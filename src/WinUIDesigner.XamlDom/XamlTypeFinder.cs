@@ -107,6 +107,12 @@ namespace WinUIDesigner.XamlDom
 			if (!namespaces.TryGetValue(xmlNamespace, out ns)) {
 				if (xmlNamespace.StartsWith("clr-namespace:", StringComparison.Ordinal)) {
 					ns = namespaces[xmlNamespace] = ParseNamespace(xmlNamespace);
+				} else if (xmlNamespace.StartsWith(UsingPrefix, StringComparison.Ordinal)) {
+					ns = ParseUsingNamespace(xmlNamespace);
+					// Only cache a resolution that found something: a "using:" namespace carries no
+					// assembly name, so an assembly loaded later could still supply it.
+					if (ns.ClrNamespaces.Count > 0)
+						namespaces[xmlNamespace] = ns;
 				} else {
 					return null;
 				}
@@ -160,6 +166,75 @@ namespace WinUIDesigner.XamlDom
 			} else {
 				return null;
 			}
+		}
+
+		internal const string UsingPrefix = "using:";
+
+		/// <summary>
+		/// Resolves a WinUI <c>using:SomeClrNamespace</c> XML namespace.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// WPF spells a CLR-namespace mapping <c>clr-namespace:Ns;assembly=Asm</c>, which is what
+		/// the reference <see cref="ParseNamespace"/> handles and what the reference tests use.
+		/// WinUI's XAML dialect uses <c>using:Ns</c> instead, with no assembly part - verified
+		/// empirically against WinUI's own <c>XamlReader.Load</c>: loading
+		/// <c>&lt;t:ExampleClass xmlns:t="using:WinUIDesigner.XamlDom.Tests" .../&gt;</c> succeeds,
+		/// while the identical document with
+		/// <c>xmlns:t="clr-namespace:WinUIDesigner.XamlDom.Tests;assembly=WinUIDesigner.XamlDom.Tests"</c>
+		/// fails with "... is an unknown namespace". <c>clr-namespace:</c> support is kept as-is
+		/// (it costs nothing and remains useful for tooling), but <c>using:</c> has to work for any
+		/// real WinUI XAML to be parseable at all.
+		/// </para>
+		/// <para>
+		/// Because <c>using:</c> carries no assembly name, candidate assemblies are the explicitly
+		/// registered ones, the entry assembly, and everything already loaded - mirroring how
+		/// WinUI itself resolves such a namespace through the app's XAML metadata provider, which
+		/// covers the app and its referenced components.
+		/// </para>
+		/// </remarks>
+		XamlNamespace ParseUsingNamespace(string xmlNamespace)
+		{
+			string namespaceName = xmlNamespace.Substring(UsingPrefix.Length).Trim();
+			XamlNamespace ns = new XamlNamespace(null, xmlNamespace);
+
+			foreach (Assembly asm in GetUsingCandidateAssemblies()) {
+				if (AssemblyDeclaresNamespace(asm, namespaceName)) {
+					var mapping = new AssemblyNamespaceMapping(asm, namespaceName);
+					if (!ns.ClrNamespaces.Contains(mapping))
+						AddMappingToNamespace(ns, mapping);
+				}
+			}
+			return ns;
+		}
+
+		IEnumerable<Assembly> GetUsingCandidateAssemblies()
+		{
+			var seen = new HashSet<Assembly>();
+			foreach (Assembly asm in _registeredAssemblies) {
+				if (seen.Add(asm))
+					yield return asm;
+			}
+			Assembly entry = Assembly.GetEntryAssembly();
+			if (entry != null && seen.Add(entry))
+				yield return entry;
+			foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies()) {
+				if (!asm.IsDynamic && seen.Add(asm))
+					yield return asm;
+			}
+		}
+
+		static bool AssemblyDeclaresNamespace(Assembly assembly, string namespaceName)
+		{
+			try {
+				foreach (Type t in assembly.GetExportedTypes()) {
+					if (t.Namespace == namespaceName)
+						return true;
+				}
+			} catch (Exception) {
+				// A partially-loadable assembly simply isn't a candidate.
+			}
+			return false;
 		}
 
 		XamlNamespace ParseNamespace(string xmlNamespace)

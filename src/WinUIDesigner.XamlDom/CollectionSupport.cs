@@ -19,6 +19,7 @@
 using System;
 using System.Diagnostics;
 using System.Collections;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
@@ -36,12 +37,67 @@ namespace WinUIDesigner.XamlDom
 		/// <summary>
 		/// Gets if the type is considered a collection in XAML.
 		/// </summary>
+		/// <remarks>
+		/// The reference tests only the non-generic <see cref="IList"/>/<see cref="IDictionary"/>.
+		/// That is not sufficient on WinUI: its C#/WinRT-projected collections implement the
+		/// <b>generic</b> interfaces only. Verified by reflection over Microsoft.WinUI.dll -
+		/// <c>UIElementCollection</c> and <c>InlineCollection</c> implement
+		/// <c>IList`1</c>/<c>ICollection`1</c>/<c>IEnumerable`1</c>/<c>IEnumerable</c> but not
+		/// <c>IList</c>, and <c>ResourceDictionary</c> implements <c>IDictionary`2</c> but not
+		/// <c>IDictionary</c> (<c>typeof(IDictionary).IsAssignableFrom(typeof(ResourceDictionary))</c>
+		/// is <c>false</c>). Without the generic checks below, <c>Grid.Children</c>,
+		/// <c>Panel.Children</c>, <c>TextBlock.Inlines</c> and every <c>Resources</c> dictionary
+		/// would not be recognised as collections at all and no WinUI XAML with child elements
+		/// could be parsed.
+		/// </remarks>
 		public static bool IsCollectionType(Type type)
 		{
 			return type != typeof(LineBreak) && (
 				typeof(IList).IsAssignableFrom(type)
 				|| type.IsArray
-				|| typeof(IDictionary).IsAssignableFrom(type));
+				|| typeof(IDictionary).IsAssignableFrom(type)
+				|| ImplementsGenericInterface(type, typeof(IList<>))
+				|| ImplementsGenericInterface(type, typeof(IDictionary<,>)));
+		}
+
+		static bool ImplementsGenericInterface(Type type, Type openGenericInterface)
+		{
+			if (type.IsGenericType && type.GetGenericTypeDefinition() == openGenericInterface)
+				return true;
+			foreach (var i in type.GetInterfaces()) {
+				if (i.IsGenericType && i.GetGenericTypeDefinition() == openGenericInterface)
+					return true;
+			}
+			return false;
+		}
+
+		/// <summary>
+		/// Returns the closed <c>IDictionary&lt;,&gt;</c> interface <paramref name="instance"/>
+		/// implements, or null. Used because WinUI dictionaries (notably
+		/// <c>Microsoft.UI.Xaml.ResourceDictionary</c>) do not implement the non-generic
+		/// <see cref="IDictionary"/> the reference relies on.
+		/// </summary>
+		static Type GetGenericDictionaryInterface(object instance)
+		{
+			if (instance == null)
+				return null;
+			foreach (var i in instance.GetType().GetInterfaces()) {
+				if (i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IDictionary<,>))
+					return i;
+			}
+			return null;
+		}
+
+		static void GenericDictionaryAdd(Type dictionaryInterface, object instance, object key, object value)
+		{
+			dictionaryInterface.GetMethod("Add", dictionaryInterface.GetGenericArguments())
+				.Invoke(instance, new[] { key, value });
+		}
+
+		static void GenericDictionaryRemove(Type dictionaryInterface, object instance, object key)
+		{
+			dictionaryInterface.GetMethod("Remove", new[] { dictionaryInterface.GetGenericArguments()[0] })
+				.Invoke(instance, new[] { key });
 		}
 
 		/// <summary>
@@ -74,7 +130,8 @@ namespace WinUIDesigner.XamlDom
 		/// </summary>
 		public static void AddToCollection(Type collectionType, object collectionInstance, XamlPropertyValue newElement)
 		{
-			if (collectionInstance is IDictionary) {
+			var genericDictionary = collectionInstance is IDictionary ? null : GetGenericDictionaryInterface(collectionInstance);
+			if (collectionInstance is IDictionary || genericDictionary != null) {
 				object val = newElement.GetValueFor(null);
 				object key = newElement is XamlObject ? ((XamlObject)newElement).GetXamlAttribute("Key") : null;
 				if (key == null || (key as string) == "")
@@ -84,14 +141,81 @@ namespace WinUIDesigner.XamlDom
 				}
 				if (key == null || (key as string) == "")
 					key = val;
-				((IDictionary)collectionInstance).Add(key, val);
+				if (genericDictionary != null)
+					GenericDictionaryAdd(genericDictionary, collectionInstance, key, val);
+				else
+					((IDictionary)collectionInstance).Add(key, val);
 			} else {
-				collectionType.InvokeMember(
-					"Add", BindingFlags.Public | BindingFlags.InvokeMethod | BindingFlags.Instance,
-					null, collectionInstance,
-					new object[] { newElement.GetValueFor(null) },
-					CultureInfo.InvariantCulture);
+				AddValueToCollection(collectionType, collectionInstance, newElement.GetValueFor(null));
 			}
+		}
+
+		/// <summary>
+		/// Finds a collection method such as <c>Add</c>/<c>Insert</c>/<c>Remove</c> on a collection
+		/// type, looking through its interfaces when the type itself does not declare it publicly.
+		/// </summary>
+		/// <remarks>
+		/// The reference reaches these methods with <c>Type.InvokeMember</c>/<c>GetMethod</c> on the
+		/// collection type, which only sees members the class declares publicly. WinUI's
+		/// C#/WinRT-projected collections implement their collection interfaces
+		/// <b>explicitly</b>, so the class exposes no public <c>Add</c> at all: an
+		/// <c>InvokeMember("Add", ...)</c> against <c>Microsoft.UI.Xaml.Controls.UIElementCollection</c>
+		/// throws <c>MissingMethodException: Method 'UIElementCollection.Add' not found</c>
+		/// (verified - this is what broke adding any child element to a <c>Panel</c>). Falling back
+		/// to the interface declaration fixes it: invoking an interface <see cref="MethodInfo"/>
+		/// against an implementing instance dispatches to the explicit implementation.
+        /// </remarks>
+		static MethodInfo FindCollectionMethod(Type collectionType, object collectionInstance, string name, int parameterCount, object lastArgument = null)
+		{
+			Type type = collectionInstance != null ? collectionInstance.GetType() : collectionType;
+
+			MethodInfo Match(IEnumerable<MethodInfo> methods)
+			{
+				var candidates = methods.Where(m => m.Name == name && m.GetParameters().Length == parameterCount).ToList();
+				if (candidates.Count == 0)
+					return null;
+				if (candidates.Count > 1 && lastArgument != null) {
+					var typed = candidates.FirstOrDefault(
+						m => m.GetParameters()[parameterCount - 1].ParameterType.IsInstanceOfType(lastArgument));
+					if (typed != null)
+						return typed;
+				}
+				return candidates[0];
+			}
+
+			var found = Match(type.GetMethods(BindingFlags.Public | BindingFlags.Instance));
+			if (found != null)
+				return found;
+
+			foreach (Type iface in type.GetInterfaces()) {
+				found = Match(iface.GetMethods());
+				if (found != null)
+					return found;
+			}
+			return null;
+		}
+
+		/// <summary>
+		/// Adds an already-materialized value to the end of a collection.
+		/// </summary>
+		internal static void AddValueToCollection(Type collectionType, object collectionInstance, object value)
+		{
+			MethodInfo add = FindCollectionMethod(collectionType, collectionInstance, "Add", 1, value);
+			if (add == null)
+				throw new MissingMethodException(collectionType.FullName, "Add");
+			add.Invoke(collectionInstance, new[] { value });
+		}
+
+		/// <summary>
+		/// Empties a collection. Uses reflection because WinUI's collections implement only the
+		/// generic collection interfaces (see <see cref="IsCollectionType"/>).
+		/// </summary>
+		internal static void ClearCollection(Type collectionType, object collectionInstance)
+		{
+			MethodInfo clear = FindCollectionMethod(collectionType, collectionInstance, "Clear", 0);
+			if (clear == null)
+				throw new MissingMethodException(collectionType.FullName, "Clear");
+			clear.Invoke(collectionInstance, null);
 		}
 
 		/// <summary>
@@ -114,15 +238,9 @@ namespace WinUIDesigner.XamlDom
 				}
 				return true;
 			} else {
-				var hasInsert = collectionType.GetMethods().Any(x => x.Name == "Insert");
-
-				if (hasInsert) {
-					collectionType.InvokeMember(
-						"Insert", BindingFlags.Public | BindingFlags.InvokeMethod | BindingFlags.Instance,
-						null, collectionInstance,
-						new object[] { index, value },
-						CultureInfo.InvariantCulture);
-
+				MethodInfo insert = FindCollectionMethod(collectionType, collectionInstance, "Insert", 2, value);
+				if (insert != null) {
+					insert.Invoke(collectionInstance, new[] { (object)index, value });
 					return true;
 				}
 			}
@@ -143,15 +261,13 @@ namespace WinUIDesigner.XamlDom
 			}
 		}
 
-		static readonly Type[] RemoveAtParameters = { typeof(int) };
-
 		/// <summary>
 		/// Removes the item at the specified index of the collection.
 		/// </summary>
 		/// <returns>True if the removal succeeded, false if the collection type does not support RemoveAt.</returns>
 		public static bool RemoveItemAt(Type collectionType, object collectionInstance, int index)
 		{
-			MethodInfo m = collectionType.GetMethod("RemoveAt", RemoveAtParameters);
+			MethodInfo m = FindCollectionMethod(collectionType, collectionInstance, "RemoveAt", 1, index);
 			if (m != null) {
 				m.Invoke(collectionInstance, new object[] { index });
 				return true;
@@ -165,6 +281,11 @@ namespace WinUIDesigner.XamlDom
 		/// </summary>
 		public static void RemoveItem(Type collectionType, object collectionInstance, object item)
 		{
+			MethodInfo remove = FindCollectionMethod(collectionType, collectionInstance, "Remove", 1, item);
+			if (remove != null) {
+				remove.Invoke(collectionInstance, new[] { item });
+				return;
+			}
 			collectionType.InvokeMember(
 				"Remove", BindingFlags.Public | BindingFlags.InvokeMethod | BindingFlags.Instance,
 				null, collectionInstance,
@@ -183,7 +304,13 @@ namespace WinUIDesigner.XamlDom
 			if (dictionary != null && xamlObject != null) {
 				dictionary.Remove(xamlObject.GetXamlAttribute("Key"));
 			} else {
-				RemoveItem(collectionType, collectionInstance, item);
+				// WinUI dictionaries only implement IDictionary<,> - see IsCollectionType's remarks.
+				var genericDictionary = GetGenericDictionaryInterface(collectionInstance);
+				if (genericDictionary != null && xamlObject != null) {
+					GenericDictionaryRemove(genericDictionary, collectionInstance, xamlObject.GetXamlAttribute("Key"));
+				} else {
+					RemoveItem(collectionType, collectionInstance, item);
+				}
 			}
 		}
 	}

@@ -1,7 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Library</OutputType>
+    <!--
+      OutputType=Exe + NUnitLite: see Program.cs. The WinUI registration-free activation manifest
+      is embedded into the project's own apphost, which only an Exe gets; testhost.exe cannot be
+      given one. Microsoft.NET.Test.Sdk + NUnit3TestAdapter are kept so `dotnet test` still
+      discovers and runs the tests that need no WinUI object (Tasks 1-4's), but the WinUI-object
+      tests must be run through this executable.
+    -->
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <RootNamespace>WinUIDesigner.XamlDom.Tests</RootNamespace>
     <Nullable>disable</Nullable>
@@ -12,6 +20,22 @@
     <EnableMsixTooling>false</EnableMsixTooling>
     <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
     <IsPackable>false</IsPackable>
+
+    <!--
+      WindowsAppSDKSelfContained
+      ==========================
+      Without this, no Microsoft.UI.Xaml WinRT class can be activated in the test process and
+      every test that creates a real WinUI object fails with REGDB_E_CLASSNOTREG (0x80040154).
+      Verified on this machine: the Windows App SDK *framework* packages
+      (Microsoft.WindowsAppRuntime.1.2/1.5/1.7/1.8/2) are installed, but the Dynamic Dependency
+      Lifetime Manager packages the bootstrapper needs (Microsoft.WinAppRuntime.DDLM.*) are not,
+      so Bootstrap.TryInitialize fails with HRESULT 0x80670016 for every major/minor version
+      tried (1.5 through 1.8) and framework-dependent activation never works. Installing DDLM is
+      a machine-wide, admin-only change; self-contained deployment instead copies the runtime
+      next to the output and registers its classes through a registration-free WinRT activation
+      manifest, needing nothing installed. With it, activation succeeds (verified).
+    -->
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +44,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="NUnitLite" Version="3.14.0" />
   </ItemGroup>
 
   <ItemGroup>
