@@ -300,23 +300,25 @@ namespace WinUIDesigner.XamlDom
 		}
 
 		/// <summary>
-		/// Registers XAML namespaces defined in the <paramref name="assembly"/> for lookup.
+		/// Registers <paramref name="assembly"/> for later lookup (see <see cref="RegisteredAssemblies"/>
+		/// and <see cref="LoadAssembly"/>'s callers). Does not itself discover any XML-namespace
+		/// mappings - see remarks.
 		/// </summary>
 		/// <remarks>
-		/// BLOCKED / INCOMPLETE (see task-3-report.md): the reference WPF implementation scans
+		/// WPF's reference implementation additionally scans
 		/// <c>System.Windows.Markup.XmlnsPrefixAttribute</c>/<c>XmlnsDefinitionAttribute</c> custom
-		/// attributes on <paramref name="assembly"/>. Neither type exists anywhere in WinUI's
-		/// dependency surface for this project (confirmed by: a CS0234 build error when qualified as
-		/// <c>Microsoft.UI.Xaml.Markup.XmlnsPrefixAttribute</c>/<c>XmlnsDefinitionAttribute</c>; direct
-		/// ECMA-335 inspection showing <c>Microsoft.UI.Xaml.Markup.XmlnsDefinition</c> is an unrelated
-		/// marshalable struct, not an <c>Attribute</c>-derived class, with no <c>XmlnsPrefix</c>
-		/// counterpart at all; the same result in the managed <c>Microsoft.WinUI.dll</c> projection;
-		/// and a blank grep for either name across every DLL in the WindowsAppSDK and
-		/// Windows.SDK.BuildTools NuGet packages). This contradicts Task 3's brief, which describes
-		/// this method as "plain reflection/string logic with no WPF dependency" safe to "copy
-		/// verbatim" — it is not: as written it does not compile for WinUI at all. The attribute-scan
-		/// loops have been removed pending a controller decision on what (if anything) should replace
-		/// them for WinUI; only the assembly-registration bookkeeping is preserved.
+		/// attributes on <paramref name="assembly"/> to discover namespace mappings. WinUI carries no
+		/// equivalent of either attribute (verified absent from the assembly - see
+		/// <see cref="WinUITypeFinder"/>'s remarks), so attribute-based discovery does not apply on
+		/// this platform and there is nothing to port here. This is not a gap in practice:
+		/// <c>clr-namespace:</c> xmlns resolution (<see cref="ParseNamespace"/>) is entirely
+		/// self-contained - the CLR namespace and assembly name are spelled out literally in the URI
+		/// itself - and was never dependent on attribute scanning on either platform. This method is
+		/// kept for its assembly-registration bookkeeping role (backing <see cref="RegisteredAssemblies"/>
+		/// and the <c>using:</c> namespace resolution in <see cref="ParseUsingNamespace"/>); explicit
+		/// namespace mappings are registered directly via <see cref="RegisterNamespaceMapping"/>
+		/// instead (see <see cref="WinUITypeFinder"/> for how the built-in WinUI namespaces are set up
+		/// that way).
 		/// </remarks>
 		public void RegisterAssembly(Assembly assembly)
 		{
@@ -422,12 +424,14 @@ namespace WinUIDesigner.XamlDom
 			internal static readonly XamlTypeFinder Instance;
 
 			// Hand-maintained list of WinUI's public, XAML-element-tag-bearing CLR namespaces.
-			// Enumerated directly from Microsoft.UI.Xaml.winmd's public namespaces (not guessed) —
-			// see task-3-report.md. WinUI carries no XmlnsDefinitionAttribute/XmlnsPrefixAttribute
-			// custom attributes at all, so attribute-scanning (RegisterAssembly) cannot discover
-			// these; they are registered directly against XamlConstants.PresentationNamespace,
-			// which Task 2 empirically confirmed the WinUI XAML compiler treats as covering all of
-			// them (a plain <Grid> or <Button> with no prefix resolves).
+			// Enumerated directly from Microsoft.UI.Xaml.winmd's public namespaces (not guessed).
+			// WinUI carries no XmlnsDefinitionAttribute/XmlnsPrefixAttribute custom attributes at
+			// all, so attribute-scanning (RegisterAssembly) cannot discover these; they are
+			// registered directly against XamlConstants.PresentationNamespace, which was
+			// empirically confirmed against WinUI 3's real XAML compiler: a minimal Window/Grid
+			// probe using this namespace as the default xmlns compiled successfully, with a plain
+			// <Grid> or <Button> (no prefix) resolving - i.e. the WinUI XAML compiler treats this
+			// one namespace as covering all of them.
 			static readonly string[] KnownWinUINamespaces = {
 				"Microsoft.UI.Xaml", "Microsoft.UI.Xaml.Automation",
 				"Microsoft.UI.Xaml.Automation.Peers", "Microsoft.UI.Xaml.Automation.Provider",

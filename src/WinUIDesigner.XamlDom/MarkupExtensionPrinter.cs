@@ -83,6 +83,15 @@ namespace WinUIDesigner.XamlDom
 					first = false;
 				}
 			}
+			else if (obj.ElementType == typeof(ThemeResourceExtensionPlaceholder)){
+				var p=obj.Properties.FirstOrDefault(x=>x.PropertyName=="ResourceKey");
+				if (p!=null && p.IsSet) {
+					sb.Append(" ");
+					AppendPropertyValue(sb, p.PropertyValue, false);
+					properties.Remove(p);
+					first = false;
+				}
+			}
 
 			foreach (var property in properties) {
 				if (!property.IsSet) continue;

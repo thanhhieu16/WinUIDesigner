@@ -16,7 +16,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-using System;
 using System.IO;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
@@ -72,30 +71,9 @@ namespace WinUIDesigner.XamlDom.Tests
 		const string X = XamlConstants.XamlNamespace;
 		const string T = XamlTypeFinderTests.XamlDomTestsNamespace;
 
-		/// <summary>
-		/// Depth-first search of a parsed <see cref="XamlObject"/> tree (the root itself, then
-		/// each property's <see cref="XamlProperty.PropertyValue"/> and
-		/// <see cref="XamlProperty.CollectionElements"/>, in document order) for the first node
-		/// matching <paramref name="predicate"/>.
-		/// </summary>
-		static XamlObject FindDescendant(XamlObject root, Func<XamlObject, bool> predicate)
-		{
-			if (predicate(root))
-				return root;
-			foreach (var property in root.Properties) {
-				if (property.PropertyValue is XamlObject child) {
-					var found = FindDescendant(child, predicate);
-					if (found != null) return found;
-				}
-				foreach (var element in property.CollectionElements) {
-					if (element is XamlObject childElement) {
-						var found = FindDescendant(childElement, predicate);
-						if (found != null) return found;
-					}
-				}
-			}
-			return null;
-		}
+		// FindDescendant moved to TestHelper (shared with RoundTripTests, which had a
+		// cosmetically-identical copy); this class doesn't inherit TestHelper, so calls below are
+		// qualified.
 
 		/// <summary>
 		/// NamescopeTest 1
@@ -119,8 +97,8 @@ namespace WinUIDesigner.XamlDom.Tests
 			WinUITestHost.Run(() => {
 				var doc = XamlParser.Parse(new StringReader(xaml));
 
-				var example = FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
-				var buttonAa = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
+				var example = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
+				var buttonAa = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
 
 				Assert.IsNotNull(example, "ExampleControl not found in the parsed tree");
 				Assert.IsNotNull(buttonAa, "Button 'aa' not found in the parsed tree");
@@ -159,10 +137,10 @@ namespace WinUIDesigner.XamlDom.Tests
 			WinUITestHost.Run(() => {
 				var doc = XamlParser.Parse(new StringReader(xaml));
 
-				var example = FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
-				var exampleb = FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl) && o.Name == "exampleb");
-				var buttonAa = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
-				var buttonBb = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "bb");
+				var example = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
+				var exampleb = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl) && o.Name == "exampleb");
+				var buttonAa = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
+				var buttonBb = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "bb");
 
 				Assert.IsNotNull(example, "unnamed ExampleControl not found in the parsed tree");
 				Assert.IsNotNull(exampleb, "'exampleb' ExampleControl not found in the parsed tree");
@@ -204,10 +182,10 @@ namespace WinUIDesigner.XamlDom.Tests
 			WinUITestHost.Run(() => {
 				var doc = XamlParser.Parse(new StringReader(xaml));
 
-				var example = FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
-				var exampleb = FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl) && o.Name == "exampleb");
-				var buttonAa = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
-				var buttonBb = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "bb");
+				var example = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl));
+				var exampleb = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(ExampleControl) && o.Name == "exampleb");
+				var buttonAa = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "aa");
+				var buttonBb = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button) && o.Name == "bb");
 
 				Assert.IsNotNull(example, "unnamed ExampleControl not found in the parsed tree");
 				Assert.IsNotNull(exampleb, "'exampleb' ExampleControl not found in the parsed tree");

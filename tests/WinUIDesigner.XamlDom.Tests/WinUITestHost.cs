@@ -72,9 +72,9 @@ namespace WinUIDesigner.XamlDom.Tests
 							// method) is now absorbed by the library itself, once per process, in
 							// WinUIDesigner.XamlDom.XamlParser.EnsureTypeDescriptorInitialized - every
 							// test in this suite reaches TypeDescriptor only through XamlParser.Parse,
-							// so no test-side warm-up is needed any more. See task-5-report.md's
-							// fix-round addendum for the verification that removing this call still
-							// leaves the suite deterministic.
+							// so no test-side warm-up is needed any more. Verified by running the full
+							// suite after removing this call: still deterministic, no
+							// FileNotFoundException for System.Windows.Forms anywhere.
 							queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 							if (queue == null)
 								startupFailure = new InvalidOperationException(

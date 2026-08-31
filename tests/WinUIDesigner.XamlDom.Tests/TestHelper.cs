@@ -99,6 +99,57 @@ namespace WinUIDesigner.XamlDom.Tests
 		}
 
 		/// <summary>
+		/// Parses <c>&lt;t:ExampleClass ObjectProp="markupExtension" /&gt;</c> directly (bypassing
+		/// the WinUI-oracle cross-check - see <see cref="MarkupExtensionTests"/>'s remarks, point 3)
+		/// and returns the resulting property value.
+		/// </summary>
+		/// <remarks>
+		/// Shared between <see cref="MarkupExtensionTests"/> and
+		/// <see cref="MarkupExtensionPlaceholderTests"/>, which each used to keep their own,
+		/// cosmetically-identical copy of this method.
+		/// </remarks>
+		public static XamlObject ParseObjectPropValue(string markupExtension)
+		{
+			var xaml =
+				"<t:ExampleClass xmlns=\"" + XamlConstants.PresentationNamespace + "\"" +
+				" xmlns:t=\"" + XamlTypeFinderTests.XamlDomTestsNamespace + "\"" +
+				" xmlns:x=\"" + XamlConstants.XamlNamespace + "\"" +
+				" ObjectProp=\"" + markupExtension + "\" />";
+			var doc = XamlParser.Parse(new StringReader(xaml));
+			var property = doc.RootElement.Properties.Single(p => p.PropertyName == "ObjectProp");
+			return (XamlObject)property.PropertyValue;
+		}
+
+		/// <summary>
+		/// Depth-first search of a parsed <see cref="XamlObject"/> tree (the root itself, then
+		/// each property's <see cref="XamlProperty.PropertyValue"/> and
+		/// <see cref="XamlProperty.CollectionElements"/>, in document order) for the first node
+		/// matching <paramref name="predicate"/>.
+		/// </summary>
+		/// <remarks>
+		/// Shared between <see cref="NamescopeTest"/> and <see cref="RoundTripTests"/>, which each
+		/// used to keep their own, cosmetically-identical copy of this method.
+		/// </remarks>
+		public static XamlObject FindDescendant(XamlObject root, Func<XamlObject, bool> predicate)
+		{
+			if (predicate(root))
+				return root;
+			foreach (var property in root.Properties) {
+				if (property.PropertyValue is XamlObject child) {
+					var found = FindDescendant(child, predicate);
+					if (found != null) return found;
+				}
+				foreach (var element in property.CollectionElements) {
+					if (element is XamlObject childElement) {
+						var found = FindDescendant(childElement, predicate);
+						if (found != null) return found;
+					}
+				}
+			}
+			return null;
+		}
+
+		/// <summary>
 		/// Removes <c>BeginInit</c>/<c>EndInit</c> lines before comparing the two loaders' logs.
 		/// </summary>
 		/// <remarks>

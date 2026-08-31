@@ -36,9 +36,8 @@ namespace WinUIDesigner.XamlDom
 		/// <summary>
 		/// The namespace used for the XAML schema.
 		/// Value: "http://schemas.microsoft.com/winfx/2006/xaml"
-		/// Verified against WinUI 3's real XAML compiler (see Task 2 report):
-		/// a minimal Window/Grid probe with this as the x: namespace compiled
-		/// successfully, generating the expected x:Class partial class.
+		/// Verified against WinUI 3's real XAML compiler: a minimal Window/Grid probe with this as
+		/// the x: namespace compiled successfully, generating the expected x:Class partial class.
 		/// </summary>
 		public const string XamlNamespace = "http://schemas.microsoft.com/winfx/2006/xaml";
 
@@ -51,9 +50,8 @@ namespace WinUIDesigner.XamlDom
 		/// <summary>
 		/// The namespace used for the WinUI presentation schema.
 		/// Value: "http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-		/// Verified against WinUI 3's real XAML compiler (see Task 2 report):
-		/// a minimal Window/Grid probe using this as the default namespace
-		/// compiled successfully, with &lt;Window&gt; resolving to
+		/// Verified against WinUI 3's real XAML compiler: a minimal Window/Grid probe using this
+		/// as the default namespace compiled successfully, with &lt;Window&gt; resolving to
 		/// Microsoft.UI.Xaml.Window.
 		/// </summary>
 		public const string PresentationNamespace = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";

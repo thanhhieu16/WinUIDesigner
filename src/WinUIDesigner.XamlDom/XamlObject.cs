@@ -610,6 +610,8 @@ namespace WinUIDesigner.XamlDom
 				wrapper = new BindingWrapper(this);
 			} else if (Instance is StaticResourceExtensionPlaceholder) {
 				wrapper = new StaticResourceWrapper(this);
+			} else if (Instance is ThemeResourceExtensionPlaceholder) {
+				wrapper = new ThemeResourceWrapper(this);
 			} else if (Instance is ReferenceExtensionPlaceholder) {
 				wrapper = new ReferenceExtensionWrapper(this);
 			}
@@ -635,8 +637,10 @@ namespace WinUIDesigner.XamlDom
 			// DynamicResource concept at all - Microsoft.UI.Xaml.DynamicResourceExtension is absent
 			// (verified by reflection; the whole assembly contains exactly two "*Extension"-named
 			// public types, IDataTemplateExtension and MarkupExtension). WinUI's nearest analogue,
-			// {ThemeResource}, is represented here by ThemeResourceExtensionPlaceholder, whose
-			// ProvideValue() already returns null without needing a special case.
+			// {ThemeResource}, is represented here by ThemeResourceExtensionPlaceholder, resolved
+			// through ThemeResourceWrapper (see CreateWrapper) exactly like {StaticResource} is
+			// through StaticResourceWrapper - this method's reflection-based fallback path below is
+			// never actually reached for either of them.
 			return InvokeProvideValue(Instance as MarkupExtension, ServiceProvider);
 		}
 
@@ -794,6 +798,27 @@ namespace WinUIDesigner.XamlDom
 		public override object ProvideValue()
 		{
 			var target = XamlObject.Instance as StaticResourceExtensionPlaceholder;
+			return XamlObject.ServiceProvider.Resolver.FindResource(target.ResourceKey);
+		}
+	}
+
+	/// <summary>
+	/// Resolves <c>{ThemeResource ...}</c> the same way <see cref="StaticResourceWrapper"/>
+	/// resolves <c>{StaticResource ...}</c>. WinUI's real <c>ThemeResource</c> additionally tracks
+	/// the active theme and re-resolves on a theme change; this design-time-only wrapper does a
+	/// single ancestor-scope resource lookup, same as StaticResource, which is the value that
+	/// matters for design-time consumers (e.g. the initial render).
+	/// </summary>
+	class ThemeResourceWrapper : MarkupExtensionWrapper
+	{
+		public ThemeResourceWrapper(XamlObject xamlObject)
+			: base(xamlObject)
+		{
+		}
+
+		public override object ProvideValue()
+		{
+			var target = XamlObject.Instance as ThemeResourceExtensionPlaceholder;
 			return XamlObject.ServiceProvider.Resolver.FindResource(target.ResourceKey);
 		}
 	}

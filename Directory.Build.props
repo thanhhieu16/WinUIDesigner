@@ -29,8 +29,11 @@
          or an MSBuild global property (`-p:AppxMSBuildToolsPathOverride=...`) to bypass
          vswhere entirely, e.g. on a machine/CI agent with a non-standard layout.
       2. vswhere.exe's answer, cached to a small generated file (see the
-         _ResolveAppxMSBuildToolsPath target below) and appended with the fixed
-         `MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\` suffix.
+         _ResolveAppxMSBuildToolsPath target below) and appended with a
+         `MSBuild\Microsoft\VisualStudio\v<major>.0\AppxPackage\` suffix, where <major> is
+         read from vswhere's own installationVersion output rather than hardcoded, so a VS
+         major-version bump doesn't silently produce a wrong (if superficially plausible)
+         path.
       3. Left unset. If vswhere can't find a suitable install, AppxMSBuildToolsPath stays
          empty and WindowsAppSDK's own default kicks in, reproducing the original, clear
          MSB4062 error - fail loud, not silently wrong.
@@ -60,21 +63,37 @@
   <Target Name="_ResolveAppxMSBuildToolsPath"
           BeforeTargets="Restore;CollectPackageReferences"
           Condition="'$(AppxMSBuildToolsPathOverride)' == '' and Exists('$(_VsWhereExe)')">
-    <Exec Command="&quot;$(_VsWhereExe)&quot; -latest -property installationPath"
+    <!-- -products * includes Build Tools SKUs (a common CI configuration), which vswhere
+         excludes by default - without it, a CI agent with only "Visual Studio Build Tools"
+         installed would resolve nothing here and fall through to WindowsAppSDK's own
+         MSB4062-producing default. -->
+    <Exec Command="&quot;$(_VsWhereExe)&quot; -latest -products * -property installationPath"
           ConsoleToMSBuild="true"
           StandardOutputImportance="low"
           ContinueOnError="WarnAndContinue">
       <Output TaskParameter="ConsoleOutput" ItemName="_VsWhereOutputLines" />
     </Exec>
 
+    <!-- installationVersion looks like "18.7.12002.237" - only the major version number is
+         needed for the "v<major>.0" path segment below, so a hardcoded "v18.0" doesn't go
+         stale the next time VS bumps its major version. -->
+    <Exec Command="&quot;$(_VsWhereExe)&quot; -latest -products * -property installationVersion"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          ContinueOnError="WarnAndContinue">
+      <Output TaskParameter="ConsoleOutput" ItemName="_VsWhereVersionLines" />
+    </Exec>
+
     <PropertyGroup>
       <_VsInstallPath>@(_VsWhereOutputLines)</_VsInstallPath>
+      <_VsInstallVersion>@(_VsWhereVersionLines)</_VsInstallVersion>
+      <_VsMajorVersion Condition="'$(_VsInstallVersion)' != ''">$(_VsInstallVersion.Split('.')[0])</_VsMajorVersion>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(_VsInstallPath)' != ''">
+    <ItemGroup Condition="'$(_VsInstallPath)' != '' and '$(_VsMajorVersion)' != ''">
       <_AppxToolsPathCacheLines Include="&lt;Project&gt;" />
       <_AppxToolsPathCacheLines Include="  &lt;PropertyGroup&gt;" />
-      <_AppxToolsPathCacheLines Include="    &lt;AppxMSBuildToolsPath&gt;$(_VsInstallPath)\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\&lt;/AppxMSBuildToolsPath&gt;" />
+      <_AppxToolsPathCacheLines Include="    &lt;AppxMSBuildToolsPath&gt;$(_VsInstallPath)\MSBuild\Microsoft\VisualStudio\v$(_VsMajorVersion).0\AppxPackage\&lt;/AppxMSBuildToolsPath&gt;" />
       <_AppxToolsPathCacheLines Include="  &lt;/PropertyGroup&gt;" />
       <_AppxToolsPathCacheLines Include="&lt;/Project&gt;" />
     </ItemGroup>
@@ -82,7 +101,7 @@
     <WriteLinesToFile File="$(_AppxToolsPathCacheFile)"
                        Lines="@(_AppxToolsPathCacheLines)"
                        Overwrite="true"
-                       Condition="'$(_VsInstallPath)' != ''" />
+                       Condition="'$(_VsInstallPath)' != '' and '$(_VsMajorVersion)' != ''" />
   </Target>
 
 </Project>

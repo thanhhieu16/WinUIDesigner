@@ -1,4 +1,3 @@
-using System;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -29,31 +28,9 @@ namespace WinUIDesigner.XamlDom.Tests
 	[TestFixture]
 	public class RoundTripTests
 	{
-		/// <summary>
-		/// Depth-first search of a parsed <see cref="XamlObject"/> tree (the root itself, then each
-		/// property's <see cref="XamlProperty.PropertyValue"/> and
-		/// <see cref="XamlProperty.CollectionElements"/>, in document order) for the first node
-		/// matching <paramref name="predicate"/>. Copied from <c>NamescopeTest.FindDescendant</c>
-		/// rather than shared - each test file in this suite keeps its own copy of this helper.
-		/// </summary>
-		static XamlObject FindDescendant(XamlObject root, Func<XamlObject, bool> predicate)
-		{
-			if (predicate(root))
-				return root;
-			foreach (var property in root.Properties) {
-				if (property.PropertyValue is XamlObject child) {
-					var found = FindDescendant(child, predicate);
-					if (found != null) return found;
-				}
-				foreach (var element in property.CollectionElements) {
-					if (element is XamlObject childElement) {
-						var found = FindDescendant(childElement, predicate);
-						if (found != null) return found;
-					}
-				}
-			}
-			return null;
-		}
+		// FindDescendant moved to TestHelper (shared with NamescopeTest, which had a
+		// cosmetically-identical copy); this class doesn't inherit TestHelper, so calls below are
+		// qualified.
 
 		static int CountElements(XamlObject o) =>
 			1 + o.Properties.Sum(p =>
@@ -73,7 +50,7 @@ namespace WinUIDesigner.XamlDom.Tests
 				// Sanity: the sample XAML actually has the non-trivial shape this test claims to
 				// exercise, before round-tripping it - a nested Button two levels down, with its
 				// Click event property and its StaticResource-bound Background both present.
-				var button = FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button));
+				var button = TestHelper.FindDescendant(doc.RootElement, o => o.ElementType == typeof(Button));
 				Assert.IsNotNull(button, "Sample XAML's Button was not found in the first parse");
 				var clickProperty = button.Properties.SingleOrDefault(p => p.PropertyName == "Click");
 				Assert.IsNotNull(clickProperty, "Button.Click was not parsed as a property at all");
@@ -96,7 +73,7 @@ namespace WinUIDesigner.XamlDom.Tests
 
 				// A few targeted checks beyond the raw count, so a bug that swaps one element for
 				// another same-sized subtree (which the count alone wouldn't catch) still fails.
-				var reparsedButton = FindDescendant(reparsedDoc.RootElement, o => o.ElementType == typeof(Button));
+				var reparsedButton = TestHelper.FindDescendant(reparsedDoc.RootElement, o => o.ElementType == typeof(Button));
 				Assert.IsNotNull(reparsedButton, "Button did not survive the round-trip");
 				var reparsedClick = reparsedButton.Properties.SingleOrDefault(p => p.PropertyName == "Click");
 				Assert.IsNotNull(reparsedClick, "Button.Click did not survive the round-trip");

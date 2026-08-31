@@ -16,9 +16,6 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
-using System;
-using System.IO;
-using System.Linq;
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
 using Microsoft.UI.Xaml.Data;
@@ -143,22 +140,9 @@ namespace WinUIDesigner.XamlDom.Tests
 	" + attributeXaml + @"/>");
 		}
 
-		/// <summary>
-		/// Parses <c>&lt;t:ExampleClass ObjectProp="markupExtension" /&gt;</c> directly (bypassing
-		/// the WinUI-oracle cross-check - see this class's remarks, point 3) and returns the
-		/// resulting property value.
-		/// </summary>
-		static XamlObject ParseObjectPropValue(string markupExtension)
-		{
-			var xaml =
-				"<t:ExampleClass xmlns=\"" + P + "\"" +
-				" xmlns:t=\"" + T + "\"" +
-				" xmlns:x=\"" + X + "\"" +
-				" ObjectProp=\"" + markupExtension + "\" />";
-			var doc = XamlParser.Parse(new StringReader(xaml));
-			var property = doc.RootElement.Properties.Single(p => p.PropertyName == "ObjectProp");
-			return (XamlObject)property.PropertyValue;
-		}
+		// ParseObjectPropValue moved to TestHelper (shared with MarkupExtensionPlaceholderTests,
+		// which had a cosmetically-identical copy) - inherited unqualified via this class's
+		// TestHelper base.
 
 		[Test]
 		public void Test1()

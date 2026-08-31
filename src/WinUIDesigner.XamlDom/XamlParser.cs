@@ -161,9 +161,10 @@ namespace WinUIDesigner.XamlDom
 		/// <c>{Binding}</c> evaluation - so without this, whichever of those three run first for a
 		/// given process throws once, non-deterministically. Both entry points are warmed
 		/// separately (matching the shape originally verified by a since-removed test-only
-		/// warm-up, WinUIDesigner.XamlDom.Tests.WinUITestHost.WarmUpTypeDescriptor - see
-		/// task-5-report.md's fix-round addendum) because it was not established that warming
-		/// one warms the other. This runs on whatever thread calls
+		/// warm-up, WinUIDesigner.XamlDom.Tests.WinUITestHost.WarmUpTypeDescriptor, which probed
+		/// GetConverter/GetProperties independently and found either one could be the first call
+		/// in a process) because it was not established that warming one warms the other. This
+		/// runs on whatever thread calls
 		/// <see cref="Parse(XmlDocument, XamlParserSettings)"/>,
 		/// which already has to be a live WinUI dispatcher thread for the rest of parsing (object
 		/// construction, markup-extension evaluation, ...) to work at all, so no extra threading
@@ -672,6 +673,15 @@ namespace WinUIDesigner.XamlDom
 				return FindAttachedProperty(typeof(DesignTimeProperties), attribute.LocalName);
 			} else if (attribute.LocalName == "DataContext" && attribute.NamespaceURI == XamlConstants.DesignTimeNamespace) {
 				return FindAttachedProperty(typeof(DesignTimeProperties), attribute.LocalName);
+			// NOTE: the four x:Class/x:TypeArguments branches below are unreachable from
+			// ParseObject's current attribute loop, which `continue`s past every attribute in the
+			// x:/2009-x: namespace except "Name" before this method is ever called on one - so
+			// GetPropertyInfo (this method's only caller for attribute parsing) never sees an
+			// x:Class or x:TypeArguments attribute at all. This mirrors identical dead structure in
+			// the WPF reference (WpfDesign.XamlDom/Project/XamlParser.cs, ~lines 295-304 for the
+			// attribute-loop skip and ~lines 602-609 for these branches) - it is inherited from the
+			// reference's own structure, not a defect introduced by this port. Left in place rather
+			// than removed in case a future change to the attribute loop makes them reachable.
 			} else if (attribute.LocalName == "Class" && attribute.NamespaceURI == XamlConstants.XamlNamespace) {
                 return FindAttachedProperty(typeof(XamlNamespaceProperties), attribute.LocalName);
             } else if (attribute.LocalName == "Class" && attribute.NamespaceURI == XamlConstants.Xaml2009Namespace) {
