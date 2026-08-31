@@ -47,6 +47,29 @@ Windows App SDK 1.7 (`Microsoft.WindowsAppSDK` `1.7.250606001`), NUnit 3
   that hides a platform difference.
 - Commit after each task passes its verification step.
 
+**Authoritative test command (added after Task 5; binding for Tasks 6-9):**
+Task 5 found that WinUI objects can only be activated/used from a real
+`Microsoft.UI.Xaml.Application.Start` dispatcher thread inside a process
+carrying an activation manifest — a class-library test host
+(`testhost.exe`, what plain `dotnet test` uses) cannot supply that
+manifest. The test project therefore builds as `OutputType=Exe` running
+NUnitLite (`tests/WinUIDesigner.XamlDom.Tests/Program.cs`), with
+`WindowsAppSDKSelfContained=true` (this machine has no Dynamic Dependency
+Lifetime Manager packages installed, so self-contained deployment is what
+makes activation work at all here). **The authoritative way to run the
+suite is the built `.exe` directly**
+(`tests/WinUIDesigner.XamlDom.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.XamlDom.Tests.exe`),
+not `dotnet test`. `dotnet test`/`Microsoft.NET.Test.Sdk`/`NUnit3TestAdapter`
+are kept working for IDE integration and quick non-WinUI-object checks, but
+under `testhost.exe` every test that needs a live WinUI object reports as
+**ignored with an explanatory message**, not failed — a reviewer or task
+runner seeing large "Skipped" counts from `dotnet test` should not read
+that as failure; run the `.exe` for the real result. Every task from here
+on that adds tests should verify via the `.exe`, and its "Run it"
+`dotnet test --filter ...` steps should be read as "then also run the
+built exe to confirm the WinUI-dependent assertions actually ran," not as
+a replacement for it.
+
 ---
 
 ## Background: the tangled-core problem
@@ -1694,8 +1717,11 @@ This breaks two assumptions baked into the reference `MarkupExtensionParser.Pars
   Run `dotnet build` after adding this — it's the piece that makes the
   whole assembly link. If `XamlReader.Load` rejects the wrapper XML or the
   returned dictionary doesn't contain the template under an enumerable key,
-  fix it here (same iteration you'd otherwise do in Task 8 Step 4) — Task 8
-  builds on a working base, not a broken one.
+  fix it here (same iteration you'd otherwise do in Task 8 Step 5) — Task 8
+  builds on a working base, not a broken one. (In practice this base
+  version was never exercised at runtime during Task 5 — Task 8 Step 1 is
+  a dedicated smoke test for exactly that, added after the fact once this
+  gap was noticed.)
 
 - [ ] **Step 15: Port the test fixtures**
 
@@ -2026,7 +2052,44 @@ post-construction resource-injection hook the way WPF's
 - Produces: no signature change — `TemplateHelper.GetFrameworkTemplate(XmlElement, XamlObject) : FrameworkTemplate`
   keeps the same signature Task 5 Step 14b already gave it.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Smoke-test the base `TemplateHelper` before extending it**
+
+  Task 5's implementer flagged this explicitly (Concern 5 in its report):
+  `TemplateHelper.cs` compiles but no Task 5 test actually exercises a
+  `FrameworkTemplate` at runtime — the base version is untested, not just
+  unextended. Before adding ancestor-resource splicing, add one small test
+  proving the base case (a template with no cross-scope resource
+  references, entirely self-contained) actually works:
+  ```csharp
+  [Test]
+  public void SelfContainedControlTemplateParses()
+  {
+      var xaml = @"
+  <Grid
+      xmlns=""" + XamlConstants.PresentationNamespace + @"""
+      xmlns:x=""" + XamlConstants.XamlNamespace + @""">
+      <Grid.Resources>
+          <ControlTemplate x:Key=""MyTemplate"" TargetType=""Button"">
+              <Border Background=""Red"" />
+          </ControlTemplate>
+      </Grid.Resources>
+  </Grid>";
+
+      var doc = XamlParser.Parse(new StringReader(xaml));
+      Assert.IsNotNull(doc.RootInstance);
+      // The template must have parsed to a real ControlTemplate via the
+      // base (pre-splicing) TemplateHelper, not thrown or silently
+      // produced null.
+  }
+  ```
+  Run it via the authoritative `.exe` runner (see Global Constraints —
+  WinUI objects, including a `FrameworkTemplate`, need the real dispatcher
+  thread `dotnet test`'s host can't provide). If this fails, fix
+  `TemplateHelper.cs`'s existing base logic first — don't build the
+  ancestor-resource-splicing feature (Steps 2-6 below) on top of a base
+  that doesn't actually work yet.
+
+- [ ] **Step 2: Write the failing test for ancestor-resource splicing**
 
   ```csharp
   [Test]
@@ -2057,19 +2120,20 @@ post-construction resource-injection hook the way WPF's
   this; shown split above only for readability of the two concerns being
   tested.)
 
-- [ ] **Step 2: Run it, confirm it fails the way this task expects**
+- [ ] **Step 3: Run it, confirm it fails the way this task expects**
 
-  `TemplateHelper.cs` already exists (Task 5 Step 14b), so this won't fail
-  with a missing-type error. It should fail because `MyBrush` is declared
-  in a *different* `Grid.Resources` block than the one the `ControlTemplate`
-  itself is nested inside — the base version only sees resources inside the
-  template's own fragment, so `{StaticResource MyBrush}` resolves to nothing
-  and `Border.Background` ends up unset (or `XamlReader.Load` throws a
-  resource-not-found error, depending on how WinUI's loader handles a
-  missing `StaticResource` — observe which one actually happens and use
-  that to shape the assertion in Step 4).
+  `TemplateHelper.cs` already exists (Task 5 Step 14b, smoke-tested by
+  Step 1 above), so this won't fail with a missing-type error. It should
+  fail because `MyBrush` is declared in a *different* `Grid.Resources`
+  block than the one the `ControlTemplate` itself is nested inside — the
+  base version only sees resources inside the template's own fragment, so
+  `{StaticResource MyBrush}` resolves to nothing and `Border.Background`
+  ends up unset (or `XamlReader.Load` throws a resource-not-found error,
+  depending on how WinUI's loader handles a missing `StaticResource` —
+  observe which one actually happens and use that to shape the assertion
+  in Step 5).
 
-- [ ] **Step 3: Add ancestor-resource splicing to the existing `TemplateHelper.cs`**
+- [ ] **Step 4: Add ancestor-resource splicing to the existing `TemplateHelper.cs`**
 
   Add a new private method, and call it from the existing
   `GetFrameworkTemplate` to inject the result into the wrapper XAML before
@@ -2115,21 +2179,23 @@ post-construction resource-injection hook the way WPF's
   resources) are out of scope for Phase 1, same limitation the reference
   WPF implementation effectively had for a standalone parser.
 
-- [ ] **Step 4: Run the test, iterate**
+- [ ] **Step 5: Run the test, iterate**
 
   ```bash
   dotnet test WinUIDesigner.sln --filter ControlTemplateWithResourceReference
   ```
-  Likely failure modes to expect and fix: `XamlReader.Load` throwing on the
-  wrapper XML (check the exact XAML it received — log `wrapperXaml` to the
-  test output on failure), or the returned `ResourceDictionary` not
-  containing the template under the expected key (WinUI's `XamlReader.Load`
-  may require the outer element be exactly what's being loaded rather than
-  wrapped — if so, load the `ResourceDictionary` wrapper as shown, but
-  confirm empirically the `x:Key` on the inner `ControlTemplate` survives
-  into `loaded.Keys`).
+  Then confirm via the authoritative `.exe` runner (Global Constraints) —
+  this test needs a live `FrameworkTemplate`/`XamlReader.Load`, which
+  needs the real dispatcher thread. Likely failure modes to expect and
+  fix: `XamlReader.Load` throwing on the wrapper XML (check the exact XAML
+  it received — log `wrapperXaml` to the test output on failure), or the
+  returned `ResourceDictionary` not containing the template under the
+  expected key (WinUI's `XamlReader.Load` may require the outer element be
+  exactly what's being loaded rather than wrapped — if so, load the
+  `ResourceDictionary` wrapper as shown, but confirm empirically the
+  `x:Key` on the inner `ControlTemplate` survives into `loaded.Keys`).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
   ```bash
   git add src/WinUIDesigner.XamlDom/TemplateHelper.cs tests/WinUIDesigner.XamlDom.Tests
