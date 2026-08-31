@@ -464,23 +464,18 @@ changes).
                   typeFinder.GetType(XamlConstants.PresentationNamespace, "Button"));
           }
 
-          [Test]
-          public void FindStaticResourceExtension()
-          {
-              Assert.AreEqual(typeof(Microsoft.UI.Xaml.StaticResourceExtension),
-                  typeFinder.GetType(XamlConstants.PresentationNamespace, "StaticResourceExtension"));
-          }
-
           public const string XamlDomTestsNamespace =
               "clr-namespace:WinUIDesigner.XamlDom.Tests;assembly=WinUIDesigner.XamlDom.Tests";
       }
   }
   ```
-  (Dropped `FindBindingMarkupExtension`'s reference-only `NullExtension` and
-  `FindNullExtension`/`FindExampleClass` cases here — `NullExtension`
-  belongs to `System.Windows.Markup`; whether WinUI has an
-  `x:Null`-backing type is checked in Task 5 where `{x:Null}` handling is
-  ported. `ExampleClass` doesn't exist yet — Task 5 adds it and its own
+  (No `FindStaticResourceExtension`/`FindNullExtension` here — verified
+  during planning that `Microsoft.UI.Xaml.winmd` has no
+  `StaticResourceExtension`/`ThemeResourceExtension`/`NullExtension`/
+  `TemplateBindingExtension` type at all; see Step 5 below and the new gap
+  section in Task 5. `FindBinding` is added in Step 5 once Step 4's port
+  is in place, since it's what proves the hand-registered namespace list
+  works. `ExampleClass` doesn't exist yet — Task 5 adds it and its own
   `FindExampleClass` test alongside `SimpleLoadTests`.)
 
 - [ ] **Step 3: Run it, confirm it fails to compile** (nothing ported yet)
@@ -502,22 +497,94 @@ changes).
   - The one real design decision is `WpfTypeFinder`'s static constructor,
     which registers the assemblies that carry WPF's built-in XAML-visible
     types (`WindowsBase`, `PresentationCore`, `PresentationFramework`,
-    `System.Xaml`, `mscorlib`). For WinUI, rename the class to
-    `WinUITypeFinder` and rename the public factory from
-    `CreateWpfTypeFinder()` to `CreateWinUITypeFinder()` (keep the old name
-    out entirely — nothing should silently assume it's still WPF), and
-    register the WinUI-equivalent assemblies:
+    `System.Xaml`, `mscorlib`) — the reference `RegisterAssembly` does this
+    by scanning the assembly's `[XmlnsDefinitionAttribute]`/
+    `[XmlnsPrefixAttribute]` custom attributes, a WPF-assembly-level
+    convention.
+
+    **Verified during a Task 3 implementation attempt, by direct ECMA-335
+    metadata inspection of `Microsoft.UI.Xaml.winmd` (not guessed): WinUI's
+    assembly carries *zero* Xmlns-related custom attributes anywhere in it**
+    (checked all 12,953 type-level custom attributes in the assembly — none
+    are Xmlns-related). `RegisterAssembly(typeof(Microsoft.UI.Xaml.DependencyObject).Assembly)`
+    would silently register nothing and `XamlTypeFinder.GetType` would never
+    resolve any WinUI control — this is not a naming slip to patch, WinUI
+    genuinely does not use this convention at all. Its own XAML compiler
+    resolves elements through a completely different, closed mechanism
+    (`IXamlMetadataProvider`/`IXamlType`, generated per-app, not reusable
+    here).
+
+    Resolution: don't rely on attribute scanning for WinUI. Register a
+    fixed, hand-maintained list of the known `Microsoft.UI.Xaml*` CLR
+    namespaces directly against `XamlConstants.PresentationNamespace` (this
+    is safe and correct precisely *because* Task 2 already empirically
+    confirmed the WinUI XAML compiler treats a single presentation xmlns as
+    covering all of these namespaces — that's why a plain `<Grid>` or
+    `<Button>` element with no prefix resolves at all). This list was
+    enumerated directly from `Microsoft.UI.Xaml.winmd`'s public
+    namespaces (not guessed):
+    ```
+    Microsoft.UI.Xaml, Microsoft.UI.Xaml.Automation,
+    Microsoft.UI.Xaml.Automation.Peers, Microsoft.UI.Xaml.Automation.Provider,
+    Microsoft.UI.Xaml.Automation.Text, Microsoft.UI.Xaml.Controls,
+    Microsoft.UI.Xaml.Controls.Primitives, Microsoft.UI.Xaml.Data,
+    Microsoft.UI.Xaml.Documents, Microsoft.UI.Xaml.Input,
+    Microsoft.UI.Xaml.Markup, Microsoft.UI.Xaml.Media,
+    Microsoft.UI.Xaml.Media.Animation, Microsoft.UI.Xaml.Media.Imaging,
+    Microsoft.UI.Xaml.Media.Media3D, Microsoft.UI.Xaml.Navigation,
+    Microsoft.UI.Xaml.Shapes
+    ```
+    (Deliberately excluding `Microsoft.UI.Xaml.Controls.AnimatedVisuals`,
+    `Microsoft.UI.Xaml.CustomAttributes`, `Microsoft.UI.Xaml.Hosting`,
+    `Microsoft.UI.Xaml.Interop`, `Microsoft.UI.Xaml.Printing`,
+    `Microsoft.UI.Xaml.Resources`, `Microsoft.UI.Xaml.XamlTypeInfo` — these
+    are non-visual/infrastructure namespaces with no XAML-element-tag
+    surface, no need to search them.)
+
+    First, add a small internal helper to `XamlTypeFinder` itself (the outer
+    class — this is new code, not in the reference, but it's a thin wrapper
+    around the reference's own existing private `AddMappingToNamespace`):
+    ```csharp
+    // inside class XamlTypeFinder, alongside RegisterAssembly
+    internal void RegisterNamespaceMapping(string xmlNamespace, Assembly assembly, string clrNamespace)
+    {
+        XamlNamespace ns;
+        if (!namespaces.TryGetValue(xmlNamespace, out ns)) {
+            ns = namespaces[xmlNamespace] = new XamlNamespace(null, xmlNamespace);
+        }
+        AddMappingToNamespace(ns, new AssemblyNamespaceMapping(assembly, clrNamespace));
+    }
+    ```
+    Then rename `WpfTypeFinder` to `WinUITypeFinder`, rename the public
+    factory from `CreateWpfTypeFinder()` to `CreateWinUITypeFinder()` (keep
+    the old name out entirely), and use the helper above instead of
+    `RegisterAssembly`:
     ```csharp
     static class WinUITypeFinder
     {
         internal static readonly XamlTypeFinder Instance;
 
+        static readonly string[] KnownWinUINamespaces = {
+            "Microsoft.UI.Xaml", "Microsoft.UI.Xaml.Automation",
+            "Microsoft.UI.Xaml.Automation.Peers", "Microsoft.UI.Xaml.Automation.Provider",
+            "Microsoft.UI.Xaml.Automation.Text", "Microsoft.UI.Xaml.Controls",
+            "Microsoft.UI.Xaml.Controls.Primitives", "Microsoft.UI.Xaml.Data",
+            "Microsoft.UI.Xaml.Documents", "Microsoft.UI.Xaml.Input",
+            "Microsoft.UI.Xaml.Markup", "Microsoft.UI.Xaml.Media",
+            "Microsoft.UI.Xaml.Media.Animation", "Microsoft.UI.Xaml.Media.Imaging",
+            "Microsoft.UI.Xaml.Media.Media3D", "Microsoft.UI.Xaml.Navigation",
+            "Microsoft.UI.Xaml.Shapes",
+        };
+
         static WinUITypeFinder()
         {
             Instance = new XamlTypeFinder();
             Instance.RegisterDesignerNamespaces();
-            Instance.RegisterAssembly(typeof(Microsoft.UI.Xaml.DependencyObject).Assembly); // Microsoft.WinUI
-            Instance.RegisterAssembly(typeof(bool).Assembly); // System.Private.CoreLib
+
+            var winUIAssembly = typeof(Microsoft.UI.Xaml.DependencyObject).Assembly;
+            foreach (var clrNamespace in KnownWinUINamespaces) {
+                Instance.RegisterNamespaceMapping(XamlConstants.PresentationNamespace, winUIAssembly, clrNamespace);
+            }
         }
     }
 
@@ -526,35 +593,50 @@ changes).
         return WinUITypeFinder.Instance.Clone();
     }
     ```
-    This relies on `[XmlnsDefinitionAttribute]`/`[XmlnsPrefixAttribute]`
-    being present on the WinUI assembly the same way WPF's assemblies carry
-    them (`RegisterAssembly` reads
-    `assembly.GetCustomAttributes(typeof(XmlnsDefinitionAttribute), true)`
-    — this is a standard .NET XAML convention both platforms use, not a
-    WPF-only mechanism, so this should just work; confirm by checking
-    `FindGrid`/`FindButton` in Step 5 actually resolve).
+    (The reference's `Instance.RegisterAssembly(typeof(Type).Assembly); // mscorelib`
+    line is dropped — it was a no-op in the reference too, since mscorlib
+    carries no `XmlnsDefinitionAttribute` either; nothing in this codebase's
+    own test/round-trip XAML references bare CLR types by unqualified tag
+    name, so there's nothing lost.)
   - Everything else in the file (`AssemblyNamespaceMapping`, `XamlNamespace`,
     `GetType`, `GetXmlNamespaceFor`, `ParseNamespace`, `AddMappingToNamespace`,
     `RegisterAssembly`, `RegisterDesignerNamespaces`, `LoadAssembly`,
     `Clone`/`ImportFrom`, `ConvertUriToLocalUri`) is plain reflection/string
-    logic with no WPF dependency — copy verbatim.
+    logic with no WPF dependency, and stays useful for other callers (e.g.
+    `RegisterAssembly` is still what registers a *user's own* project
+    assembly when a `clr-namespace:` xmlns is encountered during parsing,
+    Task 5's `XamlParser.ParseObject`) — copy verbatim, don't remove it just
+    because `WinUITypeFinder`'s own static constructor no longer calls it.
 
 - [ ] **Step 5: Run the test, make it pass**
 
   ```bash
   dotnet test WinUIDesigner.sln --filter XamlTypeFinderTests
   ```
-  If `FindGrid`/`FindButton`/`FindStaticResourceExtension` fail because the
-  types aren't found, the `XmlnsDefinitionAttribute` assumption in Step 4
-  was wrong — inspect via
-  `typeof(Microsoft.UI.Xaml.Controls.Grid).Assembly.GetCustomAttributes(typeof(System.Windows.Markup.XmlnsDefinitionAttribute), true)`
-  in a scratch console (note: `XmlnsDefinitionAttribute` itself is a plain
-  `System.Windows.Markup` BCL-style attribute type that both WPF and WinUI's
-  `Microsoft.UI.Xaml.Markup` namespace define their own copy of — use
-  `Microsoft.UI.Xaml.Markup.XmlnsDefinitionAttribute` for the WinUI check)
-  to see what's actually declared, and adjust `RegisterAssembly`'s attribute
-  type references in `XamlTypeFinder.cs` from `System.Windows.Markup.*` to
-  `Microsoft.UI.Xaml.Markup.*` if that was missed.
+  `FindGrid`/`FindButton` should now resolve via the hand-registered
+  namespace list above. `FindStaticResourceExtension` (from Step 2's test)
+  will still fail — **not a bug to chase**: verified by direct metadata
+  search that `Microsoft.UI.Xaml.winmd` contains no type named
+  `StaticResourceExtension` anywhere (nor `ThemeResourceExtension`,
+  `NullExtension`, `TemplateBindingExtension` — checked all four). Unlike
+  WPF, WinUI does not back `{StaticResource}`/`{ThemeResource}`/`{x:Null}`
+  with a public, reflectable `MarkupExtension`-derived type at all — its
+  XAML compiler resolves them as compiler intrinsics with no runtime object
+  ever constructed for the extension itself. Delete the
+  `FindStaticResourceExtension` test (it tests something WinUI doesn't
+  have) and replace it with one that reflects what's actually true:
+  ```csharp
+  [Test]
+  public void FindBinding()
+  {
+      Assert.AreEqual(typeof(Microsoft.UI.Xaml.Data.Binding),
+          typeFinder.GetType(XamlConstants.PresentationNamespace, "Binding"));
+  }
+  ```
+  (`Microsoft.UI.Xaml.Data.Binding` is confirmed to exist as a real type —
+  unlike WPF's `Binding`, it derives from `Microsoft.UI.Xaml.Data.BindingBase`,
+  **not** from `Microsoft.UI.Xaml.Markup.MarkupExtension` — this matters for
+  Task 5's `MarkupExtensionParser`, see the new gap section added there.)
 
 - [ ] **Step 6: Commit**
 
@@ -783,16 +865,23 @@ handling) needs porting — it's simply dropped.
 
 **Open risk, to resolve inside this task, not before:** the winmd only
 proves the *shape* exists; it doesn't prove that calling
-`binding.ProvideValue(ourProvider)` on a real
-`Microsoft.UI.Xaml.Data.Binding`/`Microsoft.UI.Xaml.StaticResourceExtension`
-instance actually runs their real logic rather than a default/stub — WinUI's
-`MarkupExtension` declares *both* overloads as non-abstract `virtual`
-(unlike WPF where the `IServiceProvider` overload is abstract and mandatory
-to override), so a built-in extension might have its real logic behind the
-*parameterless* `ProvideValue()` instead, with the `IXamlServiceProvider`
-overload falling through to an unhelpful default. Step 7 below is a written
-probe test that settles this empirically before `XamlObject.ProvideValue()`
-commits to one call site.
+`.ProvideValue(ourProvider)` on a real, user-written custom
+`Microsoft.UI.Xaml.Markup.MarkupExtension` subclass actually runs its real
+logic rather than a default/stub — WinUI's `MarkupExtension` declares
+*both* overloads as non-abstract `virtual` (unlike WPF where the
+`IServiceProvider` overload is abstract and mandatory to override), so a
+subclass might put its real logic behind the *parameterless* `ProvideValue()`
+instead, with the `IXamlServiceProvider` overload falling through to an
+unhelpful default. (Note this open risk is narrower than it first looked
+during planning: per Gap 7 below, `Binding` doesn't derive from
+`MarkupExtension` at all on WinUI — it's handled entirely by
+`BindingWrapper`, never through this generic path — and
+`StaticResource`/`ThemeResource`/`Null` are this codebase's own
+placeholder types whose `ProvideValue()` deliberately returns `null` and
+is never meant to be the real resolution path either, see Gap 7. This open
+risk is about *third-party custom* markup extensions only.) Step 9 below is
+a written probe test that settles this empirically before
+`XamlObject.ProvideValue()` commits to one call site.
 
 ```csharp
 // src/WinUIDesigner.XamlDom/WinUIXamlServiceProvider.cs
@@ -903,6 +992,139 @@ resolver) is replaced by a resolution path used only inside a new
 replacement for *this codebase's own* `{x:Reference}` handling — it does
 not attempt to replicate WPF's general-purpose `NameScope` object model,
 because WinUI has nothing to replicate it against.
+
+#### Gap 7 (new, found during a Task 3 implementation attempt): several standard `{...}` markup extensions have no backing WinUI type, and `Binding`/`RelativeSource` aren't `MarkupExtension` at all
+
+Verified by direct ECMA-335 metadata inspection of `Microsoft.UI.Xaml.winmd`
+(not guessed): there is no type named `StaticResourceExtension`,
+`ThemeResourceExtension`, `NullExtension`, or `TemplateBindingExtension`
+anywhere in the assembly. WPF backs `{StaticResource ...}`/
+`{ThemeResource ...}`/`{x:Null}`/`{TemplateBinding ...}` with real,
+reflectable `MarkupExtension`-derived classes; WinUI's XAML compiler treats
+all four as compiler intrinsics with no public runtime type behind the
+extension itself. Separately, `Microsoft.UI.Xaml.Data.Binding` **does**
+exist as a real type, but its base type is `Microsoft.UI.Xaml.Data.BindingBase`
+— **not** `Microsoft.UI.Xaml.Markup.MarkupExtension` (confirmed by reading
+the type's base-type metadata directly), unlike WPF where
+`Binding : BindingBase : MarkupExtension`. `Microsoft.UI.Xaml.Data.RelativeSource`
+exists too, deriving from plain `DependencyObject`.
+
+This breaks two assumptions baked into the reference `MarkupExtensionParser.Parse`
+(read closely in Step 11 below):
+1. It resolves `{TypeName ...}` by looking up a type named `TypeName` or
+   `TypeNameExtension` and requires
+   `typeof(MarkupExtension).IsAssignableFrom(extensionType)` — this throws
+   for `{Binding ...}`/`{RelativeSource ...}` on WinUI, since neither
+   resolved type is a `MarkupExtension`.
+2. For `{StaticResource ...}`/`{ThemeResource ...}`/`{x:Null}`, there is no
+   type to resolve *at all* — `typeResolver.Resolve("StaticResourceExtension")`
+   returns null on WinUI, so parsing throws before construction is even
+   attempted. Since `{StaticResource}` in particular is used in nearly all
+   real-world WinUI XAML (theme brushes, control styles), this would break
+   parsing broadly, not just as an edge case.
+
+**Resolution, applied in Step 11 below:**
+- Relax `MarkupExtensionParser.Parse`'s type-resolution gate: drop the
+  `!typeof(MarkupExtension).IsAssignableFrom(extensionType)` requirement
+  entirely. Any type resolved for the `{TypeName ...}` syntax is
+  constructible via this codebase's own reflection-based logic regardless
+  of what it derives from — `Binding`/`RelativeSource` construct and
+  populate correctly through the existing ctor-args/property-mapping logic
+  with no other change needed. `XamlObject.IsMarkupExtension` already
+  requires no change either — `CreateWrapper` (Step 7) checks
+  `Instance is BindingBase` directly, before the `IsMarkupExtension` gate,
+  exactly matching the reference's own structure (the reference already
+  handles `Binding` this way; WinUI just makes it necessary for `Binding`
+  specifically rather than optional).
+- For the four intrinsics with **no backing type at all**
+  (`StaticResource`/`ThemeResource`/`Null`/`TemplateBinding`), this
+  codebase defines its own small placeholder classes — owned by
+  `WinUIDesigner.XamlDom`, not WinUI — that derive from
+  `Microsoft.UI.Xaml.Markup.MarkupExtension` purely so `IsMarkupExtension`
+  and the existing `MarkupExtensionWrapper` registry mechanism keep working
+  unchanged for them. Add this to `MarkupExtensionParser.cs` (Step 11):
+  ```csharp
+  // in namespace WinUIDesigner.XamlDom, alongside MarkupExtensionParser
+
+  /// <summary>
+  /// WinUI has no public runtime type behind {StaticResource ...} (confirmed
+  /// absent from Microsoft.UI.Xaml.winmd, unlike WPF's real
+  /// StaticResourceExtension class) -- its XAML compiler resolves it as a
+  /// pure compiler intrinsic. This placeholder exists only so this codebase's
+  /// own MarkupExtensionParser has something constructible to represent it.
+  /// </summary>
+  public sealed class StaticResourceExtensionPlaceholder : Microsoft.UI.Xaml.Markup.MarkupExtension
+  {
+      public object ResourceKey { get; set; }
+      protected override object ProvideValue() => null; // real resolution happens in StaticResourceWrapper (Step 7)
+  }
+
+  public sealed class ThemeResourceExtensionPlaceholder : Microsoft.UI.Xaml.Markup.MarkupExtension
+  {
+      public object ResourceKey { get; set; }
+      protected override object ProvideValue() => null;
+  }
+
+  public sealed class NullExtensionPlaceholder : Microsoft.UI.Xaml.Markup.MarkupExtension
+  {
+      protected override object ProvideValue() => null;
+  }
+  ```
+  (`TemplateBinding` is intentionally not given a placeholder — it's only
+  legal inside a `ControlTemplate`, which Phase 1's `TemplateHelper`
+  delegates entirely to WinUI's own `XamlReader.Load` (Task 5 Step 14b,
+  Task 8) rather than this codebase's own object model, so
+  `MarkupExtensionParser` never needs to parse a bare `{TemplateBinding ...}`
+  itself in Phase 1's scope. If a future phase parses template content
+  through this codebase's own parser instead of `XamlReader.Load`, add a
+  placeholder for it then.)
+
+  Then, in `MarkupExtensionParser.Parse` (Step 11), resolve these three
+  names *before* falling through to the generic `typeResolver.Resolve(...)`
+  path:
+  ```csharp
+  // at the top of MarkupExtensionParser.Parse, after tokenizing and
+  // extracting typeName (see Step 11's full listing):
+  Type extensionType;
+  switch (typeName) {
+      case "StaticResource": extensionType = typeof(StaticResourceExtensionPlaceholder); break;
+      case "ThemeResource": extensionType = typeof(ThemeResourceExtensionPlaceholder); break;
+      case "Null": extensionType = typeof(NullExtensionPlaceholder); break;
+      default:
+          var typeResolver = parent.ServiceProvider.Resolver;
+          extensionType = typeResolver.Resolve(typeName + "Extension");
+          if (extensionType == null) extensionType = typeResolver.Resolve(typeName);
+          if (extensionType == null)
+              throw new XamlMarkupExtensionParseException("Unknown markup extension " + typeName + "Extension");
+          break;
+  }
+  ```
+  (Note the `!typeof(MarkupExtension).IsAssignableFrom(extensionType)` check
+  from the reference is gone entirely, per the relaxation above — not just
+  skipped for the three special-cased names.)
+  For the `StaticResource`/`ThemeResource` placeholders, their single
+  positional argument (the resource key) maps to the `ResourceKey`
+  property the same way the reference's existing "map positional args to
+  properties" logic already works for any extension with a matching
+  default constructor — no special-casing needed there, the placeholder
+  classes just need that property to exist with a matching name.
+- `XamlDocument.CreateNullValue()` (Step 10): change `new NullExtension()`
+  to `new NullExtensionPlaceholder()`.
+- `XamlObject.CreateWrapper()` (Step 7): change the
+  `Instance is StaticResourceExtension` check to
+  `Instance is StaticResourceExtensionPlaceholder`, and
+  `StaticResourceWrapper.ProvideValue()`'s
+  `target.ResourceKey` access still works unchanged (same property name on
+  the placeholder).
+- `MarkupExtensionPrinter.cs` (Step 12): change
+  `obj.ElementType == typeof(StaticResourceExtension)` to
+  `typeof(StaticResourceExtensionPlaceholder)`, and
+  `IsStaticResourceThatReferencesLocalResource`'s
+  `obj.Instance as System.Windows.StaticResourceExtension` to
+  `obj.Instance as StaticResourceExtensionPlaceholder`.
+- `XamlTypeResolverProvider.cs`/`WinUIXamlServiceProvider.cs` (Steps 5-6):
+  no change needed — these don't reference `StaticResourceExtension` by
+  name.
 
 - [ ] **Step 1: Port the straightforward value/property-info types**
 
@@ -1077,22 +1299,25 @@ because WinUI has nothing to replicate it against.
     `public XamlObjectServiceProvider ServiceProvider { get; set; }`
     property's type changes to `WinUIXamlServiceProvider`.
   - `CreateWrapper()`: `BindingWrapper`/`StaticResourceWrapper`'s `is`
-    checks change from `Instance is BindingBase`/`Instance is StaticResourceExtension`
-    to the WinUI types (`Microsoft.UI.Xaml.Data.BindingBase`,
-    `Microsoft.UI.Xaml.StaticResourceExtension` — confirm both exist and
-    derive from `Microsoft.UI.Xaml.Markup.MarkupExtension` when you write
-    this; if `BindingBase` doesn't derive from `MarkupExtension` in WinUI,
-    `IsMarkupExtension` for a `Binding` XamlObject will be `false`, and
-    `CreateWrapper`'s check `if (wrapper == null && IsMarkupExtension)` for
-    the fallback registry path won't run either — that's fine, `BindingWrapper`
-    is checked unconditionally first via the direct `is BindingBase` check).
+    checks change to `Microsoft.UI.Xaml.Data.BindingBase` and
+    `StaticResourceExtensionPlaceholder` (this codebase's own placeholder
+    type, added in Step 11 per Gap 7 above — WinUI has no real
+    `StaticResourceExtension` type to check against). Per Gap 7,
+    `Microsoft.UI.Xaml.Data.BindingBase` is **confirmed** to derive from
+    plain `Microsoft.UI.Xaml.DependencyObject`, not
+    `Microsoft.UI.Xaml.Markup.MarkupExtension` (unlike WPF) — so
+    `IsMarkupExtension` for a `Binding` XamlObject is always `false`, and
+    `CreateWrapper`'s `if (wrapper == null && IsMarkupExtension)` fallback
+    path correctly never runs for it; `BindingWrapper` is what handles
+    `Binding` entirely, via the unconditional `is BindingBase` check below,
+    same as the reference structure already does.
     Add the `Reference` case from Step 6:
     ```csharp
     void CreateWrapper()
     {
         if (Instance is BindingBase) {
             wrapper = new BindingWrapper(this);
-        } else if (Instance is StaticResourceExtension) {
+        } else if (Instance is StaticResourceExtensionPlaceholder) {
             wrapper = new StaticResourceWrapper(this);
         } else if (Instance is Microsoft.UI.Xaml.Markup.ReferenceExtension) {
             wrapper = new ReferenceExtensionWrapper(this);
@@ -1271,26 +1496,38 @@ because WinUI has nothing to replicate it against.
     }
     ```
   - Everything else (`GetTypeDescriptorContext`/`DummyTypeDescriptorContext`,
-    `RootElement`/`RootInstance`, `Save`, `CreateObject`/`CreateNullValue`,
+    `RootElement`/`RootInstance`, `Save`, `CreateObject`,
     `CreatePropertyValue`'s non-brush parts, `GetNamespaceFor`/
     `GetNamespacesFor`, `GetPrefixForNamespace` (both overloads),
-    `GetNamespaceForPrefix`, `IsNativeType`) copies verbatim. Note
-    `CreateNullValue` constructs `new NullExtension()` — verify
-    `Microsoft.UI.Xaml.Markup.NullExtension` exists (very likely, `{x:Null}`
-    is a standard XAML 2006 feature both platforms support); if it doesn't
-    exist under that exact name, search the winmd the same way earlier gaps
-    were verified.
+    `GetNamespaceForPrefix`, `IsNativeType`) copies verbatim. `CreateNullValue`
+    is the one exception: per Gap 7 above, `Microsoft.UI.Xaml.Markup.NullExtension`
+    does **not** exist (confirmed absent from the winmd, unlike the WPF
+    assumption) — change `new NullExtension()` to
+    `new NullExtensionPlaceholder()` (the placeholder type added in Step 11).
 
 - [ ] **Step 11: Port `MarkupExtensionParser.cs`**
 
   Substitutions:
-  - `using System.Windows.Markup;` → `using Microsoft.UI.Xaml.Markup;` (for
-    `MarkupExtension` in the `typeof(MarkupExtension).IsAssignableFrom(extensionType)`
-    check)
+  - `using System.Windows.Markup;` → `using Microsoft.UI.Xaml.Markup;`
+  - Add the three placeholder classes from Gap 7 above
+    (`StaticResourceExtensionPlaceholder`, `ThemeResourceExtensionPlaceholder`,
+    `NullExtensionPlaceholder`) to this file.
+  - `MarkupExtensionParser.Parse`: per Gap 7, replace the type-resolution
+    block (the reference's
+    `Type extensionType = typeResolver.Resolve(typeName + "Extension"); if (extensionType == null) extensionType = typeResolver.Resolve(typeName); if (extensionType == null || !typeof(MarkupExtension).IsAssignableFrom(extensionType)) { throw ... }`)
+    with the switch-based version given in Gap 7 — special-cased lookup for
+    `StaticResource`/`ThemeResource`/`Null` first, generic type resolution
+    for everything else with the `MarkupExtension`-assignability
+    requirement dropped entirely (not just skipped for the three special
+    cases — `Binding`/`RelativeSource` need to resolve too, and neither is
+    a `MarkupExtension` on WinUI).
   - Everything else — the entire tokenizer (`MarkupExtensionTokenizer`,
     `MarkupExtensionToken`(Kind)), `XamlMarkupExtensionParseException`, and
-    `MarkupExtensionParser.Parse`'s reflection-based construction — is
-    platform-agnostic string/reflection logic. Copies verbatim.
+    the rest of `MarkupExtensionParser.Parse`'s reflection-based
+    construction (positional-arg-to-property mapping, constructor
+    resolution) — is platform-agnostic string/reflection logic and works
+    unchanged for `Binding`/`RelativeSource`/the placeholders exactly as it
+    already does for any other resolved type. Copies verbatim.
 
 - [ ] **Step 12: Port `MarkupExtensionPrinter.cs`**
 
@@ -1307,9 +1544,14 @@ because WinUI has nothing to replicate it against.
     `typeof(StaticResourceExtension)` special-cased property-name shortcuts
     — change to `Microsoft.UI.Xaml.Data.Binding`,
     `Microsoft.UI.Xaml.Markup.ReferenceExtension` (or drop this one case if
-    Step 6 found the type doesn't exist), `Microsoft.UI.Xaml.StaticResourceExtension`.
-  - `IsStaticResourceThatReferencesLocalResource`: `System.Windows.StaticResourceExtension`
-    → `Microsoft.UI.Xaml.StaticResourceExtension`.
+    Step 6 found the type doesn't exist), and — per Gap 7 —
+    `StaticResourceExtensionPlaceholder` (this codebase's own type, not a
+    WinUI one).
+  - `IsStaticResourceThatReferencesLocalResource`: per Gap 7, change
+    `obj.Instance as System.Windows.StaticResourceExtension` to
+    `obj.Instance as StaticResourceExtensionPlaceholder`, and
+    `staticResource.ResourceKey` stays the same property name on the
+    placeholder.
   - Everything else copies verbatim.
 
 - [ ] **Step 13: Port `XamlParser.cs`**
@@ -1972,10 +2214,28 @@ post-construction resource-injection hook the way WPF's
   `NameScope`/`INameScope` (Task 5 Step 3, Task 5 Step 6, Task 7). The
   environment tooling gap (missing MSIX/Appx MSBuild component) is Task 1
   Step 1, gating everything else.
+- **Gaps found during execution (not planning) and fixed in the plan text
+  directly, before the affected task was dispatched:** the Task 5/Task 8
+  `TemplateHelper.cs` ordering defect (pre-flight scan, before any
+  dispatch — see the SDD ledger). Two more surfaced once Task 3 actually
+  ran against the real WinUI assembly: (1) WinUI carries no
+  `XmlnsDefinitionAttribute`/`XmlnsPrefixAttribute` at all (Task 3 Step 4)
+  — `WinUITypeFinder` now hand-registers a fixed, verified namespace list
+  instead of scanning attributes that don't exist; (2) several standard
+  `{...}` markup extensions have no public WinUI type at all
+  (`StaticResource`/`ThemeResource`/`Null`/`TemplateBinding`), and
+  `Binding`/`RelativeSource` aren't `MarkupExtension` subclasses on WinUI
+  the way they are on WPF — Gap 7 (added to Task 5, spanning Steps 7, 10,
+  11, 12) introduces this codebase's own placeholder types for the
+  type-less extensions and relaxes `MarkupExtensionParser`'s
+  `MarkupExtension`-assignability requirement. Both were verified against
+  the real `Microsoft.UI.Xaml.winmd` metadata, not guessed, the same way
+  every other gap in this plan was.
 - **Known residual risk carried into later tasks, not hidden:** Task 5 Step
-  9's `ProvideValue` overload uncertainty, Task 5 Step 6's
-  `ReferenceExtension` existence uncertainty, Task 5 Step 7's
-  `XamlSetTypeConverterAttribute` existence uncertainty, Task 5 Step 12's
-  `MultiBinding`/`PriorityBinding` existence uncertainty, Task 5 Step 10's
-  `Microsoft.UI.Colors` shape uncertainty — each has a concrete verification
-  step and a documented fallback, not a silent guess.
+  9's `ProvideValue` overload uncertainty (now narrowed to third-party
+  custom extensions only, per Gap 7), Task 5 Step 6's `ReferenceExtension`
+  existence uncertainty, Task 5 Step 7's `XamlSetTypeConverterAttribute`
+  existence uncertainty, Task 5 Step 12's `MultiBinding`/`PriorityBinding`
+  existence uncertainty, Task 5 Step 10's `Microsoft.UI.Colors` shape
+  uncertainty — each has a concrete verification step and a documented
+  fallback, not a silent guess.
