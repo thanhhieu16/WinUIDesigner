@@ -67,7 +67,14 @@ namespace WinUIDesigner.XamlDom.Tests
 							// WinUI's XamlReader looks for the IXamlMetadataProvider it needs to
 							// resolve non-framework types. See TestApplication.
 							new TestApplication();
-							WarmUpTypeDescriptor();
+							// The TypeDescriptor/System.Windows.Forms first-call quirk that used to be
+							// warmed up here (see git history for the removed WarmUpTypeDescriptor
+							// method) is now absorbed by the library itself, once per process, in
+							// WinUIDesigner.XamlDom.XamlParser.EnsureTypeDescriptorInitialized - every
+							// test in this suite reaches TypeDescriptor only through XamlParser.Parse,
+							// so no test-side warm-up is needed any more. See task-5-report.md's
+							// fix-round addendum for the verification that removing this call still
+							// leaves the suite deterministic.
 							queue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 							if (queue == null)
 								startupFailure = new InvalidOperationException(
@@ -105,35 +112,6 @@ namespace WinUIDesigner.XamlDom.Tests
 				System.Reflection.Assembly.GetExecutingAssembly().Location);
 			var actual = System.IO.Path.GetFileNameWithoutExtension(CurrentHostName());
 			return string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
-		}
-
-		/// <summary>
-		/// Forces <see cref="System.ComponentModel.TypeDescriptor"/>'s one-time COM-descriptor
-		/// initialisation to happen here rather than inside whichever test happens to run first.
-		/// </summary>
-		/// <remarks>
-		/// The very first <c>TypeDescriptor.GetConverter(object)</c>/<c>GetProperties(object)</c>
-		/// call made against a WinRT-backed instance in this process throws
-		/// <c>FileNotFoundException: Could not load file or assembly 'System.Windows.Forms'</c> -
-		/// .NET's <c>TypeDescriptor.ComObjectType</c> resolves its descriptor implementation out of
-		/// <c>System.Windows.Forms</c>, which a WinUI app does not reference. The failure is
-		/// one-shot: it is cached, and every later call succeeds (verified - a second
-		/// <c>GetProperties</c> on the same instance returns the full property list and property
-		/// assignment through it works). Left unwarmed it makes exactly one arbitrary test fail,
-		/// and which one depends on scheduling. Swallowing it once here makes the suite
-		/// deterministic without hiding anything: the behaviour is described in the task report as
-		/// something a real consumer of this library will meet on its first parse.
-		/// </remarks>
-		static void WarmUpTypeDescriptor()
-		{
-			try {
-				System.ComponentModel.TypeDescriptor.GetConverter(new Microsoft.UI.Xaml.Media.SolidColorBrush());
-			} catch (Exception) {
-			}
-			try {
-				System.ComponentModel.TypeDescriptor.GetProperties(new Microsoft.UI.Xaml.Media.SolidColorBrush());
-			} catch (Exception) {
-			}
 		}
 
 		/// <summary>

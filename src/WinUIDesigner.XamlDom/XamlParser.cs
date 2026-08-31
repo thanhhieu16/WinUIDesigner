@@ -121,6 +121,9 @@ namespace WinUIDesigner.XamlDom
 				throw new ArgumentNullException("document");
 			if (settings == null)
 				throw new ArgumentNullException("settings");
+
+			EnsureTypeDescriptorInitialized();
+
 			XamlParser p = new XamlParser();
 			p.settings = settings;
 			p.errorSink = (IXamlErrorSink)settings.ServiceProvider.GetService(typeof(IXamlErrorSink));
@@ -134,6 +137,52 @@ namespace WinUIDesigner.XamlDom
 			}
 
 			return p.document;
+		}
+
+		static bool typeDescriptorInitialized;
+
+		/// <summary>
+		/// Forces <see cref="TypeDescriptor"/>'s one-time COM-descriptor initialisation (see
+		/// remarks) to happen here, on the library's own entry point, rather than on whichever
+		/// call site happens to run first.
+		/// </summary>
+		/// <remarks>
+		/// The very first <c>TypeDescriptor.GetConverter(object)</c>/<c>TypeDescriptor.GetProperties(object)</c>
+		/// call made against a WinRT-backed instance in a process throws
+		/// <c>FileNotFoundException: Could not load file or assembly 'System.Windows.Forms'</c> -
+		/// .NET's <c>TypeDescriptor.ComObjectType</c> resolves its descriptor implementation out of
+		/// <c>System.Windows.Forms</c>, which a WinUI app does not reference. The failure is
+		/// one-shot and cached by the runtime: every later call in the same process succeeds. It is
+		/// real, and it is on the library's main paths -
+		/// <see cref="XamlDocument.CreatePropertyValue(XamlObject, object, XamlProperty)"/> opens
+		/// with <c>TypeDescriptor.GetConverter(instance)</c>, <see cref="XamlObject.FindOrCreateProperty"/>
+		/// calls <c>TypeDescriptor.GetProperties(instance)</c>, and
+		/// <c>BindingWrapper.CopyBinding</c> calls <c>GetProperties(target)</c> on every
+		/// <c>{Binding}</c> evaluation - so without this, whichever of those three run first for a
+		/// given process throws once, non-deterministically. Both entry points are warmed
+		/// separately (matching the shape originally verified by a since-removed test-only
+		/// warm-up, WinUIDesigner.XamlDom.Tests.WinUITestHost.WarmUpTypeDescriptor - see
+		/// task-5-report.md's fix-round addendum) because it was not established that warming
+		/// one warms the other. This runs on whatever thread calls
+		/// <see cref="Parse(XmlDocument, XamlParserSettings)"/>,
+		/// which already has to be a live WinUI dispatcher thread for the rest of parsing (object
+		/// construction, markup-extension evaluation, ...) to work at all, so no extra threading
+		/// requirement is introduced here.
+		/// </remarks>
+		internal static void EnsureTypeDescriptorInitialized()
+		{
+			if (typeDescriptorInitialized)
+				return;
+			typeDescriptorInitialized = true;
+
+			try {
+				TypeDescriptor.GetConverter(new SolidColorBrush());
+			} catch (Exception) {
+			}
+			try {
+				TypeDescriptor.GetProperties(new SolidColorBrush());
+			} catch (Exception) {
+			}
 		}
 		#endregion
 
