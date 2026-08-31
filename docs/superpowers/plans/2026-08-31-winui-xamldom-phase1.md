@@ -741,6 +741,11 @@ readability (roughly leaf-to-root), not for incremental green builds.
   `...\XamlStaticTools.cs`)
 - Create: `src/WinUIDesigner.XamlDom/DesignInstanceExtension.cs` (from
   `...\DesignInstanceExtension.cs`)
+- Create: `src/WinUIDesigner.XamlDom/TemplateHelper.cs` (new — minimal base
+  version; `XamlParser.cs` (Step 13) calls `TemplateHelper.GetFrameworkTemplate`,
+  so this file must exist before Task 5's build can succeed. Task 8 later
+  extends this same file with ancestor-resource splicing — it does not
+  create it from scratch.)
 - Create: `tests/WinUIDesigner.XamlDom.Tests/ExampleClass.cs`,
   `ExampleControl.cs`, `ExampleClassContainer.cs`, `ExampleService.cs`,
   `TestHelper.cs` (from the matching files under
@@ -1360,6 +1365,76 @@ because WinUI has nothing to replicate it against.
   `IServiceProvider`; change the override signature to match. Everything
   else copies verbatim (it already just returns `null` unconditionally).
 
+- [ ] **Step 14b: Add a minimal `TemplateHelper.cs`** (base version — Task 8
+  extends this same file, it does not replace it)
+
+  `XamlParser.ParseObject` (Step 13) needs `TemplateHelper.GetFrameworkTemplate`
+  to exist for the project to compile at all, so a working base version goes
+  in now. This version does not merge in resources from ancestor scopes
+  (that's Task 8's job) — it correctly handles a template whose resource
+  references are all satisfied within its own fragment, which is enough for
+  Task 5's own tests (none of which need cross-scope template resources).
+  ```csharp
+  using System.Xml;
+  using Microsoft.UI.Xaml;
+
+  namespace WinUIDesigner.XamlDom
+  {
+      /// <summary>
+      /// Instantiates a FrameworkTemplate from a template's XML fragment.
+      /// WPF's TemplateHelper used System.Xaml's XamlXmlReader/XamlObjectWriter
+      /// pipeline (no WinUI equivalent, confirmed absent). This uses WinUI's own
+      /// public Microsoft.UI.Xaml.Markup.XamlReader.Load(string) instead.
+      /// This base version resolves only resources declared inside the
+      /// template's own fragment; Task 8 adds ancestor-scope resource splicing.
+      /// </summary>
+      public static class TemplateHelper
+      {
+          public static FrameworkTemplate GetFrameworkTemplate(XmlElement xmlElement, XamlObject parentObject)
+          {
+              var nav = xmlElement.CreateNavigator();
+              var namespaces = new System.Collections.Generic.Dictionary<string, string>();
+              while (true) {
+                  foreach (var ns in nav.GetNamespacesInScope(XmlNamespaceScope.ExcludeXml)) {
+                      if (!namespaces.ContainsKey(ns.Key) && ns.Key != "")
+                          namespaces.Add(ns.Key, ns.Value);
+                  }
+                  if (!nav.MoveToParent())
+                      break;
+              }
+
+              var clonedElement = (XmlElement)xmlElement.CloneNode(true);
+              foreach (var entry in new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, string>>(namespaces)) {
+                  var value = entry.Value;
+                  if (value.StartsWith("clr-namespace") && !value.Contains(";assembly=")
+                      && !string.IsNullOrEmpty(parentObject.OwnerDocument.CurrentProjectAssemblyName)) {
+                      value += ";assembly=" + parentObject.OwnerDocument.CurrentProjectAssemblyName;
+                  }
+                  clonedElement.SetAttribute("xmlns:" + entry.Key, value);
+              }
+
+              var wrapperXaml =
+                  $"<ResourceDictionary xmlns=\"{XamlConstants.PresentationNamespace}\" xmlns:x=\"{XamlConstants.XamlNamespace}\">" +
+                  clonedElement.OuterXml +
+                  "</ResourceDictionary>";
+
+              var loaded = (ResourceDictionary)Microsoft.UI.Xaml.Markup.XamlReader.Load(wrapperXaml);
+
+              foreach (var key in loaded.Keys) {
+                  if (loaded[key] is FrameworkTemplate template)
+                      return template;
+              }
+              return null;
+          }
+      }
+  }
+  ```
+  Run `dotnet build` after adding this — it's the piece that makes the
+  whole assembly link. If `XamlReader.Load` rejects the wrapper XML or the
+  returned dictionary doesn't contain the template under an enumerable key,
+  fix it here (same iteration you'd otherwise do in Task 8 Step 4) — Task 8
+  builds on a working base, not a broken one.
+
 - [ ] **Step 15: Port the test fixtures**
 
   `ExampleClass.cs`: `using System.Windows.Markup;` →
@@ -1668,19 +1743,26 @@ the object-model level rather than the rendered-UI level.
 
 ---
 
-### Task 8: Rewrite `TemplateHelper` for WinUI (Gap 6)
+### Task 8: Extend `TemplateHelper` with ancestor-scope resource splicing (Gap 6)
+
+Task 5 Step 14b already added a working base `TemplateHelper.cs` (needed
+there so the project compiles at all — `XamlParser.cs` calls it). That base
+version only resolves resources declared inside the template's own
+fragment. This task adds the missing piece: resources declared on an
+*ancestor* element (e.g. a brush defined on the containing `Grid.Resources`,
+referenced by a `{StaticResource}` inside the template) — which needs
+manual XML splicing since `Microsoft.UI.Xaml.Markup.XamlReader.Load` has no
+post-construction resource-injection hook the way WPF's
+`XamlObjectWriterSettings.BeforePropertiesHandler` did.
 
 **Files:**
-- Create: `src/WinUIDesigner.XamlDom/TemplateHelper.cs` (rewritten, not
-  ported — reference at `...\TemplateHelper.cs` is for context only, the
-  `System.Xaml` pipeline it uses has no WinUI equivalent)
+- Modify: `src/WinUIDesigner.XamlDom/TemplateHelper.cs` (from Task 5 Step 14b)
 
 **Interfaces:**
 - Consumes: `Microsoft.UI.Xaml.Markup.XamlReader.Load(string)`, `XamlObject`,
   `XamlConstants`.
-- Produces: `TemplateHelper.GetFrameworkTemplate(XmlElement, XamlObject) : FrameworkTemplate`
-  — same signature as the reference, so `XamlParser.ParseObject`'s call site
-  (Task 5 Step 13) needs no change.
+- Produces: no signature change — `TemplateHelper.GetFrameworkTemplate(XmlElement, XamlObject) : FrameworkTemplate`
+  keeps the same signature Task 5 Step 14b already gave it.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1713,108 +1795,23 @@ the object-model level rather than the rendered-UI level.
   this; shown split above only for readability of the two concerns being
   tested.)
 
-- [ ] **Step 2: Run it, confirm it fails** (no `TemplateHelper` exists in
-  the new project yet — `XamlParser.ParseObject`'s template branch throws a
-  missing-method/type error)
+- [ ] **Step 2: Run it, confirm it fails the way this task expects**
 
-- [ ] **Step 3: Write `TemplateHelper.cs`**
+  `TemplateHelper.cs` already exists (Task 5 Step 14b), so this won't fail
+  with a missing-type error. It should fail because `MyBrush` is declared
+  in a *different* `Grid.Resources` block than the one the `ControlTemplate`
+  itself is nested inside — the base version only sees resources inside the
+  template's own fragment, so `{StaticResource MyBrush}` resolves to nothing
+  and `Border.Background` ends up unset (or `XamlReader.Load` throws a
+  resource-not-found error, depending on how WinUI's loader handles a
+  missing `StaticResource` — observe which one actually happens and use
+  that to shape the assertion in Step 4).
 
-  ```csharp
-  using System.Collections.Generic;
-  using System.Linq;
-  using System.Text;
-  using System.Xml;
-  using Microsoft.UI.Xaml;
-  using Microsoft.UI.Xaml.Markup;
+- [ ] **Step 3: Add ancestor-resource splicing to the existing `TemplateHelper.cs`**
 
-  namespace WinUIDesigner.XamlDom
-  {
-      /// <summary>
-      /// Instantiates a FrameworkTemplate from a template's XML fragment.
-      /// WPF's TemplateHelper used System.Xaml's XamlXmlReader/XamlObjectWriter
-      /// pipeline (no WinUI equivalent, confirmed absent). This uses WinUI's own
-      /// public Microsoft.UI.Xaml.Markup.XamlReader.Load(string) instead, and
-      /// since Load has no ambient-resource injection hook (unlike WPF's
-      /// XamlObjectWriterSettings.BeforePropertiesHandler), ancestor resources
-      /// are spliced into the wrapper XML text itself before loading.
-      /// </summary>
-      public static class TemplateHelper
-      {
-          public static FrameworkTemplate GetFrameworkTemplate(XmlElement xmlElement, XamlObject parentObject)
-          {
-              var nav = xmlElement.CreateNavigator();
-              var namespaces = new Dictionary<string, string>();
-              while (true) {
-                  foreach (var ns in nav.GetNamespacesInScope(XmlNamespaceScope.ExcludeXml)) {
-                      if (!namespaces.ContainsKey(ns.Key) && ns.Key != "")
-                          namespaces.Add(ns.Key, ns.Value);
-                  }
-                  if (!nav.MoveToParent())
-                      break;
-              }
-
-              var clonedElement = (XmlElement)xmlElement.CloneNode(true);
-              foreach (var entry in namespaces.ToList()) {
-                  var value = entry.Value;
-                  if (value.StartsWith("clr-namespace") && !value.Contains(";assembly=")
-                      && !string.IsNullOrEmpty(parentObject.OwnerDocument.CurrentProjectAssemblyName)) {
-                      value += ";assembly=" + parentObject.OwnerDocument.CurrentProjectAssemblyName;
-                  }
-                  clonedElement.SetAttribute("xmlns:" + entry.Key, value);
-              }
-
-              // Splice ancestor resources into the wrapper text -- XamlReader.Load
-              // has no post-construction hook to merge them in after the fact.
-              var mergedResourcesXaml = BuildMergedAncestorResourcesXaml(parentObject);
-
-              var wrapperXaml =
-                  $"<ResourceDictionary xmlns=\"{XamlConstants.PresentationNamespace}\" xmlns:x=\"{XamlConstants.XamlNamespace}\">" +
-                  (mergedResourcesXaml.Length > 0
-                      ? $"<ResourceDictionary.MergedDictionaries><ResourceDictionary>{mergedResourcesXaml}</ResourceDictionary></ResourceDictionary.MergedDictionaries>"
-                      : "") +
-                  clonedElement.OuterXml +
-                  "</ResourceDictionary>";
-
-              var loaded = (ResourceDictionary)Microsoft.UI.Xaml.Markup.XamlReader.Load(wrapperXaml);
-
-              // The template we just parsed is the only entry that isn't one of
-              // the spliced-in merged-dictionary resources.
-              foreach (var key in loaded.Keys) {
-                  if (loaded[key] is FrameworkTemplate template)
-                      return template;
-              }
-              return null;
-          }
-
-          static string BuildMergedAncestorResourcesXaml(XamlObject parentObject)
-          {
-              var sb = new StringBuilder();
-              var obj = parentObject;
-              while (obj != null) {
-                  if (obj.Instance is FrameworkElement fe) {
-                      // XamlStaticTools.GetXaml round-trips a XamlObject's own
-                      // markup, which is not what we have for framework-level
-                      // resources set outside our own parsed document (e.g.
-                      // theme resources) -- only resources declared inside this
-                      // same document are recoverable this way. That's the
-                      // scope Phase 1 needs: resources declared in the same
-                      // XAML file as the template.
-                  }
-                  obj = obj.ParentObject;
-              }
-              return sb.ToString();
-          }
-      }
-  }
-  ```
-  **This is a deliberately partial implementation** —
-  `BuildMergedAncestorResourcesXaml` is a stub that returns an empty string,
-  meaning ancestor resource splicing isn't actually implemented yet. Do not
-  leave it like this; the next step replaces it with real logic. It's shown
-  separately here because the real logic depends on being able to recover
-  the *original XAML text* of each ancestor's resources, which needs
-  `XamlObject`'s XML element access (`obj.XmlElement`) walked for
-  `<TypeName.Resources>` child elements — write that walk now:
+  Add a new private method, and call it from the existing
+  `GetFrameworkTemplate` to inject the result into the wrapper XAML before
+  the call to `XamlReader.Load`:
   ```csharp
   static string BuildMergedAncestorResourcesXaml(XamlObject parentObject)
   {
@@ -1834,7 +1831,27 @@ the object-model level rather than the rendered-UI level.
       return sb.ToString();
   }
   ```
-  Replace the earlier stub with this version before running the test.
+  Update `GetFrameworkTemplate` to use it (add `using System.Text;` for
+  `StringBuilder` if not already present):
+  ```csharp
+  // after building clonedElement, before constructing wrapperXaml:
+  var mergedResourcesXaml = BuildMergedAncestorResourcesXaml(parentObject);
+
+  var wrapperXaml =
+      $"<ResourceDictionary xmlns=\"{XamlConstants.PresentationNamespace}\" xmlns:x=\"{XamlConstants.XamlNamespace}\">" +
+      (mergedResourcesXaml.Length > 0
+          ? $"<ResourceDictionary.MergedDictionaries><ResourceDictionary>{mergedResourcesXaml}</ResourceDictionary></ResourceDictionary.MergedDictionaries>"
+          : "") +
+      clonedElement.OuterXml +
+      "</ResourceDictionary>";
+  ```
+  (Replaces the base version's plain `clonedElement.OuterXml`-only
+  `wrapperXaml` assignment from Task 5 Step 14b with this
+  ancestor-resource-aware version.) Note this only recovers resources
+  declared *inside the same parsed XAML document* (via `XmlElement`
+  traversal) — resources set outside the document (app-level or theme
+  resources) are out of scope for Phase 1, same limitation the reference
+  WPF implementation effectively had for a standalone parser.
 
 - [ ] **Step 4: Run the test, iterate**
 
