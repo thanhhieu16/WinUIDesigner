@@ -600,13 +600,33 @@ changes).
     name, so there's nothing lost.)
   - Everything else in the file (`AssemblyNamespaceMapping`, `XamlNamespace`,
     `GetType`, `GetXmlNamespaceFor`, `ParseNamespace`, `AddMappingToNamespace`,
-    `RegisterAssembly`, `RegisterDesignerNamespaces`, `LoadAssembly`,
-    `Clone`/`ImportFrom`, `ConvertUriToLocalUri`) is plain reflection/string
-    logic with no WPF dependency, and stays useful for other callers (e.g.
-    `RegisterAssembly` is still what registers a *user's own* project
-    assembly when a `clr-namespace:` xmlns is encountered during parsing,
-    Task 5's `XamlParser.ParseObject`) — copy verbatim, don't remove it just
-    because `WinUITypeFinder`'s own static constructor no longer calls it.
+    `RegisterDesignerNamespaces`, `LoadAssembly`, `Clone`/`ImportFrom`,
+    `ConvertUriToLocalUri`) is plain reflection/string logic with no WPF
+    dependency — copy verbatim.
+
+    **`RegisterAssembly` is the one exception**, found and fixed during a
+    Task 3 implementation attempt (verified four independent ways — a
+    build error, direct ECMA-335 winmd inspection, the managed
+    `Microsoft.WinUI.dll` projection, and a package-wide grep — see that
+    task's report): its body references
+    `XmlnsPrefixAttribute`/`XmlnsDefinitionAttribute` as C# types, and
+    neither exists anywhere in WinUI's dependency surface (not just
+    "carries no instances of them" like the assembly-level finding above —
+    the attribute *types themselves* aren't there to reference in code at
+    all; `Microsoft.UI.Xaml.Markup.XmlnsDefinition` does exist but is an
+    unrelated marshalable struct, not an `Attribute` subclass). The
+    attribute-scan loops are removed; only the assembly-registration
+    bookkeeping (`_registeredAssemblies.Add(assembly)`) is kept. This is
+    the permanent design, not a stopgap: `clr-namespace:` xmlns resolution
+    (the case this might look like it's needed for, including for this
+    codebase's own test-fixture assembly in Task 5's tests) is entirely
+    self-contained in `ParseNamespace` — the CLR namespace is spelled out
+    literally in the `clr-namespace:Foo;assembly=Bar` URI itself and never
+    depended on attribute scanning, on either platform. `RegisterAssembly`
+    keeps its bookkeeping role (assemblies get tracked in
+    `RegisteredAssemblies`) and nothing currently calls it expecting
+    namespace mappings out of it — `WinUITypeFinder`'s own bootstrap uses
+    the new `RegisterNamespaceMapping` helper instead (see above).
 
 - [ ] **Step 5: Run the test, make it pass**
 
