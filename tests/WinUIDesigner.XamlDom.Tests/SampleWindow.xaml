@@ -1,0 +1,29 @@
+<!--
+  Hand-written stand-in for a real `dotnet new winui3` MainWindow.xaml (Task 9 -
+  no winui3 template is installed on this machine, verified via `dotnet new list`).
+  Root is Grid, not Window: Microsoft.UI.Xaml.Window does not derive from
+  FrameworkElement and is not loadable as a bare XamlDom root (see Task 5's
+  SimpleLoadTests.cs remarks) - Grid stands in, per the Task 9 brief's own fallback.
+  Exercises: plain attributes (Width/Height/Orientation/Alignment), nested elements
+  (StackPanel > TextBlock x2, Button), an event property (Click), and a named
+  resource (Grid.Resources > SolidColorBrush) referenced via {StaticResource}.
+-->
+<Grid
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Width="400" Height="300">
+
+    <Grid.Resources>
+        <SolidColorBrush x:Key="AccentBrush" Color="Blue" />
+    </Grid.Resources>
+
+    <StackPanel x:Name="RootPanel" Orientation="Vertical"
+                HorizontalAlignment="Center" VerticalAlignment="Center">
+        <TextBlock x:Name="TitleText" Text="Welcome to WinUIDesigner" />
+        <TextBlock Text="Click the button below to say hello." />
+        <Button x:Name="GreetButton"
+                Content="Say Hello"
+                Click="GreetButton_Click"
+                Background="{StaticResource AccentBrush}" />
+    </StackPanel>
+</Grid>

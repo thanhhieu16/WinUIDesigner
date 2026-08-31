@@ -51,4 +51,8 @@
     <ProjectReference Include="..\..\src\WinUIDesigner.XamlDom\WinUIDesigner.XamlDom.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="SampleWindow.xaml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
