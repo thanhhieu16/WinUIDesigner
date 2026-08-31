@@ -80,7 +80,7 @@ D:\Project\ST4I\Research\WinUIDesigner\
       DesignTimeProperties.cs
       IXamlErrorSink.cs
       MarkupCompatibilityProperties.cs
-      XamlObjectServiceProvider.cs
+      WinUIXamlServiceProvider.cs        (new, not a port — see gap 5)
       XamlLoadException.cs
       XamlParserSettings.cs
       XamlXmlWriter.cs
@@ -119,10 +119,37 @@ types referenced throughout get swapped for their WinUI equivalents:
 | `System.Windows.FrameworkTemplate` | `Microsoft.UI.Xaml.FrameworkTemplate` |
 | `System.Windows.Markup.*` (markup-extension plumbing) | hand-rolled, unchanged shape (XamlDom never depended on `System.Windows.Markup.XamlReader` for parsing) |
 
+## Local environment prerequisite
+
+Confirmed by reproducing the failure directly (not guessed): any project
+with `UseWinUI=true` referencing `Microsoft.WindowsAppSDK` fails to build
+on this machine — regardless of `OutputType` (`Exe` or `Library`) or
+whether a `RuntimeIdentifier` is set — with:
+
+```
+error MSB4062: The "Microsoft.Build.Packaging.Pri.Tasks.ExpandPriContent"
+task could not be loaded from the assembly ...\AppxPackage\Microsoft.Build.Packaging.Pri.Tasks.dll.
+... The system cannot find the file specified.
+```
+
+Visual Studio 2026 Professional is installed (`vswhere` confirms it), but
+`Microsoft.Build.Packaging.Pri.Tasks.dll` does not exist anywhere on disk —
+the MSIX/Appx packaging MSBuild component (installed via the "Universal
+Windows Platform development" workload, or the standalone MSIX packaging
+tools component, in the Visual Studio Installer) is missing. This blocks
+building `WinUIDesigner.XamlDom` and its test project entirely, not just
+edge cases, so installing that workload is a Phase 1 prerequisite task —
+done once, manually, via Visual Studio Installer (not something to script
+around).
+
 ## Known gaps — flagged, not guessed
 
-These four items have no direct WinUI equivalent and need explicit
-handling rather than a mechanical type swap:
+These six items have no direct WinUI equivalent and need explicit
+handling rather than a mechanical type swap. Items 1–4 were identified
+during brainstorming; items 5–6 were found while reading the reference
+source in detail for this plan and verified against the real
+`Microsoft.UI.Xaml.winmd` metadata (via a throwaway metadata-reader spike,
+not guessed from documentation):
 
 1. **Brush serialization.** `XamlDocument.cs:246-267` (reference source)
    calls `System.Windows.Markup.XamlWriter.Save(brush)` to turn a `Brush`
@@ -151,6 +178,55 @@ handling rather than a mechanical type swap:
    the check becomes a no-op path (kept for forward compatibility, not
    removed, since it is a general ComponentModel interface and costs
    nothing to keep).
+5. **Markup extension value evaluation (`XamlObjectServiceProvider.cs`,
+   `XamlObject.cs:626-633`).** This is not a peripheral feature — it's how
+   XamlDom turns `{Binding ...}`, `{StaticResource ...}`, and any custom
+   `MarkupExtension` into the actual value assigned to a property, and it
+   runs during ordinary parsing (not just live rendering), so it affects
+   nearly every real-world XAML file. The reference implementation calls
+   `(Instance as MarkupExtension).ProvideValue(ServiceProvider)`, where
+   `ServiceProvider` is `XamlObjectServiceProvider` — a class implementing
+   five `System.Xaml`-rooted interfaces (`IXamlNameResolver`,
+   `IProvideValueTarget`, `IXamlSchemaContextProvider`, `IAmbientProvider`,
+   `IUriContext`), including a real `System.Xaml.XamlSchemaContext`
+   (`System.Windows.Markup.XamlReader.GetWpfSchemaContext()`). None of
+   this — `System.Xaml`, `XamlSchemaContext`, `IAmbientProvider` — exists
+   in WinUI.
+   Resolution, verified by reading method signatures directly out of
+   `Microsoft.UI.Xaml.winmd` with a metadata-reader spike (not guessed):
+   `Microsoft.UI.Xaml.Markup.MarkupExtension` has a second, WinUI-native
+   overload — `ProvideValue(IXamlServiceProvider serviceProvider)` — where
+   `Microsoft.UI.Xaml.IXamlServiceProvider` is a single-method interface
+   (`GetService(Type)`). The services it typically backs are just
+   `Microsoft.UI.Xaml.Markup.IProvideValueTarget` (`TargetObject`/
+   `TargetProperty` getters — same shape as WPF's), `IXamlTypeResolver`
+   (`Resolve(string)`), and `IRootObjectProvider` (`RootObject`) — all
+   confirmed to exist in the winmd and all far smaller than their WPF
+   counterparts. Critically, WinUI's contract has **no**
+   `IAmbientProvider`/`IXamlNameResolver`/`XamlSchemaContext` equivalent at
+   all, so none of that ambient-value search machinery needs porting.
+   `XamlObjectServiceProvider.cs` is **not** ported by type-swap — it's
+   replaced by a new, much smaller file (see Architecture below)
+   implementing `IXamlServiceProvider` + the three small target
+   interfaces.
+6. **`FrameworkTemplate` instantiation (`TemplateHelper.cs`).** The
+   reference implementation builds a `<ResourceDictionary>` XML wrapper
+   around the template fragment and feeds it through `System.Xaml`'s
+   `XamlXmlReader` → `XamlObjectWriter` pipeline, injecting ambient
+   resources from parent scope via
+   `XamlObjectWriterSettings.BeforePropertiesHandler`. `System.Xaml` has no
+   WinUI equivalent, so this pipeline cannot be ported as-is. Resolution,
+   also verified against the winmd:
+   `Microsoft.UI.Xaml.Markup.XamlReader.Load(string xaml)` is a real
+   public static method. It can replace `XamlXmlReader`/`XamlObjectWriter`
+   for parsing the wrapped fragment. It has no
+   `BeforePropertiesHandler`-style hook, though, so ambient resources from
+   parent scope must be spliced into the XML text itself before calling
+   `Load` (e.g. inlining the parent `ResourceDictionary`'s XAML as a
+   `<ResourceDictionary.MergedDictionaries>` entry) rather than injected as
+   a live object post-construction. This is a real design change from the
+   reference implementation, not a mechanical port — implemented as part
+   of the `TemplateHelper` task in the plan.
 
 ## Testing / Definition of Done
 
@@ -169,8 +245,11 @@ Phase 1 is done when:
   model and re-serializes it, producing XAML that parses back to an
   equivalent object graph (structural equivalence, not necessarily
   byte-identical text).
-- Each of the four flagged gaps above has an explicit, tested resolution
+- Each of the six flagged gaps above has an explicit, tested resolution
   (not a silent fallback).
+- The Visual Studio MSIX/Appx packaging workload is installed on the dev
+  machine (see "Local environment prerequisite" above) so the project
+  actually builds.
 
 ## Out of scope for Phase 1
 
