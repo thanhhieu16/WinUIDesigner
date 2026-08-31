@@ -1,0 +1,88 @@
+<Project>
+
+  <!--
+    AppxMSBuildToolsPath
+    =====================
+    Why this exists: WindowsAppSDK's PRI/Appx build targets (MrtCore.PriGen.targets,
+    Microsoft.Build.Msix.Packaging.targets) need Microsoft.Build.Packaging.Pri.Tasks.dll and
+    Microsoft.Build.AppxPackage.dll even for a WindowsPackageType=None class library like
+    WinUIDesigner.XamlDom - by design, WindowsAppSDK always wires GetPriOutputs into the
+    normal output-group chain whenever UseWinUI=true. Those DLLs only ship inside a Visual
+    Studio install, under
+      <VS install>\MSBuild\Microsoft\VisualStudio\v<version>\AppxPackage\
+    WindowsAppSDK defaults AppxMSBuildToolsPath to
+      $(MSBuildExtensionsPath)\Microsoft\VisualStudio\v$(VisualStudioVersion)\AppxPackage\
+    but under `dotnet build`/`dotnet test`, $(MSBuildExtensionsPath) resolves to the
+    standalone .NET SDK's own tree, which never has an AppxPackage folder at all - hence
+    MSB4062 ("task could not be loaded from the assembly ...\AppxPackage\...") unless
+    AppxMSBuildToolsPath is pointed at an actual VS install explicitly.
+
+    This used to be a literal, machine-specific path
+    (`...\Microsoft Visual Studio\18\Professional\...`) duplicated in both csproj files -
+    portable to exactly one machine/edition and out of sync risk between the two files.
+    Centralized here instead, and resolved dynamically via vswhere.exe (ships with every
+    VS 2017+ install at a stable path) so it adapts to whatever VS edition/version is
+    actually installed.
+
+    Resolution order (first that applies wins):
+      1. AppxMSBuildToolsPathOverride - manual escape hatch. Set as an environment variable
+         or an MSBuild global property (`-p:AppxMSBuildToolsPathOverride=...`) to bypass
+         vswhere entirely, e.g. on a machine/CI agent with a non-standard layout.
+      2. vswhere.exe's answer, cached to a small generated file (see the
+         _ResolveAppxMSBuildToolsPath target below) and appended with the fixed
+         `MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\` suffix.
+      3. Left unset. If vswhere can't find a suitable install, AppxMSBuildToolsPath stays
+         empty and WindowsAppSDK's own default kicks in, reproducing the original, clear
+         MSB4062 error - fail loud, not silently wrong.
+
+    Why a generated-file cache instead of just running vswhere from an MSBuild target:
+    WindowsAppSDK's own AppxMSBuildToolsPath default is consumed by
+    <UsingTask AssemblyFile="..."> elements, which MSBuild resolves during *evaluation*,
+    before any target (including one in this file) has run. An <Exec> called from an
+    ordinary build-time target would set the property far too late to affect that
+    resolution. Restore runs as its own earlier, separate MSBuild evaluation+execution pass
+    before the main Build/Test evaluation begins, so a target hooked into Restore can run
+    vswhere and write its result to disk in time for the next evaluation (this file, via the
+    <Import> below) to read it back in as a plain, already-known property value.
+  -->
+
+  <PropertyGroup>
+    <_AppxToolsPathCacheFile>$(MSBuildProjectDirectory)\obj\_AppxMSBuildToolsPath.g.props</_AppxToolsPathCacheFile>
+    <_VsWhereExe>$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe</_VsWhereExe>
+  </PropertyGroup>
+
+  <Import Project="$(_AppxToolsPathCacheFile)" Condition="Exists('$(_AppxToolsPathCacheFile)')" />
+
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPathOverride)' != ''">
+    <AppxMSBuildToolsPath>$(AppxMSBuildToolsPathOverride)</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <Target Name="_ResolveAppxMSBuildToolsPath"
+          BeforeTargets="Restore;CollectPackageReferences"
+          Condition="'$(AppxMSBuildToolsPathOverride)' == '' and Exists('$(_VsWhereExe)')">
+    <Exec Command="&quot;$(_VsWhereExe)&quot; -latest -property installationPath"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          ContinueOnError="WarnAndContinue">
+      <Output TaskParameter="ConsoleOutput" ItemName="_VsWhereOutputLines" />
+    </Exec>
+
+    <PropertyGroup>
+      <_VsInstallPath>@(_VsWhereOutputLines)</_VsInstallPath>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(_VsInstallPath)' != ''">
+      <_AppxToolsPathCacheLines Include="&lt;Project&gt;" />
+      <_AppxToolsPathCacheLines Include="  &lt;PropertyGroup&gt;" />
+      <_AppxToolsPathCacheLines Include="    &lt;AppxMSBuildToolsPath&gt;$(_VsInstallPath)\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\&lt;/AppxMSBuildToolsPath&gt;" />
+      <_AppxToolsPathCacheLines Include="  &lt;/PropertyGroup&gt;" />
+      <_AppxToolsPathCacheLines Include="&lt;/Project&gt;" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_AppxToolsPathCacheFile)"
+                       Lines="@(_AppxToolsPathCacheLines)"
+                       Overwrite="true"
+                       Condition="'$(_VsInstallPath)' != ''" />
+  </Target>
+
+</Project>

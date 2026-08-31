@@ -12,10 +12,6 @@
     <EnableMsixTooling>false</EnableMsixTooling>
     <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <!-- dotnet build's own SDK tree never ships an AppxPackage MSBuild-tasks folder
-         (that tooling only exists inside a Visual Studio install); point WindowsAppSDK's
-         PRI/Appx task loader at the VS copy so `dotnet build`/`dotnet test` can find it. -->
-    <AppxMSBuildToolsPath>C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Microsoft\VisualStudio\v18.0\AppxPackage\</AppxMSBuildToolsPath>
   </PropertyGroup>
 
   <ItemGroup>
