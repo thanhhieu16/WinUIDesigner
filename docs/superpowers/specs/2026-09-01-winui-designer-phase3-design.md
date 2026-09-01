@@ -33,27 +33,48 @@ Reference source, same two reference projects as Phase 2:
 
 ### WinUI API surface — verified, not assumed
 
-Checked directly against `Microsoft.UI.Xaml.winmd`
-(`Microsoft.WindowsAppSDK 1.7.250606001`, the package this repo already
-references) by scanning its metadata strings, rather than assumed from WPF
-familiarity:
+Checked directly against `Microsoft.UI.Xaml.winmd` (the WinUI element-tree
+assembly) and, for the one input-related finding below, `Microsoft.UI.winmd`
+(the input-source assembly) — both from `Microsoft.WindowsAppSDK
+1.7.250606001`, the package this repo already references — by scanning
+their metadata strings, rather than assumed from WPF familiarity. The
+first draft of this section checked only `Microsoft.UI.Xaml.winmd`; an
+external review caught one claim that assembly alone couldn't settle (see
+the `Microsoft.UI.winmd` finding below) — noted here so a later phase
+doesn't repeat the same single-assembly blind spot.
 
-**Absent (confirmed not in WinUI 3):** `Adorner`, `AdornerLayer`,
-`HitTestCore`, `Decorator`, `GetVisualChild`/`VisualChildrenCount`/
-`AddVisualChild`/`RemoveVisualChild`, `TransformToAncestor`/
-`TransformToDescendant`, `IInputElement`, `GeneralTransformGroup`,
-`IsDescendantOf`/`GetIsAncestorOf`, `SizeChangedInfo`/`OnRenderSizeChanged`
-(no override hook — `SizeChanged` is an event instead).
+**Absent (confirmed not in `Microsoft.UI.Xaml.winmd`):** `Adorner`,
+`AdornerLayer`, `HitTestCore`, `Decorator`, `GetVisualChild`/
+`VisualChildrenCount`/`AddVisualChild`/`RemoveVisualChild`,
+`TransformToAncestor`/`TransformToDescendant`, `IInputElement`,
+`GeneralTransformGroup`, `IsDescendantOf`/`GetIsAncestorOf` (no
+ancestor-walk helper of any kind — replaced by a manual
+`VisualTreeHelper.GetParent` loop, see mechanism table),
+`SizeChangedInfo`/`OnRenderSizeChanged` (no override hook — `SizeChanged`
+is an event instead), `FrameworkPropertyMetadata`/
+`FrameworkPropertyMetadataOptions.AffectsParentMeasure` (attached-property
+metadata is plain `PropertyMetadata` — no auto-invalidate-parent-measure
+option; see mechanism table), `InternalChildren` (`Panel` only exposes the
+public `Children` collection).
 
-**Present (confirmed in WinUI 3):**
+**Present (confirmed in `Microsoft.UI.Xaml.winmd`):**
 `VisualTreeHelper.FindElementsInHostCoordinates` and
 `FindAllElementsInHostCoordinates` (replaces `VisualTreeHelper.HitTest` +
-`HitTestFilterCallback`), `TransformToVisual`, `LayoutUpdated`,
-`RenderTransform`, `MatrixTransform`, `SizeChanged`, `PointerPressed`/
-`PointerReleased`/`PointerEventHandler` (replaces WPF mouse events),
-`PointerRoutedEventArgs.KeyModifiers` / `VirtualKeyModifiers`, `Popup`,
+`HitTestFilterCallback` — note these take a point in **host/XamlRoot**
+coordinates, not coordinates local to the queried subtree; see mechanism
+table), `TransformToVisual`, `LayoutUpdated`, `RenderTransform`,
+`MatrixTransform`, `SizeChanged`, `PointerPressed`/`PointerReleased`/
+`PointerEventHandler` (replaces WPF mouse events),
+`PointerRoutedEventArgs.KeyModifiers`/`VirtualKeyModifiers`, `Popup`,
 `ActualOffset`, `CompositeTransform`, `InvalidateArrange`/
 `InvalidateMeasure`.
+
+**Present (confirmed in `Microsoft.UI.winmd`, a separate assembly in the
+same package):** `Microsoft.UI.Input.InputKeyboardSource.
+GetKeyStateForCurrentThread(VirtualKey)` → `CoreVirtualKeyStates` — a
+global keyboard-modifier query genuinely exists in WinUI 3, just not in
+the element-tree assembly checked above. See "Decisions already made" for
+why this phase reads modifiers from the pointer event instead of using it.
 
 These findings drive every mechanism decision below — each one is a
 mechanical replacement for a specific WPF API this layer's reference code
@@ -84,6 +105,19 @@ calls, not a redesign.
   default. Confirmed with the user over also wiring
   `ISelectionFilterService` for real — rejected as unnecessary until a
   concrete lock/visibility rule exists to enforce (Phase 4).
+- **Selection-modifier resolution reads from the pointer event, not a
+  global query.** WinUI 3 does have a global keyboard-modifier query
+  (`Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread`,
+  confirmed in `Microsoft.UI.winmd` — this spec's first draft wrongly
+  claimed no equivalent exists anywhere in WinUI 3; an external review
+  caught it, see "WinUI API surface" above). This phase still resolves
+  `SelectionTypes.Auto` from `PointerRoutedEventArgs.KeyModifiers` at the
+  call site instead, as a deliberate choice, not a forced one: it's the
+  value already in hand at the one call site that needs it
+  (`DesignPanel`'s pointer handler), with no extra service dependency or
+  thread-affinity concern. `DefaultSelectionService` keeps its `Auto` case
+  in the ported switch for interface completeness, but this phase's own
+  call path never passes it `Auto`.
 - **Project split mirrors the reference's own split**, same rationale as
   Phase 2: new project `WinUIDesigner.Designer` (mirrors
   `WpfDesign.Designer`) holds the concrete, UI-framework-heavy pieces
@@ -149,23 +183,27 @@ swaps from the reference, verified against the winmd above):
 | --- | --- |
 | `VisualTreeHelper.HitTest(reference, filterCallback, resultCallback, params)` | `VisualTreeHelper.FindElementsInHostCoordinates(point, subtreeRoot)` — returns a flat front-to-back `IEnumerable<UIElement>`; the reference's `HitTestFilterCallback` pruning logic (Alt-cycle skip) becomes a LINQ filter over that list instead of a mid-walk callback. |
 | `Visual` (as `DesignPanelHitTestResult.VisualHit`'s type) | `UIElement` — `FindElementsInHostCoordinates` returns `UIElement`, not `Visual`. |
+| `DesignPanel.HitTest(Point mousePosition, ...)`'s point — the reference is **panel-local** (range-checked against `this.RenderSize`) | `FindElementsInHostCoordinates` needs a point in **host/XamlRoot** coordinates. `DesignPanel.HitTest` keeps the reference's panel-local range check against `this.ActualWidth`/`ActualHeight`, then converts the point via `this.TransformToVisual(this.XamlRoot.Content).TransformPoint(mousePosition)` before calling `FindElementsInHostCoordinates` — ported literally without this conversion, hit-testing silently returns the wrong element whenever `DesignPanel` isn't at the window origin. |
 | `element.TransformToAncestor(ancestor)` | `element.TransformToVisual(target)` — WinUI has no ancestor/descendant distinction; `TransformToVisual` is the only transform-lookup method and works regardless of the relationship. |
+| `element.IsDescendantOf(ancestor)` | No WinUI equivalent, confirmed absent — replaced by a manual loop: walk `VisualTreeHelper.GetParent` from `element` until it reaches `ancestor` (descendant) or `null` (not a descendant). Used by the concrete `AdornerLayer`'s visibility cache (`GetOrCreateAdornerInfo`, `ArrangeOverride`, `UpdateAdornersForElement`). |
 | `FrameworkElement.OnRenderSizeChanged` override | `SizeChanged` event subscription (no override hook exists). |
-| `System.Windows.Input.Keyboard.Modifiers` (static, read anywhere) | `PointerRoutedEventArgs.KeyModifiers` (`VirtualKeyModifiers`) — only available at the point of a pointer event. `DefaultSelectionService.SetSelectedComponents(..., SelectionTypes.Auto)`'s modifier read moves from inside the service to `DesignPanel`'s pointer handler, which resolves `Auto` to a concrete `SelectionTypes` before calling. See "Known gaps" #1. |
+| `AdornerPanel.PlacementProperty`'s `FrameworkPropertyMetadata(..., FrameworkPropertyMetadataOptions.AffectsParentMeasure)` | Plain `PropertyMetadata` plus a manual `PropertyChangedCallback` that calls `InvalidateMeasure()` on the owning `AdornerPanel` — WinUI attached-property metadata has no auto-invalidate-parent-measure option. `base.InternalChildren` (reference) becomes `Children` (WinUI `Panel` has no protected child-collection member). |
+| `System.Windows.Input.Keyboard.Modifiers` (static, read anywhere) | `PointerRoutedEventArgs.KeyModifiers` (`VirtualKeyModifiers`) — read at the point of the pointer event, by choice rather than by necessity. See "Decisions already made". |
 | `MouseButtonEventHandler`/mouse events | `PointerEventHandler`/pointer events. |
-| `Decorator` with `GetVisualChild` override (WPF `DesignPanel` base) | Plain `Panel` subclass using the public `Children` collection — WinUI has no protected visual-child composition hooks, so the `_eatAllHitTestRequests` visual-child trick is dropped (see "Explicitly out of scope"). |
+| `Decorator` with `GetVisualChild` override (WPF `DesignPanel` base) | Plain `Panel` subclass using the public `Children` collection and its own `MeasureOverride`/`ArrangeOverride` (sizing the content plus the `AdornerLayer` to fill available space) — WinUI has no protected visual-child composition hooks, so the `_eatAllHitTestRequests` visual-child trick is dropped (see "Explicitly out of scope"). |
 
 ## In scope
 
 **Overlay layer (`WinUIDesigner.DesignModel/Adorners/`):**
-`AdornerPanel` (attached `Placement` property, `AbsoluteToRelative`/
-`RelativeToAbsolute`, `MeasureOverride`/`ArrangeOverride` — ported as a
-`Panel` subclass; `MeasureOverride`'s one `PlacementOperation.GetRealElementSize`
-call is inlined as a small local static helper — see "Known gaps" #3, not a
+`AdornerPanel` (attached `Placement` property — plain `PropertyMetadata` +
+manual `InvalidateMeasure()` callback, see mechanism table —
+`MeasureOverride`/`ArrangeOverride` over `Children` — ported as a `Panel`
+subclass; `MeasureOverride`'s one `PlacementOperation.GetRealElementSize`
+call is inlined as a small local static helper — see "Known gaps" #2, not a
 `PlacementOperation` port), `AdornerOrder` (struct, unchanged logic),
 `AdornerPlacement` abstract class + its one concrete `FillContent` instance
 (the only placement kind the minimal selection frame needs — see
-"Explicitly out of scope" for `AdornerPlacementSpace`'s other placements),
+"Explicitly out of scope" for `RelativePlacement.cs`'s other placements),
 `IAdornerLayer` (marker interface, unchanged), `AdornerProvider` (extension
 base class — `OnInitialized`/`OnRemove`/`Adorners` collection/`AddAdorner`/
 `AddAdorners`, ties into Phase 2's `DefaultExtension` and looks up
@@ -190,19 +228,31 @@ Alt-cycle skip bookkeeping (`hitTestElements`/`skippedHitTestElements`)
 reimplemented as list filtering.
 
 **`DesignPanel`/`DesignSurface`:** `IDesignPanel` (interface — `Context`,
-`IsContentHitTestVisible`, `IsAdornerLayerHitTestVisible`, `Adorners`,
-`CustomHitTestFilterBehavior`, the two `HitTest` overloads; the reference's
+`IsContentHitTestVisible`, `IsAdornerLayerHitTestVisible`, `Adorners`, the
+two `HitTest` overloads; `CustomHitTestFilterBehavior` and the reference's
 redundant `IInputElement`-derived event redeclarations and drag events are
 dropped — `DesignPanel` is a real `UIElement` and already has
 `PointerPressed`/`PointerReleased`/`DragEnter`/`DragOver`/`DragLeave`/`Drop`
-natively). `DesignPanel` (`Panel` subclass implementing `IDesignPanel`,
-holds the content + the concrete `AdornerLayer` as ordinary `Panel.Children`
+natively; `CustomHitTestFilterBehavior` has no consumer without
+`IToolService`'s real implementation, see "Explicitly out of scope").
+`IsContentHitTestVisible` keeps its reference meaning (skip hit-testing the
+design content) but not its reference *mechanism*: instead of toggling a
+dedicated `_eatAllHitTestRequests` element's `IsHitTestVisible`,
+`DesignPanel.HitTest` checks the property directly and skips its content
+pass entirely when it's `false` — same effect, no extra element. `DesignPanel`
+(`Panel` subclass implementing `IDesignPanel`, holds the content + the
+concrete `AdornerLayer` as ordinary `Panel.Children`, with its own
+`MeasureOverride`/`ArrangeOverride` sizing both to fill the available space
 — no `_eatAllHitTestRequests`, no `GetVisualChild` override, see
-"Explicitly out of scope"). `DesignSurface` (`ContentControl`-derived,
-`LoadDesigner`/`UnloadDesigner`, `DesignContext` property) — trimmed to
-just enough to host `DesignPanel` and wire `IDesignPanel` into
-`DesignContext.Services`; no `ZoomControl`, no command handlers (see
-"Explicitly out of scope").
+"Explicitly out of scope"; no focus handling of any kind — `Panel` isn't
+focus-capable in WinUI and nothing in this phase's own scope needs
+`DesignPanel` to hold focus, since all key handling is deferred to Phase
+4). `DesignSurface` (`ContentControl`-derived, `LoadDesigner`/
+`UnloadDesigner`, `DesignContext` property) — not templated: no
+`[TemplatePart]`, no `OnApplyTemplate`, no `Generic.xaml`; its constructor
+sets `Content = _designPanel` directly, the simplest form that still hosts
+`DesignPanel` and wires `IDesignPanel` into `DesignContext.Services`. No
+`ZoomControl`, no command handlers (see "Explicitly out of scope").
 
 **Selection:** `ISelectionService` (`SelectionChanging`/`SelectionChanged`/
 `PrimarySelectionChanging`/`PrimarySelectionChanged`, `IsComponentSelected`,
@@ -210,13 +260,13 @@ just enough to host `DesignPanel` and wire `IDesignPanel` into
 `PrimarySelection`, `SelectionCount`), `SelectionTypes` `[Flags]` enum
 (`None`, `Auto`, `Primary`, `Toggle`, `Add`, `Remove`, `Replace` — full enum ported
 even though `DesignPanel`'s click handler only needs to resolve `Auto` down
-to `Toggle`/`Add`/`Primary` itself, per the `Keyboard.Modifiers` gap above).
+to `Toggle`/`Add`/`Primary` itself, per the modifier-resolution decision above).
 `DefaultSelectionService : ISelectionService` ported with its existing
 set-difference/notification semantics kept intact (same reasoning as Phase
 2 kept `UndoTransaction`'s semantics unchanged) — its one `Keyboard.Modifiers`
-read is replaced by an explicit `VirtualKeyModifiers` parameter threaded in
-from `DesignPanel`'s pointer handler instead of a global read (see "Known
-gaps" #1). `ServiceContainer.Selection` convenience property added back
+read is replaced by an explicit `VirtualKeyModifiers` value threaded in
+from `DesignPanel`'s pointer handler instead of a global read (see
+"Decisions already made"). `ServiceContainer.Selection` convenience property added back
 (dropped in Phase 2, same pattern as the existing `.Component` property).
 `PrimarySelectionExtensionServer` only — the one `SelectionAdornerProvider`
 actually consumes; the other five classes in the reference file
@@ -243,10 +293,22 @@ phases to implement against):** `ITool`, `IToolService`, `IErrorService`,
   directly rather than pulling in the rest of the file's stateful
   placement-behavior machinery (`Start`/`Commit`/`ContainerBehavior` etc.),
   none of which this phase uses.
-- `AdornerPlacementSpace.cs`'s placement kinds beyond `FillContent`
+- `RelativePlacement.cs`'s placement kinds beyond `FillContent`
   (relative/corner-anchored placement, used by resize-thumb layout) —
-  no consumer until Phase 4's resize thumbs exist.
+  no consumer until Phase 4's resize thumbs exist. (`AdornerPlacementSpace.cs`,
+  a 3-value enum with zero consumers anywhere in the reference, is dropped
+  too, but for lack of any use at all — not deferred to a later phase.)
 - `PlacementAlignment.cs` — consumed only by the placement kinds above.
+- `AdornerPanel.AbsoluteToRelative`/`RelativeToAbsolute` — both are typed
+  in `System.Windows.Vector`, which has no `Windows.Foundation` counterpart,
+  and their only consumer anywhere in the reference is
+  `WpfDesign.Designer/Project/Extensions/RenderTransformOriginExtension.cs`
+  (Phase 4). Not ported: no Phase 3 consumer to justify inventing a
+  `Vector` substitute for.
+- `IDesignPanel.CustomHitTestFilterBehavior` — typed in WPF's
+  `HitTestFilterCallback`, which this phase's hit-testing approach doesn't
+  use (see mechanism table); its only setter in the reference is
+  `Services/ToolService.cs`, and `IToolService` is interface-only here.
 - `Controls/GridAdorner.cs`, `Controls/PanelMoveAdorner.cs`,
   `Extensions/GridAdornerProvider.cs`, `Controls/SelectionFrame.cs` (the
   reference's full version, with resize thumbs) — Phase 4 concrete
@@ -260,10 +322,14 @@ phases to implement against):** `ITool`, `IToolService`, `IErrorService`,
   per-selected-item or multi-selection behavior, which is Phase 4.
 - `DesignPanel`'s `_eatAllHitTestRequests` visual-child trick — WinUI has no
   `GetVisualChild`/`AddVisualChild` protected composition API to hang it on
-  (confirmed absent from the winmd). `DesignPanel`'s own `PointerPressed`
-  handler calling `Focus()` directly is the WinUI-native replacement for
-  "grab focus before the content's own handlers run" — no separate
-  hit-test-eating element needed.
+  (confirmed absent from the winmd), and this phase has no use for what it
+  was for: grabbing focus onto `DesignPanel` before the content's own
+  handlers run. `Panel` isn't focus-capable in WinUI (`IsTabStop` is a
+  `Control` member), and nothing in Phase 3's own scope needs `DesignPanel`
+  to hold focus — all key handling is deferred to Phase 4. Its other role,
+  toggling content hit-testability, is handled directly by
+  `DesignPanel.HitTest` checking `IsContentHitTestVisible` before running
+  its content pass (see "In scope").
 - `AdornerLayer.ArrangeOverride`'s `GeneralTransformGroup` 3D-fallback
   branch — `GeneralTransformGroup` doesn't exist in WinUI (confirmed absent
   from the winmd); WinUI's `TransformToVisual` only ever needs the
@@ -305,20 +371,7 @@ phases to implement against):** `ITool`, `IToolService`, `IErrorService`,
    whether `WinUIDesigner.TestHost` needs a real `Window` subtype added,
    and if so, whether tests can run under CI without an interactive
    desktop session.
-2. **`Keyboard.Modifiers` (WPF global static) has no WinUI equivalent.**
-   Confirmed via the winmd: no static keyboard-modifier query exists;
-   `VirtualKeyModifiers` is only available on a live
-   `PointerRoutedEventArgs`/`KeyRoutedEventArgs`. `DefaultSelectionService.
-   SetSelectedComponents(components, SelectionTypes.Auto)` in the reference
-   reads `Keyboard.Modifiers` internally to resolve `Auto` into
-   `Toggle`/`Add`/`Primary`. This phase's port moves that resolution to the
-   call site: `DesignPanel`'s pointer handler reads
-   `PointerRoutedEventArgs.KeyModifiers` and passes an already-resolved
-   `SelectionTypes` (never `Auto`) into `SetSelectedComponents`. Ported
-   `DefaultSelectionService` keeps the `Auto` case in its switch for
-   interface completeness but it is never reached in this phase's own call
-   path — flagged so it isn't mistaken for dead code removed by accident.
-3. **`PlacementOperation.GetRealElementSize` is the only used member of a
+2. **`PlacementOperation.GetRealElementSize` is the only used member of a
    file this phase otherwise excludes wholesale.** Confirmed by reading the
    full method: it's a pure static helper over `RenderSize`/`Width`/
    `Height`/`MinWidth`/`MinHeight`, no dependency on `PlacementOperation`'s
@@ -326,24 +379,33 @@ phases to implement against):** `ITool`, `IToolService`, `IErrorService`,
    as a small local static helper (exact placement — inline in
    `AdornerPanel` vs. a shared internal helper class — is a plan-time
    choice, not a design one).
-4. **`AdornerLayer`'s adorned-element dictionary is keyed by `UIElement`
+3. **`AdornerLayer`'s adorned-element dictionary is keyed by `UIElement`
    reference identity**, same as Phase 2's `XamlComponentService._sites`
    dictionary (Phase 2's `IdentityEqualityComparer`). Whether this phase
    needs its own identity comparer or can reuse/expose Phase 2's is a
    plan-time decision — flagged so it isn't silently reimplemented
    differently by accident.
 
+(The keyboard-modifier question originally flagged here as gap #2 turned
+out not to be a gap — a WinUI equivalent exists. It moved to "Decisions
+already made" once corrected; see the "WinUI API surface" section above
+for how the error was caught.)
+
 ## Data flow
 
 `XamlDesignContext.RootItem.View` (a live `UIElement`, from Phase 2) is set
 as `DesignSurface`'s content → `DesignPanel` hosts it inside its `Children`
 alongside the concrete `AdornerLayer` → a pointer press on `DesignPanel`
-resolves screen coordinates to panel-local coordinates → `DesignPanel.HitTest`
+gives a panel-local point (`PointerRoutedEventArgs.GetCurrentPoint`) →
+`DesignPanel.HitTest` range-checks it against `ActualWidth`/`ActualHeight`,
+converts it to host/XamlRoot coordinates via `TransformToVisual`, then
 calls `VisualTreeHelper.FindElementsInHostCoordinates` against the adorner
-layer then the content, walking each hit `UIElement` up via
-`VisualTreeHelper.GetParent` to find its registered `DesignItem` (through
-Phase 2's `IComponentService.GetDesignItem`) → resolved `SelectionTypes`
-(never `Auto`, see gap #2) plus the hit `DesignItem` are passed to
+layer then the content (see mechanism table), walking each hit `UIElement`
+up via `VisualTreeHelper.GetParent` to find its registered `DesignItem`
+(`IComponentService.GetDesignItem(component, findByView: true)` — Phase
+2's substitute for the reference's dropped `ViewService.GetModel`) →
+resolved `SelectionTypes` (never `Auto`, see "Decisions already made")
+plus the hit `DesignItem` are passed to
 `ISelectionService.SetSelectedComponents` → `SelectionChanged`/
 `PrimarySelectionChanged` fire → `PrimarySelectionExtensionServer` (Phase 2's
 `ExtensionServer` framework) reapplies `SelectionAdornerProvider` on the new
@@ -366,7 +428,9 @@ Phase 3 is done when:
 
 - A test hosts a real `DesignItem.View` (parsed via Phase 1/2's pipeline
   from actual WinUI 3 XAML) inside a live `DesignPanel`/`DesignSurface`,
-  performs a hit-test at a known screen point, and asserts the correct
+  performs a hit-test at a point known to fall inside a specific child
+  element (in `DesignPanel`'s own local coordinate space, per its
+  `HitTest` contract — see mechanism table), and asserts the correct
   `DesignItem` is returned as `ModelHit`.
 - A test simulates a click (direct method call with a resolved
   `SelectionTypes`, not a synthesized OS input event) that selects an
@@ -382,7 +446,7 @@ Phase 3 is done when:
   is removed (single-selection minimal scope — no multi-select UI, but the
   underlying `ISelectionService`/`AdornerLayer` machinery must still behave
   correctly for exactly one active selection at a time).
-- Each of the four flagged gaps above has an explicit, tested resolution.
+- Each of the three flagged gaps above has an explicit, tested resolution.
 
 ## Out of scope for Phase 3
 
