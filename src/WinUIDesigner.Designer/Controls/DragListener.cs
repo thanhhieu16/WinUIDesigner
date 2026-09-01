@@ -64,6 +64,14 @@ namespace WinUIDesigner.Designer.Controls
 
         void OnPointerPressed(object sender, PointerRoutedEventArgs e)
         {
+            // Final-review fix (finding #5): only the left mouse button (or the primary action
+            // mode of another pointer device) starts a drag - a right-click or pen-barrel press
+            // on a thumb must not begin a resize/rotate/skew (it should open a context menu, or
+            // do nothing). Confirmed via Microsoft.UI.xml:
+            // Microsoft.UI.Input.PointerPointProperties.IsLeftButtonPressed. Simulate* (the test
+            // seam) bypasses this handler entirely, so no existing test is affected.
+            if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
+
             _capturedPointer = e.Pointer;
             Target.CapturePointer(e.Pointer);
             // Best-effort: makes Escape-to-cancel reachable while this element holds the
@@ -77,13 +85,17 @@ namespace WinUIDesigner.Designer.Controls
 
         void OnPointerMoved(object sender, PointerRoutedEventArgs e)
         {
-            if (!IsDown) return;
+            // Final-review fix (finding #5, "ideally"): ignore Moved/Released from a pointer
+            // other than the one that started this drag (e.g. a second finger/pen touching down
+            // mid-drag) - cheap given _capturedPointer already exists for CapturePointer/
+            // ReleasePointerCapture.
+            if (!IsDown || e.Pointer.PointerId != _capturedPointer?.PointerId) return;
             MoveTo(e.GetCurrentPoint(null).Position, e.KeyModifiers);
         }
 
         void OnPointerReleased(object sender, PointerRoutedEventArgs e)
         {
-            if (!IsDown) return;
+            if (!IsDown || e.Pointer.PointerId != _capturedPointer?.PointerId) return;
             EndAt();
         }
 

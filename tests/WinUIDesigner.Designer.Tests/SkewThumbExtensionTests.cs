@@ -75,5 +75,40 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsFalse(buttonItem.Properties.GetProperty("RenderTransform").IsSet);
             });
         }
+
+        // Final-review findings #1/#2 (skew's equivalent of RotateThumbExtensionTests.
+        // MultiTickRotateDragCommitsExactlyOneUndoEntryForTheWholeGesture): without the
+        // per-handle ChangeGroup this test drives against, each Drag_Changed tick's ApplySkew
+        // call committed its own separate undo-stack entry instead of the whole drag collapsing
+        // into one.
+        [Test]
+        public void MultiTickSkewDragCommitsExactlyOneUndoEntryForTheWholeGesture()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSelected(window, out var buttonItem, out var button);
+                var extension = buttonItem.Extensions.OfType<SkewThumbExtension>().Single();
+                var drag = extension.DragListenerX;
+                var undoService = surface.DesignContext.Services.GetService<WinUIDesigner.DesignModel.Services.UndoService>();
+                Assert.IsNotNull(undoService, "XamlDesignContext always registers UndoService");
+
+                drag.SimulateDown(new Windows.Foundation.Point(0, 0));
+                drag.SimulateMove(new Windows.Foundation.Point(-10, 0)); // tick 1: +5 degrees
+                surface.UpdateLayout();
+                drag.SimulateMove(new Windows.Foundation.Point(-20, 0)); // tick 2: +10 degrees
+                drag.SimulateUp(new Windows.Foundation.Point(-20, 0));
+                surface.UpdateLayout();
+
+                var skew = button.RenderTransform as Microsoft.UI.Xaml.Media.SkewTransform;
+                Assert.IsNotNull(skew);
+                Assert.AreEqual(10, skew.AngleX, 0.5, "sanity check on the drag's final committed AngleX");
+                Assert.AreEqual(1, undoService.UndoActions.Count(),
+                    "a multi-tick skew drag on one handle should collapse into exactly one undo-stack entry, not one per tick");
+
+                undoService.Undo();
+                surface.UpdateLayout();
+                Assert.IsFalse(buttonItem.Properties.GetProperty("RenderTransform").IsSet,
+                    "a single Undo should revert the whole skew drag back to its pre-drag state (no RenderTransform), not just the last tick");
+            });
+        }
     }
 }

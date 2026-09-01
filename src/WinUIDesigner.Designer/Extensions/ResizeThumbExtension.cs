@@ -40,8 +40,6 @@ namespace WinUIDesigner.Designer.Extensions
         internal readonly System.Collections.Generic.Dictionary<PlacementAlignment, DragListener> DragListeners =
             new System.Collections.Generic.Dictionary<PlacementAlignment, DragListener>();
 
-        public bool IsResizing { get; private set; }
-
         public ResizeThumbExtension()
         {
             adornerPanel = new AdornerPanel { Order = AdornerOrder.Foreground };
@@ -65,6 +63,14 @@ namespace WinUIDesigner.Designer.Extensions
             thumb.SetDesignCursor(cursor);
             thumb.Alignment = alignment;
             AdornerPanel.SetPlacement(thumb, Place(alignment));
+            // Final-review fix (finding #3): the reference's Place sets Opacity = 0 on the two
+            // stretched, full-edge center thumbs (Top/Bottom-center, Left/Right-center - the ones
+            // using WidthRelativeToContentWidth/HeightRelativeToContentHeight = 1 below) so they
+            // stay hit-testable but invisible, framing the selection with a thin strip instead of
+            // a visible white-with-black-border bar. This port had dropped it entirely, so those
+            // four thumbs rendered as visible bars on every selection.
+            if (alignment.Horizontal == HorizontalAlignment.Center || alignment.Vertical == VerticalAlignment.Center)
+                thumb.Opacity = 0;
             adornerPanel.Children.Add(thumb);
 
             var drag = new DragListener(thumb);
@@ -97,8 +103,13 @@ namespace WinUIDesigner.Designer.Extensions
         {
             drag.Transform = this.ExtendedItem.GetCompleteAppliedTransformationToView();
             oldSize = new Windows.Foundation.Size(ModelTools.GetWidth(ExtendedItem.View), ModelTools.GetHeight(ExtendedItem.View));
+            // When resizeBehavior is null, operation stays null and every ModelTools.Resize call
+            // below commits its own top-level undo entry instead of being grouped into one - the
+            // same gap PlacementOperation.Start would otherwise close. Currently unreachable: all
+            // eight thumbs are Visibility.Collapsed (UpdateAdornerVisibility) whenever
+            // resizeBehavior is null, so no drag can start. Low priority - left as a flagged gap
+            // rather than dead-until-4b code (final-review minor finding).
             operation = resizeBehavior != null ? PlacementOperation.Start(extendedItemArray, PlacementType.Resize) : null;
-            IsResizing = true;
         }
 
         void Drag_Changed(DragListener drag)
@@ -144,7 +155,6 @@ namespace WinUIDesigner.Designer.Extensions
                 if (drag.IsCanceled) operation.Abort(); else operation.Commit();
                 operation = null;
             }
-            IsResizing = false;
         }
 
         protected override void OnInitialized()
@@ -175,6 +185,15 @@ namespace WinUIDesigner.Designer.Extensions
 
         void UpdateAdornerVisibility()
         {
+            // Known limitation, flagged not fixed (final-review minor finding): ThumbVisible is
+            // also written by ResizeThumb.ArrangeOverride itself ("too small along this axis" -
+            // ThumbVisible = actualSize > 14), independently of this method's "doesn't apply to
+            // this container" check. Both writers share the same DependencyProperty/Visibility
+            // channel with no coordination between them, so a resize that changes CanPlace and
+            // element size in the same tick can - in principle - have one writer's value briefly
+            // clobbered by the other's next arrange pass before settling. This is the plan's own
+            // design choice (not an implementer slip); fixing it would mean introducing a second,
+            // combined visibility signal, judged not worth the plan-deviation risk for 4a.
             foreach (var thumb in designerThumbs) {
                 bool visible = resizeBehavior != null && resizeBehavior.CanPlace(extendedItemArray, PlacementType.Resize, thumb.Alignment);
                 thumb.ThumbVisible = visible;

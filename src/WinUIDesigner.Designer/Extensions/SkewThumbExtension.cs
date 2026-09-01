@@ -15,19 +15,39 @@ namespace WinUIDesigner.Designer.Extensions
     /// instances become DesignerThumb (Grid-based) instead - Thumb is sealed, so even direct
     /// instantiation with a public Cursor setter isn't available (UIElement.Cursor isn't
     /// public in WinUI). WindowClone guard dropped (not part of this port).
+    ///
+    /// Final-review fix (findings #1/#2): the reference brackets each of its two drags
+    /// (dragX_Started/dragX_Completed, dragY_Started/dragY_Completed) in its own
+    /// PlacementOperation.Start()/.Commit() - a fact this port had dropped, with no Completed
+    /// handler wired up for either DragListener at all. Restored via DesignItem.OpenGroup/
+    /// ChangeGroup.Commit()/Abort() (not PlacementOperation.Start - see RotateThumbExtension's
+    /// class remarks for why), one independent ChangeGroup per handle (skewXGroup/skewYGroup),
+    /// matching the reference's own per-handle granularity rather than combining both handles
+    /// into a single group. Without this, every ApplySkew tick committed its own top-level
+    /// undo-stack entry and Escape-cancel had nothing to Abort() - same defect as
+    /// RotateThumbExtension's.
+    ///
+    /// Known gap, flagged not fixed (final-review minor finding): DragX_Changed/DragY_Changed
+    /// compute their delta in raw window/pointer space (drag.Delta with no drag.Transform set),
+    /// unlike ResizeThumbExtension.Drag_Started which sets
+    /// drag.Transform = GetCompleteAppliedTransformationToView() to compensate for any
+    /// rotate/scale already applied to the element or an ancestor. This only diverges once such
+    /// a transform is already in play (out of scope for 4a's own DoD, and no 4a test exercises a
+    /// pre-rotated/pre-scaled ancestor) - left for 4b/4e to address alongside the rest of the
+    /// transform-composition work.
     /// </summary>
     [ExtensionServer(typeof(OnlyOneItemSelectedExtensionServer))]
     [ExtensionFor(typeof(FrameworkElement))]
     public sealed class SkewThumbExtension : AdornerProvider
     {
         readonly AdornerPanel adornerPanel;
-        readonly DesignItem[] extendedItemArray = new DesignItem[1];
         DesignerThumb thumbX, thumbY;
         internal DragListener DragListenerX, DragListenerY;
 
         UIElement parent;
         SkewTransform skewTransform;
         double skewX, skewY;
+        ChangeGroup skewXGroup, skewYGroup;
 
         public SkewThumbExtension()
         {
@@ -39,6 +59,9 @@ namespace WinUIDesigner.Designer.Extensions
         {
             parent = (UIElement)Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(this.ExtendedItem.View);
             (skewX, skewY) = skewTransform != null ? (skewTransform.AngleX, skewTransform.AngleY) : (0, 0);
+            // Final-review fix (findings #1/#2): bracket this handle's whole drag in its own
+            // outer ChangeGroup - see class remarks.
+            skewXGroup = this.ExtendedItem.OpenGroup("Skew");
         }
 
         void DragX_Changed(DragListener drag)
@@ -48,10 +71,21 @@ namespace WinUIDesigner.Designer.Extensions
             ApplySkew(angleX: destAngle, angleY: skewY);
         }
 
+        void DragX_Completed(DragListener drag)
+        {
+            if (skewXGroup != null) {
+                if (drag.IsCanceled) skewXGroup.Abort(); else skewXGroup.Commit();
+                skewXGroup = null;
+            }
+        }
+
         void DragY_Started(DragListener drag)
         {
             parent = (UIElement)Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(this.ExtendedItem.View);
             (skewX, skewY) = skewTransform != null ? (skewTransform.AngleX, skewTransform.AngleY) : (0, 0);
+            // Final-review fix (findings #1/#2): bracket this handle's whole drag in its own
+            // outer ChangeGroup - see class remarks.
+            skewYGroup = this.ExtendedItem.OpenGroup("Skew");
         }
 
         void DragY_Changed(DragListener drag)
@@ -59,6 +93,14 @@ namespace WinUIDesigner.Designer.Extensions
             var delta = drag.Delta;
             var destAngle = -0.5 * delta.Y + skewY;
             ApplySkew(angleX: skewX, angleY: destAngle);
+        }
+
+        void DragY_Completed(DragListener drag)
+        {
+            if (skewYGroup != null) {
+                if (drag.IsCanceled) skewYGroup.Abort(); else skewYGroup.Commit();
+                skewYGroup = null;
+            }
         }
 
         void ApplySkew(double angleX, double angleY)
@@ -79,7 +121,6 @@ namespace WinUIDesigner.Designer.Extensions
         protected override void OnInitialized()
         {
             base.OnInitialized();
-            extendedItemArray[0] = this.ExtendedItem;
             this.ExtendedItem.PropertyChanged += OnPropertyChanged;
 
             var fe = (FrameworkElement)this.ExtendedItem.Component;
@@ -99,9 +140,11 @@ namespace WinUIDesigner.Designer.Extensions
             DragListenerX = new DragListener(thumbX);
             DragListenerX.Started += DragX_Started;
             DragListenerX.Changed += DragX_Changed;
+            DragListenerX.Completed += DragX_Completed;
             DragListenerY = new DragListener(thumbY);
             DragListenerY.Started += DragY_Started;
             DragListenerY.Changed += DragY_Changed;
+            DragListenerY.Completed += DragY_Completed;
         }
 
         void OnPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)

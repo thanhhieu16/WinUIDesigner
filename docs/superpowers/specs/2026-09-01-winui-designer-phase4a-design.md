@@ -577,13 +577,26 @@ integration, unchanged) — one `ChangeGroup` per whole drag.
 `RotateThumbExtension`/`SkewThumbExtension` follow the same
 `DragListener` lifecycle but call `ModelTools.ApplyTransform` (via the
 new `Services.DesignPanel` accessor) with a `RotateTransform`/
-`SkewTransform` instead of resizing; unlike resize, `ApplyTransform`
-opens and commits its **own** `ChangeGroup` on every call — i.e. once
-per `PointerMoved`, nested inside the outer drag's own tracking — and
-calls `AdornerLayer.UpdateAdornersForElement` (Phase 3, unchanged, now
-reached through `DesignPanel`'s new public `AdornerLayer` property) so
-the selection highlight and thumb positions re-arrange after every
-transform change.
+`SkewTransform` instead of resizing. `ApplyTransform` opens and commits
+its **own** `ChangeGroup` on every call — once per `PointerMoved` — but
+(final-review fix, findings #1/#2; corrects this spec's original text,
+which had claimed the per-tick granularity below matched the
+reference's own, a claim verified false against the actual reference
+source) each drag is *also* bracketed in its own outer `ChangeGroup`,
+opened via `DesignItem.OpenGroup` in `Drag_Started` and committed (or
+aborted, on cancel) in `Drag_Completed` — `RotateThumbExtension` opens
+one group for its single drag; `SkewThumbExtension` opens one
+independently per handle (X and Y), matching the reference's own
+per-handle granularity. Every per-tick `ApplyTransform` `ChangeGroup`
+then nests inside that outer group (`UndoService.Execute` routes into
+whichever transaction is currently open), so the whole gesture — however
+many ticks it took — collapses into a single undo-stack entry, the same
+drag-level granularity `ResizeThumbExtension`'s `PlacementOperation`
+already gives resize. `ApplyTransform` also calls
+`AdornerLayer.UpdateAdornersForElement` (Phase 3, unchanged, now reached
+through `DesignPanel`'s new public `AdornerLayer` property) so the
+selection highlight and thumb positions re-arrange after every transform
+change.
 
 ## Testing / Definition of Done
 
@@ -607,10 +620,14 @@ Phase 4a is done when:
   `AdornerLayer`'s thumb/highlight positions re-arrange afterward
   (`TransformToVisual`-based assertion, same pattern as Phase 3's
   `SelectedElementsAdornerPanelIsArrangedAtTheElementsTransformedPosition`
-  test), and that undo reverts it (accounting for `ApplyTransform`'s
-  per-call `ChangeGroup` — a single undo after a multi-step rotate drag
-  only reverts the last step, matching the reference's own granularity,
-  not the resize path's single-group-per-drag behavior).
+  test), and that undo reverts it — a single undo after a multi-step
+  rotate drag reverts the *entire* drag in one step, the same
+  single-group-per-drag granularity the resize path already has
+  (final-review fix, findings #1/#2; corrects this bullet's original
+  text, which had wrongly claimed a single undo only reverts the last
+  step "matching the reference's own granularity" — verified false
+  against the actual reference source, see `RotateThumbExtension`'s
+  class remarks).
 - A test drags a skew thumb and asserts a `SkewTransform` is applied.
 - A test cancels an in-progress resize (via whatever Escape-cancel
   mechanism gap #1 below resolves to) and asserts the item's

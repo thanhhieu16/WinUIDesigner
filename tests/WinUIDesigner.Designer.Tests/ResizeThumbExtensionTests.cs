@@ -49,6 +49,27 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
+        // Final-review finding #3: the reference's Place sets Opacity = 0 on the four stretched,
+        // full-edge center thumbs (Top/Bottom-center, Left/Right-center) so they stay
+        // hit-testable but invisible - a thin strip, not a visible white-with-black-border bar
+        // framing every selection. This port had dropped the Opacity assignment entirely.
+        [Test]
+        public void TheFourStretchedCenterThumbsAreInvisibleButTheFourCornerThumbsAreNot()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSelected(window, out _, out _);
+                var thumbs = surface.DesignPanel.Adorners.SelectMany(a => a.Children).OfType<ResizeThumb>().ToList();
+                Assert.AreEqual(8, thumbs.Count);
+
+                foreach (var thumb in thumbs) {
+                    bool isStretchedCenterThumb = thumb.Alignment.Horizontal == Microsoft.UI.Xaml.HorizontalAlignment.Center
+                        || thumb.Alignment.Vertical == Microsoft.UI.Xaml.VerticalAlignment.Center;
+                    double expectedOpacity = isStretchedCenterThumb ? 0 : 1;
+                    Assert.AreEqual(expectedOpacity, thumb.Opacity, $"thumb at alignment {thumb.Alignment} should have Opacity {expectedOpacity}");
+                }
+            });
+        }
+
         [Test]
         public void DraggingTheBottomRightThumbGrowsWidthAndHeightAndCommitsOneChangeGroup()
         {

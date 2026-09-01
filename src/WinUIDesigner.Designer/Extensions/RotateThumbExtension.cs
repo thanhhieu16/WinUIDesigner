@@ -35,20 +35,40 @@ namespace WinUIDesigner.Designer.Extensions
     /// center. Falls back to (0.5, 0.5) only when the property is genuinely unset, mirroring
     /// SkewThumbExtension.ApplySkew's own IsSet check on the same property - a user-authored
     /// custom RenderTransformOrigin already present in the loaded XAML is still respected.
+    ///
+    /// Final-review fixes (findings #1/#2/#4): the plan dropped the reference's
+    /// PlacementOperation.Start()/.Commit() bracketing around the whole rotate drag, on the
+    /// (verified false) claim that it was redundant with the per-tick ChangeGroup already opened
+    /// inside ModelTools.ApplyTransform. It isn't - without an outer group, every Drag_Changed
+    /// tick commits its own separate undo-stack entry (a multi-tick drag needs one Ctrl+Z per
+    /// tick to fully undo) and Escape-cancel has nothing to Abort(). Fixed by bracketing the
+    /// drag with DesignItem.OpenGroup/ChangeGroup.Commit()/Abort() directly (not
+    /// PlacementOperation.Start, which throws PlacementOperationException when the parent has no
+    /// placement behavior - a case this code path never guarded against) - see Drag_Started/
+    /// Drag_Completed. Each per-tick ApplyTransform ChangeGroup then nests inside this outer one
+    /// (UndoService.Execute routes into the open transaction), collapsing the whole gesture into
+    /// one undo entry, matching ResizeThumbExtension's own drag-level granularity. Also fixed:
+    /// rotateTransform is now re-read from the live RenderTransform at the top of every
+    /// Drag_Started instead of relying on the value captured once in OnInitialized -
+    /// ModelTools.ApplyTransform replaces RenderTransform with a brand-new instance on every
+    /// call, so the old OnInitialized-only capture went stale after the first rotate gesture,
+    /// making a second gesture snap back to 0 instead of continuing from the first gesture's
+    /// angle (SkewThumbExtension.ApplySkew never had this bug - it re-assigns its own
+    /// skewTransform field on every call).
     /// </summary>
     [ExtensionServer(typeof(OnlyOneItemSelectedExtensionServer))]
     [ExtensionFor(typeof(FrameworkElement))]
     public sealed class RotateThumbExtension : AdornerProvider
     {
         readonly AdornerPanel adornerPanel;
-        readonly DesignItem[] extendedItemArray = new DesignItem[1];
-        internal DragListener DragListener;
+        internal DragListener RotateDragListener;
 
         Windows.Foundation.Point centerPoint;
         UIElement parent;
         double startAngleFromCenter;
         double initialAngle;
         RotateTransform rotateTransform;
+        ChangeGroup rotateGroup;
 
         public RotateThumbExtension()
         {
@@ -65,13 +85,13 @@ namespace WinUIDesigner.Designer.Extensions
             AdornerPanel.SetPlacement(thumb, new RelativePlacement(HorizontalAlignment.Center, VerticalAlignment.Top) { WidthRelativeToContentWidth = 1, HeightOffset = 0 });
             adornerPanel.Children.Add(thumb);
 
-            DragListener = new DragListener(thumb);
-            DragListener.Started += Drag_Started;
-            DragListener.Changed += Drag_Changed;
-            DragListener.Completed += Drag_Completed;
+            RotateDragListener = new DragListener(thumb);
+            RotateDragListener.Started += Drag_Started;
+            RotateDragListener.Changed += Drag_Changed;
+            RotateDragListener.Completed += Drag_Completed;
         }
 
-        void Drag_Started(WinUIDesigner.Designer.Controls.DragListener drag)
+        void Drag_Started(DragListener drag)
         {
             var designerItem = this.ExtendedItem.View;
             parent = (UIElement)Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(designerItem);
@@ -84,10 +104,21 @@ namespace WinUIDesigner.Designer.Extensions
 
             var start = TransformToParent(drag.StartPoint, parent) ?? centerPoint;
             startAngleFromCenter = Math.Atan2(start.Y - centerPoint.Y, start.X - centerPoint.X);
+
+            // Final-review fix (finding #4): re-read the live RenderTransform here on every
+            // drag, instead of trusting the value OnInitialized captured once - see class remarks.
+            rotateTransform = fe.RenderTransform as RotateTransform;
+            if (rotateTransform == null && fe.RenderTransform is TransformGroup tg)
+                rotateTransform = tg.Children.OfType<RotateTransform>().FirstOrDefault();
             initialAngle = rotateTransform != null ? rotateTransform.Angle : 0;
+
+            // Final-review fix (findings #1/#2): bracket the whole drag in one outer ChangeGroup
+            // so every per-tick ApplyTransform call nests inside it instead of committing its own
+            // top-level undo-stack entry - see class remarks.
+            rotateGroup = this.ExtendedItem.OpenGroup("Rotate");
         }
 
-        void Drag_Changed(WinUIDesigner.Designer.Controls.DragListener drag)
+        void Drag_Changed(DragListener drag)
         {
             var current = drag.GetPosition(parent) ?? centerPoint;
             var currentAngleFromCenter = Math.Atan2(current.Y - centerPoint.Y, current.X - centerPoint.X);
@@ -100,8 +131,12 @@ namespace WinUIDesigner.Designer.Extensions
             ModelTools.ApplyTransform(this.ExtendedItem, new RotateTransform { Angle = destAngle }, false);
         }
 
-        void Drag_Completed(WinUIDesigner.Designer.Controls.DragListener drag)
+        void Drag_Completed(DragListener drag)
         {
+            if (rotateGroup != null) {
+                if (drag.IsCanceled) rotateGroup.Abort(); else rotateGroup.Commit();
+                rotateGroup = null;
+            }
         }
 
         /// <summary>Converts a raw window-space point (DragListener.StartPoint, which has no
@@ -120,14 +155,12 @@ namespace WinUIDesigner.Designer.Extensions
         protected override void OnInitialized()
         {
             base.OnInitialized();
-            extendedItemArray[0] = this.ExtendedItem;
             this.Services.Selection.PrimarySelectionChanged += OnPrimarySelectionChanged;
             OnPrimarySelectionChanged(null, null);
 
-            var fe = (FrameworkElement)this.ExtendedItem.Component;
-            rotateTransform = fe.RenderTransform as RotateTransform;
-            if (rotateTransform == null && fe.RenderTransform is TransformGroup tg)
-                rotateTransform = tg.Children.OfType<RotateTransform>().FirstOrDefault();
+            // rotateTransform is no longer pre-captured here - Drag_Started re-reads it fresh
+            // from the live RenderTransform on every drag (finding #4, see class remarks), so an
+            // OnInitialized-only snapshot would just be dead weight.
         }
 
         protected override void OnRemove()

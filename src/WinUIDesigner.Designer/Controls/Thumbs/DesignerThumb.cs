@@ -70,11 +70,5 @@ namespace WinUIDesigner.Designer.Controls.Thumbs
             thumb.Visibility = thumb.ThumbVisible ? Visibility.Visible : Visibility.Collapsed;
             thumb.BorderThickness = new Thickness(thumb.IsPrimarySelection ? 2 : 1);
         }
-
-        public void ReDraw()
-        {
-            var parent = this.TryFindParent<FrameworkElement>();
-            if (parent != null) parent.InvalidateArrange();
-        }
     }
 }

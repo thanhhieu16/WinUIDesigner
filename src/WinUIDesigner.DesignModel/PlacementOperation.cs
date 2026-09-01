@@ -129,6 +129,10 @@ namespace WinUIDesigner.DesignModel
             set => changeGroup.Title = value;
         }
 
+        // Abort/Commit dereference currentContainerBehavior unguarded (no null check). Safe today
+        // because Start() only ever returns a PlacementOperation once currentContainerBehavior is
+        // non-null (it aborts and throws otherwise, see Start above) - flagged here for a future
+        // reader rather than left implicit (final-review minor finding).
         public void Abort()
         {
             if (isAborted) return;

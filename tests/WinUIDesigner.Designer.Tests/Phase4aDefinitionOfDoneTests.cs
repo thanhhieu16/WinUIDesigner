@@ -41,9 +41,9 @@ namespace WinUIDesigner.Designer.Tests
         // checking the revert, not just inferring it from the post-drag values. PlacementOperation
         // opens exactly one ChangeGroup for the whole Start..Commit gesture (see
         // PlacementOperation's constructor/Commit), regardless of how many Drag_Changed ticks fed
-        // into it, so a single Undo() reverts the entire drag in one step - contrast
-        // RotateDragUndoOnlyRevertsTheLastStepOfAMultiStepDrag below, where ModelTools.ApplyTransform
-        // opens/commits its own ChangeGroup per call instead.
+        // into it, so a single Undo() reverts the entire drag in one step. RotateThumbExtension/
+        // SkewThumbExtension now match this same drag-level granularity too (final-review fix,
+        // findings #1/#2) - see RotateDragCommitsOneUndoEntryForTheWholeMultiStepDrag below.
         [Test]
         public void ResizeDragCommitsThroughPlacementOperationAndSupportsUndo()
         {
@@ -99,7 +99,7 @@ namespace WinUIDesigner.Designer.Tests
             WinUITestHost.RunWithWindow(window => {
                 var surface = LoadSelected(window, out var buttonItem, out var button);
                 var extension = buttonItem.Extensions.OfType<RotateThumbExtension>().Single();
-                var drag = extension.DragListener;
+                var drag = extension.RotateDragListener;
 
                 var centerScreen = button.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(30, 15));
                 drag.SimulateDown(new Windows.Foundation.Point(centerScreen.X, centerScreen.Y - 40));
@@ -118,54 +118,63 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
-        // DoD bullet 3's undo nuance (design.md's Testing/DoD section): unlike resize's single
-        // ChangeGroup per drag, RotateThumbExtension never wraps its drag in a PlacementOperation
-        // (Task 5 deliberately dropped that) - each Drag_Changed tick calls
-        // ModelTools.ApplyTransform directly, which opens *and commits* its own ChangeGroup per
-        // call. So a multi-step rotate drag pushes one undo-stack entry per tick, and a single
-        // Undo() after the drag only reverts the most recent tick, not the whole gesture. This is
-        // the one DoD nuance genuinely novel to this suite - not just a re-assertion of something
-        // Task 5's own ModelToolsTests/RotateThumbExtensionTests already covers.
+        // DoD bullet 3's undo nuance (design.md's Testing/DoD section) - corrected by the
+        // final-review fix round (findings #1/#2). The plan had dropped the reference's
+        // PlacementOperation.Start()/.Commit() bracketing around the rotate drag on the claim
+        // that it was redundant with the per-tick ChangeGroup ModelTools.ApplyTransform already
+        // opens - verified false against the actual reference source (RotateThumbExtension.cs:
+        // drag_Rotate_Started/drag_Rotate_Completed do call PlacementOperation.Start/.Commit).
+        // Without that outer bracket, a multi-step rotate drag pushed one undo-stack entry per
+        // Drag_Changed tick, so a single Undo() after a real-world drag (~250 ticks at typical
+        // mouse polling rates for a 2-second gesture) only reverted the most recent tick, and
+        // Escape mid-drag had no outer group to Abort(). Fixed by bracketing the whole drag with
+        // DesignItem.OpenGroup/ChangeGroup.Commit()/Abort() in RotateThumbExtension.Drag_Started/
+        // Drag_Completed (mirroring ResizeThumbExtension's own drag-level granularity) - see also
+        // the equivalent per-handle fix in SkewThumbExtension and the more detailed regression
+        // tests in RotateThumbExtensionTests.MultiTickRotateDragCommitsExactlyOneUndoEntryForTheWholeGesture/
+        // SkewThumbExtensionTests.MultiTickSkewDragCommitsExactlyOneUndoEntryForTheWholeGesture.
         [Test]
-        public void RotateDragUndoOnlyRevertsTheLastStepOfAMultiStepDrag()
+        public void RotateDragCommitsOneUndoEntryForTheWholeMultiStepDrag()
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = LoadSelected(window, out var buttonItem, out var button);
                 var extension = buttonItem.Extensions.OfType<RotateThumbExtension>().Single();
-                var drag = extension.DragListener;
+                var drag = extension.RotateDragListener;
                 var undoService = surface.DesignContext.Services.GetService<WinUIDesigner.DesignModel.Services.UndoService>();
 
                 // Drag_Started captures startAngleFromCenter/initialAngle once, from the very first
                 // threshold-crossing move - every later Changed tick computes its destAngle relative
                 // to that same frozen snapshot, not the previous tick. So two ticks straight up ->
                 // straight right -> straight down read back as two distinct *absolute* angles (90,
-                // then 180), each committed by its own ApplyTransform call - exactly two ChangeGroups
-                // on the undo stack by the end of the drag.
+                // then 180), each applied by its own ApplyTransform call - but both now nest inside
+                // the one outer ChangeGroup the whole drag opened, so they collapse into a single
+                // undo-stack entry.
                 var centerScreen = button.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(30, 15));
                 var startAbove = new Windows.Foundation.Point(centerScreen.X, centerScreen.Y - 40);
                 var quarterTurn = new Windows.Foundation.Point(centerScreen.X + 40, centerScreen.Y); // 90 deg cw from start
                 var halfTurn = new Windows.Foundation.Point(centerScreen.X, centerScreen.Y + 40); // 180 deg cw from start
 
                 drag.SimulateDown(startAbove);
-                drag.SimulateMove(quarterTurn); // first Changed tick - commits ChangeGroup #1 (Angle -> 90)
+                drag.SimulateMove(quarterTurn); // first Changed tick (Angle -> 90)
                 surface.UpdateLayout();
                 var angleAfterFirstTick = ((Microsoft.UI.Xaml.Media.RotateTransform)button.RenderTransform).Angle;
                 Assert.AreEqual(90, angleAfterFirstTick, 1, "sanity check on the first tick's committed angle");
 
-                drag.SimulateMove(halfTurn); // second Changed tick - commits a separate ChangeGroup #2 (Angle -> 180)
+                drag.SimulateMove(halfTurn); // second Changed tick (Angle -> 180)
                 drag.SimulateUp(halfTurn);
                 surface.UpdateLayout();
                 var angleAfterDrag = ((Microsoft.UI.Xaml.Media.RotateTransform)button.RenderTransform).Angle;
                 Assert.AreEqual(180, angleAfterDrag, 1, "sanity check on the drag's final committed angle");
 
                 Assert.IsNotNull(undoService, "XamlDesignContext always registers UndoService");
-                Assert.IsTrue(undoService.CanUndo);
+                Assert.AreEqual(1, undoService.UndoActions.Count(),
+                    "the whole multi-tick rotate drag should collapse into exactly one undo-stack entry");
+
                 undoService.Undo();
                 surface.UpdateLayout();
 
-                var angleAfterOneUndo = ((Microsoft.UI.Xaml.Media.RotateTransform)button.RenderTransform).Angle;
-                Assert.AreEqual(angleAfterFirstTick, angleAfterOneUndo, 1,
-                    "a single Undo after a multi-step rotate drag should only revert the last ApplyTransform call's ChangeGroup (back to the first tick's angle), not the whole drag");
+                Assert.IsFalse(buttonItem.Properties.GetProperty("RenderTransform").IsSet,
+                    "a single Undo after a multi-step rotate drag should revert the whole gesture back to its pre-drag state (no RenderTransform), not just the last tick");
             });
         }
 
