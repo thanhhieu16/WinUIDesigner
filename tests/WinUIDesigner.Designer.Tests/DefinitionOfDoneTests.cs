@@ -132,16 +132,21 @@ namespace WinUIDesigner.Designer.Tests
 
 				surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[] { leftItem }, SelectionTypes.Primary);
 				surface.UpdateLayout();
-				var afterFirst = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == leftButton).ToList();
-				Assert.AreEqual(1, afterFirst.Count, "selecting Left should apply one adorner panel to it");
+				// Filtered to the SelectionHighlight-bearing panel specifically (not "all adorner
+				// panels on this element") since Task 4's ResizeThumbExtension now also adorns the
+				// primary selection with its own, separate AdornerPanel (the eight resize thumbs) -
+				// both legitimately coexist. This test's own concern, per its comment above, is only
+				// the highlight's single-active-selection lifecycle.
+				var afterFirst = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == leftButton && a.Children.OfType<SelectionHighlight>().Any()).ToList();
+				Assert.AreEqual(1, afterFirst.Count, "selecting Left should apply one highlight adorner panel to it");
 
 				surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[] { rightItem }, SelectionTypes.Primary);
 				surface.UpdateLayout();
 
-				var stillOnLeft = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == leftButton).ToList();
-				var onRight = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == rightButton).ToList();
-				Assert.AreEqual(0, stillOnLeft.Count, "Left's adorner should be removed once selection moves to Right");
-				Assert.AreEqual(1, onRight.Count, "Right should now have exactly one adorner");
+				var stillOnLeft = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == leftButton && a.Children.OfType<SelectionHighlight>().Any()).ToList();
+				var onRight = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == rightButton && a.Children.OfType<SelectionHighlight>().Any()).ToList();
+				Assert.AreEqual(0, stillOnLeft.Count, "Left's highlight adorner should be removed once selection moves to Right");
+				Assert.AreEqual(1, onRight.Count, "Right should now have exactly one highlight adorner");
 			});
 		}
 
@@ -162,7 +167,11 @@ namespace WinUIDesigner.Designer.Tests
 				surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[] { rightItem }, SelectionTypes.Primary);
 				surface.UpdateLayout();
 
-				var panel = surface.DesignPanel.Adorners.Single(a => a.AdornedElement == rightButton);
+				// Filtered to the SelectionHighlight-bearing panel specifically - see the comment in
+				// SelectingASecondElementRemovesTheFirstElementsHighlight above; Task 4's
+				// ResizeThumbExtension now also legitimately adorns the primary selection with its
+				// own separate AdornerPanel, so a plain AdornedElement match is no longer unique.
+				var panel = surface.DesignPanel.Adorners.Single(a => a.AdornedElement == rightButton && a.Children.OfType<SelectionHighlight>().Any());
 				var matrixTransform = panel.RenderTransform as MatrixTransform;
 				Assert.IsNotNull(matrixTransform, "expected AdornerLayer.ArrangeOverride to take the MatrixTransform branch, not the TranslateTransform fallback");
 
