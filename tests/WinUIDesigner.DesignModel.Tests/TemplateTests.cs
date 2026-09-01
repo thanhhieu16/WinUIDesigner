@@ -111,5 +111,24 @@ namespace WinUIDesigner.DesignModel.Tests
                     "the guard should throw a clear DesignerException, not an unrelated NullReferenceException/ArgumentNullException");
             });
         }
+
+        [Test]
+        public void RegisteringATypeArgumentThrowsNotSupportedException()
+        {
+            // Final-review finding: the reference's `component is Type -> new TypeExtension(...)`
+            // branch was correctly dropped (WinUI has no {x:Type} markup extension equivalent),
+            // but a Type argument used to fall through silently to
+            // Document.CreateObject(parent, typeof(SomeType)), producing a useless XamlObject
+            // wrapping a System.RuntimeType instance instead of failing loudly. Per the plan's
+            // Global Constraints ("no silent fallback, no swallowed exception that hides a
+            // platform difference"), this must throw instead.
+            WinUITestHost.Run(() => {
+                var context = Load("<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" />");
+
+                Assert.Throws<System.NotSupportedException>(() =>
+                    context.Services.Component.RegisterComponentForDesigner(typeof(Microsoft.UI.Xaml.Controls.Button)));
+            });
+        }
     }
 }

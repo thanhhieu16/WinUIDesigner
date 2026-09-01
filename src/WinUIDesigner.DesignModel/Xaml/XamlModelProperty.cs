@@ -334,8 +334,14 @@ namespace WinUIDesigner.DesignModel.Xaml
 						{
 							property.SetValueOnInstance(oldValueOnInstance);
 						}
-						catch(Exception)
-						{ }
+						catch(Exception ex)
+						{
+							// Deliberate choice (final-review pass, spec's "Undo/redo behavior
+							// note" section): keep the reference's tolerant swallow-on-undo-
+							// failure behavior verbatim, but make failures observable in debug
+							// output instead of fully silent.
+							System.Diagnostics.Debug.WriteLine("PropertyChangeAction.Undo: restoring ValueOnInstance failed: " + ex);
+						}
 					}
 
 					property.ResetInternal();

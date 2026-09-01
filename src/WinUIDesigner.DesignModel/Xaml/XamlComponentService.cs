@@ -1,3 +1,21 @@
+// Copyright (c) 2019 AlphaSierraPapa for the SharpDevelop Team
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this
+// software and associated documentation files (the "Software"), to deal in the Software
+// without restriction, including without limitation the rights to use, copy, modify, merge,
+// publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+// to whom the Software is furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all copies or
+// substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+// PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+// FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+// DEALINGS IN THE SOFTWARE.
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -65,6 +83,16 @@ namespace WinUIDesigner.DesignModel.Xaml
                 component = new NullExtensionPlaceholder();
             }
 
+            // Final-review fix: without this guard, a Type argument fell through silently to
+            // Document.CreateObject(parent, typeof(SomeType)) and produced a XamlObject wrapping
+            // a useless System.RuntimeType instance instead of failing loudly. Per the plan's
+            // Global Constraints ("no silent fallback, no swallowed exception that hides a
+            // platform difference"), refuse it explicitly instead.
+            if (component is Type) {
+                throw new NotSupportedException(
+                    "WinUI has no {x:Type} markup extension equivalent - registering a raw System.Type as a design item is not supported.");
+            }
+
             XamlObject parentXamlObject = null;
             if (parent != null)
                 parentXamlObject = ((XamlDesignItem)parent).XamlObject;
@@ -116,10 +144,38 @@ namespace WinUIDesigner.DesignModel.Xaml
             // XamlObject.SetXamlAttribute, which calls NameScopeHelper.NameChanged itself
             // (verified in src/WinUIDesigner.XamlDom/XamlObject.cs) - no separate "register" step
             // is needed here the way the reference needed nameScope.RegisterName.
+            //
+            // Aliasing hazard (found in final-review pass): NameScopeHelper's table is a flat,
+            // last-writer-wins map (WinUIDesigner.XamlDom/NameScopeHelper.cs). DesignItem.Clone()
+            // re-parses the clone's XAML text - which still carries the *original* element's
+            // x:Name - into the SAME XamlDocument (XamlParser.ParseSnippet sets its parser's
+            // document to root.OwnerDocument). XamlParser.ParseObject writes straight to the
+            // table the instant it sees an x:Name attribute (before this method ever runs),
+            // so by the time we get here document.NamedObjects[name] may already have been
+            // silently overwritten to point at `obj` itself - a "self-hit" that looks like "no
+            // collision" once renamed away, even though the ORIGINAL element elsewhere in the
+            // tree still carries that same x:Name in its own XML (XamlObject.Name reads that
+            // attribute directly and is unaffected by the table - see XamlObject.cs). Trusting
+            // NameScopeHelper.FindNamedObject for the collision check is therefore unreliable
+            // here: it can never distinguish "this name is genuinely free" from "this name's
+            // table slot was just stolen by the very object we're registering". So the search
+            // below walks the live, already-attached document tree and compares each element's
+            // own Name property directly (the same source of truth XamlObject.Name uses)
+            // instead of the aliasable table, and - if a rename does happen - explicitly
+            // restores the displaced original's table entry afterwards, since
+            // NameScopeHelper.NameChanged's unconditional Remove(oldName) during the rename
+            // would otherwise leave the original permanently unresolvable by name (breaking
+            // {x:Reference}/ElementName lookups - see WinUIXamlServiceProvider.cs).
             if (_context.RootItem != null && !string.IsNullOrEmpty(site.Name)) {
-                var document = _context.Document;
+                XamlObject documentRoot = ((XamlDesignItem)_context.RootItem).XamlObject;
+                Func<string, XamlObject> findOtherNamedObject = name =>
+                    (documentRoot != obj && documentRoot.Name == name) ? documentRoot
+                        : XamlDesignItem.GetAllChildXamlObjects(documentRoot)
+                            .FirstOrDefault(o => o != obj && o.Name == name);
+
                 string newName = site.Name;
-                if (NameScopeHelper.FindNamedObject(document, newName) != null) {
+                XamlObject displacedOriginal = findOtherNamedObject(newName);
+                if (displacedOriginal != null) {
                     int copyIndex = newName.LastIndexOf("_Copy", StringComparison.Ordinal);
                     if (copyIndex < 0) {
                         newName += "_Copy";
@@ -134,11 +190,15 @@ namespace WinUIDesigner.DesignModel.Xaml
 
                     int i = 1;
                     string newNameTemplate = newName;
-                    while (NameScopeHelper.FindNamedObject(document, newName) != null) {
+                    while (findOtherNamedObject(newName) != null) {
                         newName = newNameTemplate + i++;
                     }
 
                     site.Name = newName;
+
+                    // Restore the original's own name-table entry, in case the rename above
+                    // (via NameScopeHelper.NameChanged's Remove(oldName)) just evicted it.
+                    NameScopeHelper.NameChanged(displacedOriginal, null, displacedOriginal.Name);
                 }
             }
             return site;
