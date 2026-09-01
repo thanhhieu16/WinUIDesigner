@@ -168,5 +168,15 @@ namespace WinUIDesigner.DesignModel
 				return GetRequiredService<Extensions.ExtensionManager>();
 			}
 		}
+
+		/// <summary>
+		/// Gets the <see cref="ISelectionService"/>.
+		/// Throws an exception if the service is not found.
+		/// </summary>
+		public ISelectionService Selection {
+			get {
+				return GetRequiredService<ISelectionService>();
+			}
+		}
 	}
 }

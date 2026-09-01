@@ -45,4 +45,55 @@ namespace WinUIDesigner.DesignModel
         IEnumerable<MemberDescriptor> GetAvailableEvents(DesignItem designItem);
         IEnumerable<MemberDescriptor> GetCommonAvailableProperties(IEnumerable<DesignItem> designItems);
     }
+
+    [Flags]
+    public enum SelectionTypes
+    {
+        None = 0,
+        Auto = 1,
+        Primary = 2,
+        Toggle = 4,
+        Add = 8,
+        Remove = 0x10,
+        Replace = 0x20
+    }
+
+    public interface ISelectionService
+    {
+        event EventHandler SelectionChanging;
+        event EventHandler<DesignItemCollectionEventArgs> SelectionChanged;
+        event EventHandler PrimarySelectionChanging;
+        event EventHandler PrimarySelectionChanged;
+
+        bool IsComponentSelected(DesignItem component);
+        ICollection<DesignItem> SelectedItems { get; }
+        void SetSelectedComponents(ICollection<DesignItem> components);
+        void SetSelectedComponents(ICollection<DesignItem> components, SelectionTypes selectionType);
+        DesignItem PrimarySelection { get; }
+        int SelectionCount { get; }
+    }
+
+    public interface IErrorService
+    {
+        void ShowErrorTooltip(Microsoft.UI.Xaml.FrameworkElement attachTo, Microsoft.UI.Xaml.UIElement errorElement);
+    }
+
+    public interface ITopLevelWindow
+    {
+        void SetOwner(Microsoft.UI.Xaml.Window child);
+        void Activate();
+    }
+
+    public interface ITopLevelWindowService
+    {
+        ITopLevelWindow GetTopLevelWindow(Microsoft.UI.Xaml.UIElement element);
+    }
+
+    public interface IKeyBindingService
+    {
+        object Owner { get; }
+        void RegisterBinding(Microsoft.UI.Xaml.Input.KeyboardAccelerator binding);
+        void DeregisterBinding(Microsoft.UI.Xaml.Input.KeyboardAccelerator binding);
+        Microsoft.UI.Xaml.Input.KeyboardAccelerator GetBinding(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers);
+    }
 }
