@@ -277,9 +277,11 @@ this repo's minimal equivalent of wiring a highlight adorner to the
 selection-driven extension-server mechanism) tagged
 `[ExtensionServer(typeof(PrimarySelectionExtensionServer))]`, adding one
 `SelectionHighlight`-content `AdornerPanel` via `FillContent` placement.
-`SelectionHighlight` (new, minimal — a plain unstyled `Border` with a
-visible stroke; not a port of the reference's `Controls/SelectionFrame.cs`,
-which carries resize-thumb layout Phase 4 doesn't need yet).
+`SelectionHighlight` (new, minimal — a plain unstyled `Grid` with a visible
+stroke, standing in for `Border` because `Microsoft.UI.Xaml.Controls.Border`
+is sealed in this WinAppSDK version; not a port of the reference's
+`Controls/SelectionFrame.cs`, which carries resize-thumb layout Phase 4
+doesn't need yet).
 
 **Interface-only, no implementation, not registered (declared for later
 phases to implement against):** `ITool`, `IToolService`, `IErrorService`,

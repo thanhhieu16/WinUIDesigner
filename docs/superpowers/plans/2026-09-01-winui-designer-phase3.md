@@ -1181,11 +1181,10 @@ spec flagged as this phase's hardest technical risks. Uses Task 1's
   Dropped, not stubbed: no `hitTestElements`/`skippedHitTestElements`
   fields, no Alt check, `HitTest` runs a plain single pass per call.
 - **`FilterHitTestInvisibleElements`'s `designItem.IsDesignTimeLocked`
-  check** is dropped — `DesignItem` (Phase 2) has no such property (Phase 2
-  never ported it; it exists in the reference to support
-  `ISelectionFilterService`, which this phase declares but never
-  implements). No enforcement mechanism exists in this phase's scope to
-  make the check meaningful.
+  check** is dropped — `DesignItem.IsDesignTimeLocked` exists
+  (`XamlDesignItem.cs`, backed by Phase 1's `DesignTimeProperties.IsLocked`),
+  but this phase has no `ISelectionFilterService` consumer to make the
+  check meaningful, so it's dropped rather than dead-enforced.
 - **`Content` (this task's own, custom property on `DesignPanel`) is not a
   `Border`-wrapped `_sceneContainer`** the way the reference's `DesignPanel.Child`
   is — `_sceneContainer`'s only job in the reference is `TextFormattingMode`/
