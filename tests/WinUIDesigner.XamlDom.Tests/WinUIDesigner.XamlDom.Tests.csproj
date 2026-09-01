@@ -49,6 +49,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinUIDesigner.XamlDom\WinUIDesigner.XamlDom.csproj" />
+    <ProjectReference Include="..\WinUIDesigner.TestHost\WinUIDesigner.TestHost.csproj" />
   </ItemGroup>
 
   <ItemGroup>

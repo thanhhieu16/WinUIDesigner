@@ -1,8 +1,9 @@
 using System;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Threading;
 
-namespace WinUIDesigner.XamlDom.Tests
+namespace WinUIDesigner.TestHost
 {
 	/// <summary>
 	/// Runs test bodies on a thread that has a live WinUI XAML dispatcher.
@@ -109,7 +110,7 @@ namespace WinUIDesigner.XamlDom.Tests
 		static bool IsOwnApphost()
 		{
 			var expected = System.IO.Path.GetFileNameWithoutExtension(
-				System.Reflection.Assembly.GetExecutingAssembly().Location);
+				System.Reflection.Assembly.GetEntryAssembly()?.Location ?? System.Reflection.Assembly.GetExecutingAssembly().Location);
 			var actual = System.IO.Path.GetFileNameWithoutExtension(CurrentHostName());
 			return string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase);
 		}
@@ -161,6 +162,7 @@ namespace WinUIDesigner.XamlDom.Tests
 	public sealed class TestApplication : Microsoft.UI.Xaml.Application, Microsoft.UI.Xaml.Markup.IXamlMetadataProvider
 	{
 		readonly ReflectionXamlMetadataProvider provider = new ReflectionXamlMetadataProvider(
+			Assembly.GetEntryAssembly() ?? typeof(TestApplication).Assembly,
 			typeof(TestApplication).Assembly);
 
 		public Microsoft.UI.Xaml.Markup.IXamlType GetXamlType(Type type) => provider.GetXamlType(type);

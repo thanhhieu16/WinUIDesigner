@@ -19,6 +19,7 @@
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
 using Microsoft.UI.Xaml.Data;
+using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.XamlDom.Tests
 {

@@ -21,6 +21,7 @@ using System.Linq;
 using Microsoft.UI.Xaml;
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
+using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.XamlDom.Tests
 {

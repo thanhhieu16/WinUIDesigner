@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
+using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.XamlDom.Tests
 {

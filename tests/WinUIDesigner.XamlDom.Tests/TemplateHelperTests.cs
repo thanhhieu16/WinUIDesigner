@@ -22,6 +22,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
+using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.XamlDom.Tests
 {

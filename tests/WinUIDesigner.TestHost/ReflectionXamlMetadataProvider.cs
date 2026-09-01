@@ -8,7 +8,7 @@ using System.Linq;
 using System.Reflection;
 using Microsoft.UI.Xaml.Markup;
 
-namespace WinUIDesigner.XamlDom.Tests
+namespace WinUIDesigner.TestHost
 {
 	/// <summary>
 	/// A reflection-driven <see cref="IXamlMetadataProvider"/> that lets WinUI's own

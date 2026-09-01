@@ -20,6 +20,7 @@ using System.IO;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
 using WinUIDesigner.XamlDom;
+using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.XamlDom.Tests
 {
