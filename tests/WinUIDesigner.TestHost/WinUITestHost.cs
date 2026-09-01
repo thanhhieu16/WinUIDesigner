@@ -151,6 +151,122 @@ namespace WinUIDesigner.TestHost
 
 			captured?.Throw();
 		}
+
+		/// <summary>
+		/// Runs <paramref name="action"/> on the WinUI dispatcher thread with a real, activated
+		/// <see cref="Microsoft.UI.Xaml.Window"/> whose XAML island is already live - needed for
+		/// any test that depends on a real layout pass (ActualWidth/ActualHeight,
+		/// TransformToVisual, VisualTreeHelper.FindElementsInHostCoordinates all require an
+		/// element to be connected to a live XamlRoot). Assigning <c>window.Content</c> inside
+		/// <paramref name="action"/> attaches the tree synchronously, so the usual
+		/// <c>window.Content = root; root.UpdateLayout();</c> then assert works.
+		/// <see cref="Microsoft.UI.Xaml.Window.Content"/> is reset to null afterwards, even if
+		/// <paramref name="action"/> throws.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Verified empirically (Phase 3, Task 1) on Windows App SDK 1.7.250606001, unpackaged +
+		/// registration-free activation. The naive version of this method - create a
+		/// <c>Window</c>, <c>Activate()</c> it and run the test body in the same dispatcher
+		/// turn - does NOT work, for two independent reasons, both confirmed by direct
+		/// measurement rather than inference:
+		/// </para>
+		/// <para>
+		/// 1. The host is fine. <c>WindowNative.GetWindowHandle</c> returns a real HWND
+		/// (class <c>WinUIDesktopWin32WindowClass</c>) that <c>IsWindow</c>/<c>IsWindowVisible</c>
+		/// confirm, <c>Window.Compositor</c> and <c>Window.AppWindow</c> are non-null and
+		/// <c>CompositionTarget.Rendering</c> ticks at ~60Hz. What is asynchronous is the
+		/// *first* <c>Window.Content</c> assignment: XAML connects the content to the window's
+		/// island on a later turn of the message loop, so <c>XamlRoot</c> stays null (and
+		/// <c>ActualWidth</c> zero, and <c>Loaded</c> unraised) for the whole turn that set it.
+		/// No amount of <c>UpdateLayout</c> helps; only returning to the loop does. Hence the
+		/// one-time warm-up below, which pays that cost once per process. Every later
+		/// <c>Content</c> assignment - including the ones the test bodies make - then attaches
+		/// synchronously, because the island and XamlRoot already exist.
+		/// </para>
+		/// <para>
+		/// 2. The window must never be closed. Closing the process's last live WinUI
+		/// <c>Window</c> ends <c>Application.Start</c>'s message loop, which tears down the
+		/// shared DispatcherQueue: every later <see cref="Run"/> then fails with "Could not
+		/// enqueue work onto the WinUI dispatcher thread", the host thread exits and NUnitLite
+		/// dies before printing any results (silent exit code 0, no output at all). So one
+		/// window is created per process, reused by every call, and left open - the process
+		/// exiting is what disposes of it.
+		/// </para>
+		/// <para>
+		/// Note for callers: <c>FindElementsInHostCoordinates</c> wants the point in *island*
+		/// coordinates, which is what <c>element.TransformToVisual(null)</c> produces.
+		/// <c>TransformToVisual(XamlRoot.Content)</c> is NOT the same thing and silently returns
+		/// no hits whenever the root content is not itself at the island origin - which is the
+		/// normal case here, since a <c>Grid</c> with an explicit Width/Height gets centred in
+		/// the window (measured: ActualOffset &lt;562,260&gt; in a 1424x720 island).
+		/// </para>
+		/// </remarks>
+		public static void RunWithWindow(Action<Microsoft.UI.Xaml.Window> action)
+		{
+			var window = EnsureWindow();
+			try {
+				Run(() => action(window));
+			} finally {
+				// Drop the test's tree so it cannot leak into the next test. Run() rather than a
+				// bare assignment: Content has thread affinity like everything else here.
+				Run(() => window.Content = null);
+			}
+		}
+
+		static readonly object windowGate = new object();
+		static Microsoft.UI.Xaml.Window sharedWindow;
+
+		/// <summary>
+		/// Creates the process-wide test window on first use and pumps the message loop until its
+		/// XAML island is live, so callers can rely on <c>Window.Content</c> attaching
+		/// synchronously. See <see cref="RunWithWindow"/> for why this is needed.
+		/// </summary>
+		static Microsoft.UI.Xaml.Window EnsureWindow()
+		{
+			lock (windowGate) {
+				if (sharedWindow != null)
+					return sharedWindow;
+
+				Microsoft.UI.Xaml.Window created = null;
+				// Run() (not this method) is what reports an unusable host, via Assert.Ignore.
+				Run(() => {
+					created = new Microsoft.UI.Xaml.Window();
+					// Any content will do; assigning it is what makes XAML build the island.
+					created.Content = new Microsoft.UI.Xaml.Controls.Grid();
+					created.Activate();
+				});
+
+				// The island is connected on a later turn of the loop, so give the loop turns:
+				// each Run() round-trips through it. Measured: ready after two round-trips.
+				var deadline = DateTime.UtcNow.AddSeconds(30);
+				var live = false;
+				while (!live && DateTime.UtcNow < deadline) {
+					Run(() => live = ((Microsoft.UI.Xaml.FrameworkElement)created.Content).XamlRoot != null);
+					if (!live)
+						Thread.Sleep(10);
+				}
+				if (!live)
+					throw new TimeoutException(
+						"The test window's XAML island never became live: Window.Content.XamlRoot stayed null " +
+						"for 30 seconds after Activate(). Live-layout tests cannot run in this session.");
+
+				// Park it off-screen now that the island is established, so a test run does not
+				// leave a window sitting on top of the desktop holding the foreground. Verified
+				// to change nothing about layout or hit-testing (XamlRoot.IsHostVisible stays
+				// true and FindElementsInHostCoordinates still resolves).
+				Run(() => {
+					try {
+						created.AppWindow.Move(new Windows.Graphics.PointInt32(-32000, -32000));
+					} catch (Exception) {
+						// Purely cosmetic - an on-screen window works just as well.
+					}
+				});
+
+				sharedWindow = created;
+				return sharedWindow;
+			}
+		}
 	}
 
 	/// <summary>
