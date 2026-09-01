@@ -45,6 +45,8 @@ namespace WinUIDesigner.Designer
 
 		public ICollection<AdornerPanel> Adorners { get { return _adornerLayer.Adorners; } }
 
+		public Controls.AdornerLayer AdornerLayer { get { return _adornerLayer; } }
+
 		protected override Size MeasureOverride(Size availableSize)
 		{
 			if (_content != null) _content.Measure(availableSize);
