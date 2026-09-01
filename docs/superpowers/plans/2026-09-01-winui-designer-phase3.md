@@ -288,7 +288,9 @@ seams:
                       "layout should have run: ActualHeight should be nonzero");
 
                   var centerInButton = new Windows.Foundation.Point(button.ActualWidth / 2, button.ActualHeight / 2);
-                  var hostPoint = button.TransformToVisual(button.XamlRoot.Content).TransformPoint(centerInButton);
+                  // Island coordinates = TransformToVisual(null), not TransformToVisual(XamlRoot.Content) -
+                  // see the Step 5 addendum below (Task 1 investigation finding).
+                  var hostPoint = button.TransformToVisual(null).TransformPoint(centerInButton);
                   var hits = VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, button.XamlRoot.Content);
 
                   CollectionAssert.Contains(hits, button,
@@ -345,6 +347,23 @@ seams:
   git add tests/WinUIDesigner.TestHost/WinUITestHost.cs src/WinUIDesigner.Designer tests/WinUIDesigner.Designer.Tests WinUIDesigner.sln
   git commit -m "chore: scaffold WinUIDesigner.Designer, resolve live-layout gap (Phase 3 Task 1)"
   ```
+
+#### Addendum: Step 1/5's naive form does not work — real fix found by empirical investigation
+
+Executed on this plan: the naive `RunWithWindow` above (create `Window`, `Activate()`, run the
+body in the same turn, `Close()` in `finally`) **fails** — `XamlRoot` stays null — and both of
+Step 5's documented fallbacks (blocking dispatcher round-trip, off-screen `AppWindow.Move`) also
+fail (the blocking round-trip **deadlocks**; do not use it). Root causes, confirmed by direct
+HWND/compositor measurement (not inference): (1) a window's *first* `Content` assignment attaches
+to its XAML island asynchronously — only returning to the message loop resolves it, not
+`UpdateLayout()` — so the fix is a one-time per-process warm-up that pumps the loop until the
+island is live, after which every later `Content` assignment attaches synchronously; (2) closing
+the process's last live `Window` ends `Application.Start`'s loop and kills the shared
+dispatcher — silently, with NUnitLite exiting 0 and printing no results — so the fixed
+`RunWithWindow` reuses one process-wide window and never closes it. No `.csproj`/manifest/package
+changes are needed; the public `RunWithWindow(Action<Window>)` signature is unchanged. Full
+root-cause analysis, measurements, and the exact shipped code:
+`.superpowers/sdd/2026-09-01-winui-designer-phase3/task-1-investigation-report.md`.
 
 ---
 
@@ -1550,9 +1569,13 @@ spec flagged as this phase's hardest technical risks. Uses Task 1's
               if (this.XamlRoot == null)
                   return;
 
-              // FindElementsInHostCoordinates needs a point in host/XamlRoot coordinates, not the
-              // panel-local point the reference's HitTest takes (verified during spec brainstorming).
-              var hostPoint = this.TransformToVisual(this.XamlRoot.Content).TransformPoint(mousePosition);
+              // FindElementsInHostCoordinates needs a point in island coordinates, not the
+              // panel-local point the reference's HitTest takes. This is TransformToVisual(null),
+              // not TransformToVisual(this.XamlRoot.Content) - empirically confirmed (Phase 3,
+              // Task 1 investigation) that the latter silently returns zero hits whenever the root
+              // content isn't itself sitting at the island origin (e.g. a sized root Grid ends up
+              // centred in the island instead).
+              var hostPoint = this.TransformToVisual(null).TransformPoint(mousePosition);
               bool continueHitTest = true;
 
               if (testAdorners) {
