@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel.Extensions;
 using System.Linq;
 
@@ -352,6 +353,26 @@ namespace WinUIDesigner.DesignModel
 		/// Creates a copy of this design item.
 		/// </summary>
 		public abstract DesignItem Clone();
+
+		/// <summary>
+		/// Gets a Transform representing all transforms applied to the item's view. Narrowed to
+		/// RenderTransform only - the reference also walks LayoutTransform and
+		/// ContainerVisual.Transform, neither of which exists in WinUI (confirmed absent from
+		/// Microsoft.UI.Xaml.winmd during spec brainstorming). See spec's Known gap #3 for
+		/// whether re-adding a live RenderTransform instance into a new TransformGroup is safe.
+		/// </summary>
+		public Microsoft.UI.Xaml.Media.Transform GetCompleteAppliedTransformationToView()
+		{
+			var result = new TransformGroup();
+			DependencyObject current = this.View;
+			while (current != null) {
+				var fe = current as FrameworkElement;
+				if (fe != null && fe.RenderTransform != null)
+					result.Children.Add(fe.RenderTransform);
+				current = VisualTreeHelper.GetParent(current);
+			}
+			return result;
+		}
 
 		/// <summary>
 		/// Gets the component this DesignSite was created for.

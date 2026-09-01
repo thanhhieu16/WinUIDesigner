@@ -50,4 +50,27 @@ namespace WinUIDesigner.DesignModel.Extensions
 			return Services.Selection.PrimarySelection == extendedItem;
 		}
 	}
+
+	/// <summary>Applies an extension to the primary selection only when exactly one item is
+	/// selected - used by the resize/rotate/skew thumb extensions (Task 4/5), which don't make
+	/// sense for a multi-selection. No WPF-specific API - mechanical port.</summary>
+	public class OnlyOneItemSelectedExtensionServer : PrimarySelectionExtensionServer
+	{
+		protected override void OnInitialized()
+		{
+			base.OnInitialized();
+			this.Services.Selection.SelectionChanged += OnSelectionChanged;
+		}
+
+		void OnSelectionChanged(object sender, System.EventArgs e)
+		{
+			if (this.Services.Selection.SelectedItems.Count > 1)
+				ReapplyExtensions(this.Services.Selection.SelectedItems);
+		}
+
+		public override bool ShouldApplyExtensions(DesignItem extendedItem)
+		{
+			return Services.Selection.PrimarySelection == extendedItem && Services.Selection.SelectionCount < 2;
+		}
+	}
 }

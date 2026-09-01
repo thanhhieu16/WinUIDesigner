@@ -1,14 +1,25 @@
+using Windows.Foundation;
+
 namespace WinUIDesigner.DesignModel
 {
-    /// <summary>
-    /// Stub for Task 2 - will be replaced/enhanced in that task.
-    /// Provides rounding precision constants.
-    /// </summary>
-    public static class PlacementInformation
+    /// <summary>Stores information about the placement of an individual item during a
+    /// PlacementOperation. No WPF-specific API - mechanical port.</summary>
+    public sealed class PlacementInformation
     {
-        /// <summary>
-        /// The number of decimal places to round bounds to.
-        /// </summary>
-        public const int BoundsPrecision = 2;
+        public const int BoundsPrecision = 0;
+
+        public DesignItem Item { get; }
+        public PlacementOperation Operation { get; }
+        public Rect OriginalBounds { get; set; }
+        public Rect Bounds { get; set; }
+        public PlacementAlignment? ResizeThumbAlignment { get; set; }
+
+        internal PlacementInformation(DesignItem item, PlacementOperation operation)
+        {
+            Item = item;
+            Operation = operation;
+        }
+
+        public override string ToString() => "[PlacementInformation OriginalBounds=" + OriginalBounds + " Bounds=" + Bounds + " Item=" + Item + "]";
     }
 }
