@@ -70,8 +70,10 @@ namespace WinUIDesigner.Designer
                 // transform into the new (still-unattached) TransformGroup's children, THEN
                 // SetValue the property to the group - reproducibly threw
                 // ArgumentException("The reference node is not a child of this node.") from
-                // XamlProperty.InsertNodeInCollection when a subsequent transform of a third kind
-                // triggered a second CollectionElements.Add. Root cause (traced through
+                // XamlProperty.InsertNodeInCollection when the very next CollectionElements.Add
+                // in this same call (the RotateTransform/TransformGroup branch below, adding the
+                // new transform into the group) ran against the now-desynced collection. Root
+                // cause (traced through
                 // WinUIDesigner.XamlDom.XamlProperty/XamlObject, both unchanged Phase 1 code, so
                 // not fixable inside this file's scope): CollectionElementsCollection.InsertItem
                 // reparents the old transform's XmlElement into the TransformGroup via a plain
