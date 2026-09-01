@@ -201,6 +201,11 @@ namespace WinUIDesigner.TestHost
 		/// normal case here, since a <c>Grid</c> with an explicit Width/Height gets centred in
 		/// the window (measured: ActualOffset &lt;562,260&gt; in a 1424x720 island).
 		/// </para>
+		/// <para>
+		/// Verified only on an interactive desktop session with a live window station (WinSta0) and
+		/// DWM running. Headless, session-0, or otherwise disconnected sessions are unconfirmed -
+		/// whoever wires up CI for this suite should re-verify this mechanism there first.
+		/// </para>
 		/// </remarks>
 		public static void RunWithWindow(Action<Microsoft.UI.Xaml.Window> action)
 		{

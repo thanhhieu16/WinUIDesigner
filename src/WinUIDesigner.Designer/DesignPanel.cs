@@ -60,6 +60,9 @@ namespace WinUIDesigner.Designer
 			return finalSize;
 		}
 
+		// hitTestType (both overloads below): currently unused - the reference's only consumer was
+		// the Alt-cycle hit-test filter callback, dropped this phase (see plan's "Known drops").
+		// Retained for signature/interface compatibility.
 		public DesignPanelHitTestResult HitTest(Point mousePosition, bool testAdorners, bool testDesignSurface, HitTestType hitTestType)
 		{
 			DesignPanelHitTestResult result = DesignPanelHitTestResult.NoHit;

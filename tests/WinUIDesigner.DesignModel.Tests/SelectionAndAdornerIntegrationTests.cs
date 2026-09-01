@@ -30,9 +30,14 @@ namespace WinUIDesigner.DesignModel.Tests
 
             public void SetSelectedComponents(ICollection<DesignItem> components, SelectionTypes selectionType)
             {
+                // Mirrors DefaultSelectionService's real firing order: SelectionChanging fires
+                // unconditionally before any state change, PrimarySelectionChanging only when the
+                // primary is actually about to change, right before it does.
+                if (SelectionChanging != null) SelectionChanging(this, EventArgs.Empty);
                 _selected = components != null ? components.ToList() : new List<DesignItem>();
                 var newPrimary = _selected.FirstOrDefault();
                 if (newPrimary != PrimarySelection) {
+                    if (PrimarySelectionChanging != null) PrimarySelectionChanging(this, EventArgs.Empty);
                     PrimarySelection = newPrimary;
                     if (PrimarySelectionChanged != null) PrimarySelectionChanged(this, EventArgs.Empty);
                 }
