@@ -33,8 +33,7 @@ namespace WinUIDesigner.Designer.Controls
 		{
 			_designPanel = designPanel;
 			// FrameworkElement.LayoutUpdated's delegate type in WinUI 3 is EventHandler<object>,
-			// not EventHandler (WPF) - confirm against the actual signature at build time; this is
-			// a copy-compile-fix detail, not a design decision.
+			// not EventHandler (WPF).
 			LayoutUpdated += OnLayoutUpdated;
 			_adorners = new AdornerPanelCollection(this);
 		}
@@ -107,20 +106,16 @@ namespace WinUIDesigner.Designer.Controls
 		{
 			foreach (AdornerPanel adorner in Children) {
 				if (IsDescendantOf(adorner.AdornedElement, _designPanel)) {
-					// Reference casts the ancestor-relative transform to MatrixTransform and
-					// assigns it directly, preserving rotation/scale as well as translation - the
-					// spec's own "Explicitly out of scope" already established WinUI's
-					// TransformToVisual only ever needs this MatrixTransform path (no
-					// GeneralTransformGroup exists to fall back to). Kept as a defensive
-					// translation-only fallback in case that assumption is wrong for some element.
-					var transform = adorner.AdornedElement.TransformToVisual(_designPanel);
-					var matrixTransform = transform as MatrixTransform;
-					if (matrixTransform != null) {
-						adorner.RenderTransform = matrixTransform;
-					} else {
-						var origin = transform.TransformPoint(new Point(0, 0));
-						adorner.RenderTransform = new TranslateTransform { X = origin.X, Y = origin.Y };
-					}
+					// Empirically confirmed (Phase 3 final review, I2 -
+					// DefinitionOfDoneTests.SelectedElementsAdornerPanelIsArrangedAtTheElementsTransformedPosition):
+					// TransformToVisual always returns a MatrixTransform in this environment, matching
+					// the spec's "Explicitly out of scope" finding that no GeneralTransformGroup case
+					// exists here to fall back to. The previous TranslateTransform (position-only)
+					// fallback branch was therefore dead, untested code that would have silently
+					// dropped rotation/scale on some future element instead of failing loudly - removed.
+					// A direct cast is used instead, so an element that ever breaks this assumption
+					// throws an InvalidCastException here rather than silently degrading.
+					adorner.RenderTransform = (MatrixTransform)adorner.AdornedElement.TransformToVisual(_designPanel);
 				}
 				adorner.Arrange(new Rect(new Point(0, 0), adorner.DesiredSize));
 			}

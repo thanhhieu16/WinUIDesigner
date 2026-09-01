@@ -15,6 +15,12 @@ namespace WinUIDesigner.Designer
 		{
 			_designPanel = new DesignPanel();
 			Content = _designPanel;
+			// A bare ContentControl's generic.xaml default (WinAppSDK 1.7.250606001) template-binds
+			// the ContentPresenter's alignment to HorizontalContentAlignment/VerticalContentAlignment,
+			// which default to Left/Top - so an untemplated DesignSurface would otherwise shrink-wrap
+			// its DesignPanel to DesiredSize instead of filling the surface's allocated area.
+			HorizontalContentAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
+			VerticalContentAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
 		}
 
 		public DesignPanel DesignPanel { get { return _designPanel; } }

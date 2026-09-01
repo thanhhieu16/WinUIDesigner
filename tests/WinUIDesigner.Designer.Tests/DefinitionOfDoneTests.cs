@@ -2,6 +2,7 @@ using System.IO;
 using System.Linq;
 using System.Xml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Xaml;
@@ -23,19 +24,15 @@ namespace WinUIDesigner.Designer.Tests
 		static DesignSurface LoadInto(Microsoft.UI.Xaml.Window window, string xaml)
 		{
 			var surface = new DesignSurface();
-			// Measured directly (Phase 3, Task 5): a bare Microsoft.UI.Xaml.Controls.ContentControl's
-			// HorizontalContentAlignment/VerticalContentAlignment default to Left/Top, not Stretch -
-			// so without this, DesignSurface's ContentPresenter arranges the unsized DesignPanel at
-			// exactly its DesiredSize (here, the root Grid's Auto-sized single implicit cell, which
-			// equals one button's 60x30 - both buttons the same size). That leaves the Grid with no
-			// extra room for HorizontalAlignment="Left" vs "Right" to differentiate: both buttons end
-			// up stacked on the exact same rect, and hit-testing at any point can no longer tell them
-			// apart. Stretching the surface's content is what a real design host does anyway (show the
-			// design at the surface's actual size), and it is what gives the Left/Right-aligned buttons
-			// room to land at different points - confirmed by direct measurement: with this set, Left
-			// lands at panel-local (0,0) and Right at (1364,0) in a 1424-wide panel.
-			surface.HorizontalContentAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
-			surface.VerticalContentAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
+			// DesignSurface's constructor now sets HorizontalContentAlignment/VerticalContentAlignment
+			// to Stretch itself (Phase 3 final review fix, I1) - verified below by NOT overriding it
+			// here. Without that default, a bare ContentControl's generic.xaml would arrange the
+			// unsized DesignPanel at exactly its DesiredSize (here, the root Grid's Auto-sized single
+			// implicit cell, which equals one button's 60x30 - both buttons the same size), leaving no
+			// extra room for HorizontalAlignment="Left" vs "Right" to differentiate: both buttons would
+			// end up stacked on the exact same rect, and hit-testing at any point could no longer tell
+			// them apart. Confirmed by direct measurement: with the constructor's Stretch default in
+			// effect, Left lands at panel-local (0,0) and Right at (1364,0) in a 1424-wide panel.
 			window.Content = surface;
 			using (var reader = XmlReader.Create(new StringReader(xaml)))
 				surface.LoadDesigner(reader, new XamlLoadSettings());
@@ -51,9 +48,14 @@ namespace WinUIDesigner.Designer.Tests
 			WinUITestHost.RunWithWindow(window => {
 				var surface = LoadInto(window, TwoButtonsXaml);
 				var grid = (Grid)surface.DesignContext.RootItem.Component;
-				var leftItem = surface.DesignContext.Services.Component.GetDesignItem(grid.Children[0]);
+				var leftButton = (Button)grid.Children[0];
+				var leftItem = surface.DesignContext.Services.Component.GetDesignItem(leftButton);
 
-				var result = surface.DesignPanel.HitTest(new Windows.Foundation.Point(30, 15), true, true, HitTestType.ElementSelection);
+				// Derived from the button's actual measured position (not a raw panel-local literal,
+				// per HitTestTests.cs's pattern), so this fails loudly - rather than silently hitting
+				// something else - if TwoButtonsXaml's button dimensions ever change.
+				var pointInLeftButton = leftButton.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(30, 15));
+				var result = surface.DesignPanel.HitTest(pointInLeftButton, true, true, HitTestType.ElementSelection);
 
 				Assert.AreSame(leftItem, result.ModelHit);
 			});
@@ -140,6 +142,33 @@ namespace WinUIDesigner.Designer.Tests
 				var onRight = surface.DesignPanel.Adorners.Where(a => a.AdornedElement == rightButton).ToList();
 				Assert.AreEqual(0, stillOnLeft.Count, "Left's adorner should be removed once selection moves to Right");
 				Assert.AreEqual(1, onRight.Count, "Right should now have exactly one adorner");
+			});
+		}
+
+		// Final whole-branch review finding I2: no existing test asserted the adorner's arranged
+		// *position* numerically (AdornerLayerTests.cs only checks RenderTransform is non-null for
+		// any value), and nothing determined which of ArrangeOverride's two branches - the
+		// MatrixTransform cast or the TranslateTransform position-only fallback - actually runs in
+		// this environment. Asserts both: the branch taken, and the numeric position it produces.
+		[Test]
+		public void SelectedElementsAdornerPanelIsArrangedAtTheElementsTransformedPosition()
+		{
+			WinUITestHost.RunWithWindow(window => {
+				var surface = LoadInto(window, TwoButtonsXaml);
+				var grid = (Grid)surface.DesignContext.RootItem.Component;
+				var rightButton = (Button)grid.Children[1];
+				var rightItem = surface.DesignContext.Services.Component.GetDesignItem(rightButton);
+
+				surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[] { rightItem }, SelectionTypes.Primary);
+				surface.UpdateLayout();
+
+				var panel = surface.DesignPanel.Adorners.Single(a => a.AdornedElement == rightButton);
+				var matrixTransform = panel.RenderTransform as MatrixTransform;
+				Assert.IsNotNull(matrixTransform, "expected AdornerLayer.ArrangeOverride to take the MatrixTransform branch, not the TranslateTransform fallback");
+
+				var expected = rightButton.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(0, 0));
+				Assert.AreEqual(expected.X, matrixTransform.Matrix.OffsetX, 0.5, "adorner X position should match the adorned element's transformed position");
+				Assert.AreEqual(expected.Y, matrixTransform.Matrix.OffsetY, 0.5, "adorner Y position should match the adorned element's transformed position");
 			});
 		}
 	}
