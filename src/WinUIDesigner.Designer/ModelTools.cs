@@ -11,8 +11,8 @@ namespace WinUIDesigner.Designer
     /// Static helper methods for working with the designer DOM. Ported from the reference's
     /// ModelTools.cs (890 lines) with only the members actually called by a phase so far -
     /// Phase 4a added GetWidth/GetHeight/Resize/ApplyTransform; Phase 4c Task 4 added
-    /// CanDeleteComponents/DeleteComponents (below). WrapItemsNewContainer/
-    /// UnwrapItemsFromContainer/ArrangeItems/StretchItems/IsInDocument/
+    /// CanDeleteComponents/DeleteComponents; Phase 4c Task 5 added ArrangeItems (below).
+    /// WrapItemsNewContainer/UnwrapItemsFromContainer/StretchItems/IsInDocument/
     /// ComparePositionInModelFile remain unported multi-selection/context-menu helpers with
     /// no consumer yet (4e territory).
     /// </summary>
@@ -185,6 +185,133 @@ namespace WinUIDesigner.Designer
                 changeGroup.Abort();
                 throw;
             }
+        }
+
+        sealed class ItemPos
+        {
+            public DesignItem DesignItem;
+            public double Xmin, Xmax, Ymin, Ymax;
+        }
+
+        static ItemPos GetItemPos(PlacementOperation operation, DesignItem designItem)
+        {
+            var pos = operation.CurrentContainerBehavior.GetPosition(operation, designItem);
+            return new ItemPos {
+                DesignItem = designItem,
+                Xmin = pos.X, Xmax = pos.X + pos.Width,
+                Ymin = pos.Y, Ymax = pos.Y + pos.Height,
+            };
+        }
+
+        /// <summary>Aligns the given items along one edge/midline of their combined bounds.
+        /// Ported from the reference (WpfDesign.Designer/Project/ModelTools.cs:628-870) with
+        /// two changes: (1) the Canvas branch drops the Canvas.Right/Bottom-anchored `else`
+        /// case entirely (those attached properties don't exist in WinUI - confirmed absent,
+        /// CLAUDE.md) rather than reproducing an unreachable branch; (2) the reference's Top
+        /// direction has a stray copy-pasted `Canvas.TopProperty.SetValue` line inside its Grid
+        /// branch (a WPF attached property a Grid ignores, immediately followed by the actually-
+        /// correct margin.Top assignment) - dropped, not reproduced, matching this port's
+        /// established "fix a latent reference bug while porting" precedent. The Grid branch
+        /// otherwise ports both alignment cases unchanged - no WinUI gap there, Margin.Right
+        /// exists.</summary>
+        public static void ArrangeItems(IEnumerable<DesignItem> items, ArrangeDirection arrangeDirection)
+        {
+            var collection = items.ToList();
+            var container = collection.First().Parent;
+            if (collection.Any(x => x.Parent != container)) return;
+
+            var placement = container.GetBehavior<IPlacementBehavior>();
+            if (placement == null) return;
+
+            var operation = PlacementOperation.Start(collection, PlacementType.Move);
+
+            var itemList = collection.Select(item => GetItemPos(operation, item)).ToList();
+            var xmin = itemList.Min(x => x.Xmin);
+            var xmax = itemList.Max(x => x.Xmax);
+            var mpos = (xmax - xmin) / 2 + xmin;
+            var ymin = itemList.Min(x => x.Ymin);
+            var ymax = itemList.Max(x => x.Ymax);
+            var ympos = (ymax - ymin) / 2 + ymin;
+
+            foreach (var item in collection) {
+                var fe = (FrameworkElement)item.Component;
+                switch (arrangeDirection) {
+                    case ArrangeDirection.Left:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmin);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                leftValue: xmin, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - (xmin + fe.ActualWidth));
+                        }
+                        break;
+                    case ArrangeDirection.HorizontalMiddle:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(mpos - fe.ActualWidth / 2);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            var left = mpos - fe.ActualWidth / 2;
+                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - left - fe.ActualWidth);
+                        }
+                        break;
+                    case ArrangeDirection.Right:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmax - fe.ActualWidth);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            var left = xmax - fe.ActualWidth;
+                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - xmax);
+                        }
+                        break;
+                    case ArrangeDirection.Top:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymin);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                topValue: ymin, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - (ymin + fe.ActualHeight));
+                        }
+                        break;
+                    case ArrangeDirection.VerticalMiddle:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ympos - fe.ActualHeight / 2);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            var top = ympos - fe.ActualHeight / 2;
+                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - top - fe.ActualHeight);
+                        }
+                        break;
+                    case ArrangeDirection.Bottom:
+                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymax - fe.ActualHeight);
+                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                            var top = ymax - fe.ActualHeight;
+                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - ymax);
+                        }
+                        break;
+                }
+            }
+
+            operation.Commit();
+        }
+
+        static HorizontalAlignment HAlign(DesignItem item) =>
+            item.Properties.GetProperty("HorizontalAlignment").GetConvertedValueOnInstance<HorizontalAlignment>();
+
+        static VerticalAlignment VAlign(DesignItem item) =>
+            item.Properties.GetProperty("VerticalAlignment").GetConvertedValueOnInstance<VerticalAlignment>();
+
+        static void SetGridMargin(DesignItem item, bool isRightAligned, double leftValue, double rightValue)
+        {
+            var margin = item.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Thickness>();
+            if (isRightAligned) margin.Right = rightValue; else margin.Left = leftValue;
+            item.Properties.GetProperty("Margin").SetValue(margin);
+        }
+
+        static void SetGridMarginVertical(DesignItem item, bool isBottomAligned, double topValue, double bottomValue)
+        {
+            var margin = item.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Thickness>();
+            if (isBottomAligned) margin.Bottom = bottomValue; else margin.Top = topValue;
+            item.Properties.GetProperty("Margin").SetValue(margin);
         }
     }
 }
