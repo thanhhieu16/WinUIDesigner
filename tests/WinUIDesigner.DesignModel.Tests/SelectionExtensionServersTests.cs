@@ -90,5 +90,43 @@ namespace WinUIDesigner.DesignModel.Tests
                 }
             });
         }
+
+        [Test]
+        public void PrimarySelectionButOnlyWhenMultipleSelectedAppliesOnlyWithTwoOrMoreSelected()
+        {
+            WinUITestHost.Run(() => {
+                const string xaml = "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Button x:Name=\"A\" /><Button x:Name=\"B\" /></Grid>";
+
+                var loadSettings = new XamlLoadSettings();
+                var fakePanel = new FakeDesignPanel();
+                var fakeSelection = new FakeSelectionService();
+                loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.IDesignPanel), fakePanel));
+                loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(ISelectionService), fakeSelection));
+
+                using (var reader = XmlReader.Create(new StringReader(xaml))) {
+                    var context = new XamlDesignContext(reader, loadSettings);
+                    fakePanel.Context = context;
+
+                    var root = (Microsoft.UI.Xaml.Controls.Grid)context.RootItem.Component;
+                    var a = (Microsoft.UI.Xaml.Controls.Button)root.Children[0];
+                    var b = (Microsoft.UI.Xaml.Controls.Button)root.Children[1];
+                    var services = context.Services;
+                    var aItem = services.Component.GetDesignItem(a);
+                    var bItem = services.Component.GetDesignItem(b);
+
+                    var server = services.ExtensionManager.GetExtensionServer(
+                        new ExtensionServerAttribute(typeof(PrimarySelectionButOnlyWhenMultipleSelectedExtensionServer)));
+
+                    fakeSelection.SetSelectedComponents(new[] { aItem }, SelectionTypes.Primary);
+                    Assert.IsFalse(server.ShouldApplyExtensions(aItem), "only one item selected - should not apply");
+
+                    fakeSelection.SetSelectedComponents(new[] { aItem, bItem }, SelectionTypes.Replace);
+                    Assert.IsTrue(server.ShouldApplyExtensions(aItem), "primary selection with 2 selected - should apply");
+                    Assert.IsFalse(server.ShouldApplyExtensions(bItem), "not the primary selection - should not apply");
+                }
+            });
+        }
     }
 }

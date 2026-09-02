@@ -115,4 +115,30 @@ namespace WinUIDesigner.DesignModel.Extensions
 			return primarySelectionParent == extendedItem;
 		}
 	}
+
+	/// <summary>Applies an extension to the primary selection only when 2+ items are
+	/// selected - used by ArrangeItemsContextMenuExtension/WrapItemsContextMenuExtension
+	/// (Phase 4c, Task 8), which don't make sense for a single-item selection. No
+	/// WPF-specific API - mechanical port. The reference additionally overrides
+	/// ShouldBeReApplied() => true (WpfDesign/Project/Extensions/SelectionExtensionServers.cs:125-128);
+	/// this port skips it, matching OnlyOneItemSelectedExtensionServer's own precedent above,
+	/// which achieves reapplication directly through its OnSelectionChanged handler instead.</summary>
+	public class PrimarySelectionButOnlyWhenMultipleSelectedExtensionServer : PrimarySelectionExtensionServer
+	{
+		protected override void OnInitialized()
+		{
+			base.OnInitialized();
+			this.Services.Selection.SelectionChanged += OnSelectionChanged;
+		}
+
+		void OnSelectionChanged(object sender, System.EventArgs e)
+		{
+			ReapplyExtensions(this.Services.Selection.SelectedItems);
+		}
+
+		public override bool ShouldApplyExtensions(DesignItem extendedItem)
+		{
+			return Services.Selection.PrimarySelection == extendedItem && Services.Selection.SelectionCount > 1;
+		}
+	}
 }
