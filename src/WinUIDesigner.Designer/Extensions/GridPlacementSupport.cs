@@ -238,6 +238,14 @@ namespace WinUIDesigner.Designer.Extensions
         public override void LeaveContainer(PlacementOperation operation)
         {
             GrayOutDesignerExceptActiveArea.Stop(ref grayOut);
+            // Final-review fix (I1): PlacementOperation.ChangeContainer calls LeaveContainer on
+            // the OLD container's behavior without ever calling EndPlacement on it (only the
+            // FINAL container gets EndPlacement, at Commit/Abort time) - so without resetting the
+            // latch here too, dragging an item into this Grid and back out again (without ever
+            // committing/aborting while this Grid is the current container) left
+            // enteredIntoNewContainer stuck true forever, silently overwriting alignment on the
+            // next unrelated placement/resize in this same Grid.
+            enteredIntoNewContainer = false;
             base.LeaveContainer(operation);
             foreach (var info in operation.PlacedItems) {
                 if (info.Item.ComponentType == typeof(ColumnDefinition)) {

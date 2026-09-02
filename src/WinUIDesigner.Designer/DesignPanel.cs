@@ -56,8 +56,16 @@ namespace WinUIDesigner.Designer
 		public bool UseRasterPlacement { get; set; } = false;
 
 		/// <summary>The raster cell size used when UseRasterPlacement is on. Same default (5)
-		/// and same int type as the reference's DesignPanel.RasterWidth.</summary>
-		public int RasterWidth { get; set; } = 5;
+		/// and same int type as the reference's DesignPanel.RasterWidth. Final-review fix (I4):
+		/// clamped to a minimum of 1 - RasterPlacementBehavior.drawRaster's gridline loop
+		/// (`for (int i = 0; i &lt;= h; i += raster)`) runs before any division, so a value &lt;= 0
+		/// with UseRasterPlacement on would otherwise be an infinite loop, not a clean
+		/// exception.</summary>
+		public int RasterWidth {
+			get { return _rasterWidth; }
+			set { _rasterWidth = value < 1 ? 1 : value; }
+		}
+		int _rasterWidth = 5;
 
 		public ICollection<AdornerPanel> Adorners { get { return _adornerLayer.Adorners; } }
 
@@ -142,6 +150,15 @@ namespace WinUIDesigner.Designer
 					// the actually-clicked element; PanelMove's own move gesture is driven
 					// separately, directly off the overlay's own routed pointer events
 					// (DragListener), not through this hit-test path.
+					//
+					// Final-review note (I3, see PanelMove's own class doc comment for the fuller
+					// story): this same fall-through is *why* clicking a container's body over a
+					// content-filling child re-selects the child instead of starting a container
+					// move through the real pointer path below (OnPointerPressed/
+					// HandlePointerPressed) - the press reaches this method's content pass and
+					// resolves to the child underneath, same as any other click on that child
+					// would, before PanelMove's Drag_Started ever gets a chance to check what's
+					// selected.
 					if (adorner.Children.Count == 1 && adorner.Children[0] is PanelMoveAdorner)
 						continue;
 
@@ -175,15 +192,27 @@ namespace WinUIDesigner.Designer
 
 		void OnPointerPressed(object sender, PointerRoutedEventArgs e)
 		{
-			if (Context == null) return;
 			var point = e.GetCurrentPoint(this).Position;
+			HandlePointerPressed(point, e.KeyModifiers);
+		}
+
+		/// <summary>The real OnPointerPressed hit-test-and-select logic, extracted so a test can
+		/// drive it directly with a Point and modifiers instead of a real pointer event.
+		/// PointerRoutedEventArgs has no public constructor (Global Constraints), so this
+		/// internal seam - reachable from WinUIDesigner.Designer.Tests via InternalsVisibleTo -
+		/// is what makes it possible to exercise the real click-to-select path (as opposed to
+		/// DragListener's SimulateDown, which bypasses it entirely) from a test. See PanelMove's
+		/// class doc comment and the PanelMoveAdorner fall-through note above (final-review
+		/// I3).</summary>
+		internal void HandlePointerPressed(Point point, VirtualKeyModifiers modifiers)
+		{
+			if (Context == null) return;
 			var result = HitTest(point, true, true, HitTestType.ElementSelection);
 			if (result.ModelHit == null) return;
 
 			// Mirrors the reference's SelectionTypes.Auto resolution (Control -> Toggle,
 			// Shift -> Add, else -> Primary) - read from the triggering pointer event instead of
 			// a global keyboard-state query (spec's "Decisions already made").
-			var modifiers = e.KeyModifiers;
 			SelectionTypes selectionType;
 			if ((modifiers & VirtualKeyModifiers.Control) == VirtualKeyModifiers.Control)
 				selectionType = SelectionTypes.Toggle;

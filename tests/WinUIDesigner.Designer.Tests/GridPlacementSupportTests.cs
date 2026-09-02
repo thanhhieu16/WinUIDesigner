@@ -244,5 +244,83 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(10, button.Height, 0.5, "VerticalAlignment is Top, so Height must be untouched");
             });
         }
+
+        // Final-review regression (I1): PlacementOperation.ChangeContainer calls LeaveContainer on
+        // the OLD container's behavior without ever calling EndPlacement on it (only the FINAL
+        // container gets EndPlacement, at Commit/Abort time). A Canvas and a Grid side by side,
+        // each already holding one Button: "Mover" is dragged Canvas -> Grid -> back to Canvas
+        // within one operation, exercising GridPlacementSupport.LeaveContainer on TargetGrid's own
+        // behavior instance while TargetGrid is the CURRENT (not final) container - the exact path
+        // EndPlacement never runs for. A separate, later operation then resizes "Resident", who
+        // never left TargetGrid, to prove enteredIntoNewContainer did not leak true from Mover's
+        // visit onto TargetGrid's (shared, per-DesignItem) GridPlacementSupport instance.
+        const string CanvasAndGridSiblingsXaml =
+            "<StackPanel Orientation=\"Horizontal\" xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Canvas x:Name=\"SourceCanvas\" Width=\"100\" Height=\"100\">" +
+            "<Button x:Name=\"Mover\" Width=\"20\" Height=\"10\" Canvas.Left=\"10\" Canvas.Top=\"10\" />" +
+            "</Canvas>" +
+            "<Grid x:Name=\"TargetGrid\" Width=\"100\" Height=\"100\">" +
+            "<Button x:Name=\"Resident\" Width=\"20\" Height=\"10\" HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" />" +
+            "</Grid>" +
+            "</StackPanel>";
+
+        [Test]
+        public void LeavingTheGridAfterAChangeContainerVisitResetsTheJustEnteredLatchForLaterPlacements()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(CanvasAndGridSiblingsXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                surface.UpdateLayout();
+
+                var root = (Microsoft.UI.Xaml.Controls.StackPanel)surface.DesignContext.RootItem.Component;
+                var sourceCanvas = (Microsoft.UI.Xaml.Controls.Canvas)root.Children[0];
+                var targetGrid = (Microsoft.UI.Xaml.Controls.Grid)root.Children[1];
+                var mover = (Microsoft.UI.Xaml.Controls.Button)sourceCanvas.Children[0];
+                var resident = (Microsoft.UI.Xaml.Controls.Button)targetGrid.Children[0];
+
+                var services = surface.DesignContext.Services;
+                var sourceItem = services.Component.GetDesignItem(sourceCanvas);
+                var gridItem = services.Component.GetDesignItem(targetGrid);
+                var moverItem = services.Component.GetDesignItem(mover);
+                var residentItem = services.Component.GetDesignItem(resident);
+
+                // Drag Mover Canvas -> Grid -> back to Canvas, all within one PlacementOperation.
+                var moveOp = PlacementOperation.Start(new[] { moverItem }, PlacementType.Move);
+                moveOp.ChangeContainer(gridItem);
+                Assert.IsInstanceOf<GridPlacementSupport>(moveOp.CurrentContainerBehavior,
+                    "precondition: Mover's current behavior must be TargetGrid's own");
+                var gridBehavior = moveOp.CurrentContainerBehavior;
+                moveOp.ChangeContainer(sourceItem);
+                moveOp.Commit();
+                surface.UpdateLayout();
+
+                Assert.AreSame(sourceItem, moverItem.Parent, "precondition: Mover ended back up in SourceCanvas");
+
+                // Resident never left TargetGrid - a fresh, separate PlacementOperation resize on
+                // it must not be affected by whatever enteredIntoNewContainer state Mover's visit
+                // left behind on TargetGrid's GridPlacementSupport instance.
+                var residentOp = PlacementOperation.Start(new[] { residentItem }, PlacementType.Resize);
+                Assert.AreSame(gridBehavior, residentOp.CurrentContainerBehavior,
+                    "precondition: same GridPlacementSupport instance that Mover's visit touched");
+                var info = residentOp.PlacedItems[0];
+                // Fills the whole (single implicit-cell) grid - if enteredIntoNewContainer had
+                // leaked true, SetPosition would wrongly "suggest" Stretch/Stretch here instead of
+                // preserving Resident's existing Left/Top alignment.
+                info.Bounds = new Windows.Foundation.Rect(0, 0, 100, 100);
+                residentOp.CurrentContainerBehavior.SetPosition(info);
+                residentOp.Commit();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(Microsoft.UI.Xaml.HorizontalAlignment.Left, resident.HorizontalAlignment,
+                    "a stale enteredIntoNewContainer latch must not overwrite Resident's alignment");
+                Assert.AreEqual(Microsoft.UI.Xaml.VerticalAlignment.Top, resident.VerticalAlignment);
+                Assert.IsTrue(residentItem.Properties["Width"].IsSet,
+                    "Width must not be Reset - that only happens when the (wrongly) suggested alignment resolves to Stretch");
+                Assert.IsTrue(residentItem.Properties["Height"].IsSet);
+            });
+        }
     }
 }

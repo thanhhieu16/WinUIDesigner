@@ -15,6 +15,18 @@ namespace WinUIDesigner.Designer.Extensions
     /// as Phase 4a's SelectionAdornerProvider abstraction (skipping an empty intermediate
     /// class that exists only to carry one attribute changes nothing at runtime): this class
     /// subclasses AdornerProvider directly and carries the ExtensionServer attribute itself.
+    ///
+    /// Final-review note (I3): through the REAL pointer path (not DragListener's SimulateDown
+    /// test seam), a container whose body is entirely covered by content-filling children has no
+    /// clickable body-move surface - only the corner drag handle (TopLeftContainerDragHandle,
+    /// Task 14) can still reparent it. Why: DragListener.OnPointerPressed (unlike the reference's
+    /// own PanelMoveAdorner) never sets e.Handled, so the press bubbles up to
+    /// DesignPanel.OnPointerPressed, which re-hit-tests and re-selects whatever child is under
+    /// the pointer (see DesignPanel.HitTest's PanelMoveAdorner-fall-through comment) - and by the
+    /// time Drag_Started below runs, PrimarySelection is that child, not this container, so the
+    /// PrimarySelection == ExtendedItem gate correctly refuses to start a container move. This is
+    /// not a bug (nothing here should suppress the child's own re-selection without a separate
+    /// design decision), just an interaction worth knowing about; MoveTests covers it explicitly.
     /// </summary>
     [ExtensionServer(typeof(DefaultExtensionServer.PermanentWithDesignPanel))]
     [ExtensionFor(typeof(Panel))]

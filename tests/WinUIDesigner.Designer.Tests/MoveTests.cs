@@ -319,5 +319,78 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(10, top, 0.5, "dragging the container's body must not move it when a child inside it is selected instead");
             });
         }
+
+        // Final-review regression (I3): every PanelMove test above drives DragListener.SimulateDown
+        // directly on the extension's own overlay, bypassing DesignPanel.OnPointerPressed entirely -
+        // so none of them exercise the REAL pointer path, where the press bubbles up to
+        // DesignPanel.OnPointerPressed (DragListener.OnPointerPressed never sets e.Handled) and
+        // re-hit-tests/re-selects whatever is under the pointer before PanelMove's own Drag_Started
+        // gate ever runs. Target here has the same Width/Height as InnerCanvas (and sits at its
+        // origin), so it fully covers InnerCanvas's body - through the real pointer path this
+        // must resolve the press to Target, not InnerCanvas, even though InnerCanvas starts out
+        // selected.
+        const string ContainerFullyCoveredByChildXaml =
+            "<Canvas x:Name=\"RootCanvas\" Width=\"300\" Height=\"300\" " +
+            "xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Canvas x:Name=\"InnerCanvas\" Width=\"100\" Height=\"100\" Canvas.Left=\"10\" Canvas.Top=\"10\">" +
+            "<Button x:Name=\"Target\" Width=\"100\" Height=\"100\" Canvas.Left=\"0\" Canvas.Top=\"0\" />" +
+            "</Canvas></Canvas>";
+
+        [Test]
+        public void ClickingAContainerFullyCoveredByAChildThroughTheRealPointerPathSelectsTheChildNotTheContainer()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(ContainerFullyCoveredByChildXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                surface.DesignPanel.UseSnaplinePlacement = false;
+                surface.UpdateLayout();
+
+                var rootCanvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+                var innerCanvas = (Microsoft.UI.Xaml.Controls.Canvas)rootCanvas.Children[0];
+                var targetButton = (Microsoft.UI.Xaml.Controls.Button)innerCanvas.Children[0];
+                var services = surface.DesignContext.Services;
+                var innerItem = services.Component.GetDesignItem(innerCanvas);
+                var targetItem = services.Component.GetDesignItem(targetButton);
+
+                // InnerCanvas starts as the primary selection - through DragListener.SimulateDown
+                // (every other test above), a body drag from here would move the container, per
+                // ClickingAndDraggingASelectedContainersOwnBodyMovesTheContainerItself. The real
+                // pointer path differs (I3): Target fully covers InnerCanvas, so the real
+                // OnPointerPressed hit-test-and-select logic - DesignPanel.HandlePointerPressed,
+                // the internal seam this test drives directly since PointerRoutedEventArgs has no
+                // public constructor (Global Constraints) - resolves the press to Target instead.
+                services.Selection.SetSelectedComponents(new[] { innerItem }, SelectionTypes.Primary);
+                surface.UpdateLayout();
+                var extension = innerItem.Extensions.OfType<PanelMove>().Single();
+
+                var pressPoint = WindowPoint(innerItem, 50, 50); // lands on Target, which fills InnerCanvas
+
+                surface.DesignPanel.HandlePointerPressed(pressPoint, Windows.System.VirtualKeyModifiers.None);
+                surface.UpdateLayout();
+
+                Assert.AreSame(targetItem, services.Selection.PrimarySelection,
+                    "the real pointer path must re-select the covering child, not the container");
+
+                // PanelMove's Drag_Started gate (PrimarySelection == ExtendedItem) now sees the
+                // child selected, not InnerCanvas, so a drag starting from the same point must not
+                // move the container. Drag_Started/Changed/Completed are still driven through
+                // DragListener.SimulateDown/Move/Up (same seam as every other test in this file) -
+                // only the selection state preceding the drag now reflects what the real pointer
+                // path would actually have produced.
+                extension.DragListener.SimulateDown(pressPoint);
+                extension.DragListener.SimulateMove(WindowPoint(innerItem, 70, 65));
+                extension.DragListener.SimulateUp(WindowPoint(innerItem, 70, 65));
+                surface.UpdateLayout();
+
+                var left = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").GetConvertedValueOnInstance<double>();
+                var top = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").GetConvertedValueOnInstance<double>();
+                Assert.AreEqual(10, left, 0.5,
+                    "a container fully covered by a content-filling child has no real-pointer-path body-move surface (I3) - only the corner drag handle still reparents it");
+                Assert.AreEqual(10, top, 0.5);
+            });
+        }
     }
 }

@@ -13,11 +13,21 @@ namespace WinUIDesigner.Designer.Extensions
     /// more specific one (Grid/Canvas/StackPanel-specific behaviors are Phase 4b). Resizes via
     /// Width/Height, not Canvas.Left/Top. Ported from the reference's
     /// Extensions/DefaultPlacementBehavior.cs with two drops: InfoTextEnterArea ("hold Alt to
-    /// enter container" hint UI) has no 4a consumer reachable through this phase's own
-    /// EndPlacement/CanEnterContainer paths without it, and internalCanEnterContainer's
-    /// "is Decorator" branch is dropped since WinUI has no Decorator type (confirmed absent
-    /// from Microsoft.UI.Xaml.winmd during spec brainstorming) - its three sibling branches
+    /// enter container" hint UI) is dropped, and internalCanEnterContainer's "is Decorator"
+    /// branch is dropped since WinUI has no Decorator type (confirmed absent from
+    /// Microsoft.UI.Xaml.winmd during spec brainstorming) - its three sibling branches
     /// (Expander/UserControl/CollectionSupport) all port unchanged.
+    ///
+    /// Final-review note (I2): CanEnterContainer below ignores shouldAlwaysEnter entirely -
+    /// unlike the reference, which gates cross-container entry on holding Alt unless
+    /// shouldAlwaysEnter is true (the reason InfoTextEnterArea existed there). This was harmless
+    /// in 4a, when CanEnterContainer had no caller at all. Phase 4b's MoveLogic (Task 14) gave it
+    /// its first real caller (passing shouldAlwaysEnter: false), which was the moment to either
+    /// restore the Alt-gate or deliberately drop it - reviewed and ruled: dropped on purpose, so
+    /// every cross-container drag in this port auto-reparents with no modifier key required.
+    /// DragListener/MoveLogic.Move already thread Windows.System.VirtualKeyModifiers through, so
+    /// a future phase can reintroduce the gate by checking the modifier inside
+    /// CanEnterContainer/internalCanEnterContainer if desired - no plumbing is missing for it.
     /// </summary>
     [ExtensionFor(typeof(Panel))]
     [ExtensionFor(typeof(Control))]

@@ -102,12 +102,23 @@ runner).
   test that needs specific row/column sizes must set them this way after
   load, not rely on the XAML attribute** — this is not specific to Task
   10, it applies to Tasks 11-13's `GridAdornerProvider` tests too.
-- **`DesignItemProperty.Reset()` clears the model but not the live
-  instance value** (empirically confirmed, Task 10). After `Reset()`,
-  `IsSet` is `false` and the XAML attribute disappears, but the live
-  `DependencyProperty` keeps its old value (e.g. `button.Width` stays at
-  its prior number). Assert `IsSet == false` on the model for a `Reset()`
-  outcome — never assert on the live value directly for that case.
+- **`DesignItemProperty.Reset()` now also clears the live DependencyProperty
+  value, for DP-backed properties** (fixed in Task 11 —
+  `WinUIDesigner.XamlDom/XamlPropertyInfo.cs`'s `ResetValue` now calls
+  `ClearValue(dependencyProperty)` whenever the DP is known, before ever
+  falling back to `PropertyDescriptor.ResetValue`). This constraint used to
+  say the opposite — true through Task 10, no longer true as of Task 11's
+  fix, which was an intentional, reviewed correction of a real undo bug
+  (not a regression): before it, `Reset()` only cleared the model —
+  `IsSet` went `false` and the XAML attribute disappeared, but the live
+  instance kept its old value (e.g. `button.Width` stayed at its prior
+  number after `Reset()`), so a *newly set then undone* property left the
+  live instance out of sync with the reverted XAML. Since Task 11, a
+  `Reset()` outcome can be asserted directly on the live value for any
+  DP-backed property; asserting `IsSet == false` on the model is still the
+  right (and only) check for a property that isn't DP-backed, where this
+  fix doesn't apply (`dependencyProperty == null`, so `ResetValue` falls
+  back to the old `PropertyDescriptor.ResetValue`-or-no-op path).
 - If a step's code needs an empirical fact this plan could not settle
   ahead of time, the task says so explicitly and gives the exact test
   that answers it. No silent assumption, no swallowed exception that

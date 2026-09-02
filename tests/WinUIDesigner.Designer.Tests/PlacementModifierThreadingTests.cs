@@ -81,6 +81,27 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
+        // Final-review regression (I4): RasterPlacementBehavior.drawRaster's gridline loop
+        // (`for (int i = 0; i <= h; i += raster)`) runs before any division, so RasterWidth <= 0
+        // with UseRasterPlacement on is an infinite loop, not a clean exception. The setter must
+        // clamp any assigned value below 1 up to 1.
+        [Test]
+        public void RasterWidthClampsAnyValueBelowOneUpToOne()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var panel = new WinUIDesigner.Designer.DesignPanel();
+
+                panel.RasterWidth = 0;
+                Assert.AreEqual(1, panel.RasterWidth, "0 must clamp to 1");
+
+                panel.RasterWidth = -5;
+                Assert.AreEqual(1, panel.RasterWidth, "a negative value must clamp to 1");
+
+                panel.RasterWidth = 8;
+                Assert.AreEqual(8, panel.RasterWidth, "a value >= 1 must pass through unclamped");
+            });
+        }
+
         [Test]
         public void OptionServiceIsRegisteredOnALoadedDesignerWithRoundingOff()
         {
