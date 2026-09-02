@@ -295,6 +295,18 @@ namespace WinUIDesigner.Designer.Controls
             if (adornerPanel.Children.Contains(previewAdorner))
                 adornerPanel.Children.Remove(previewAdorner);
 
+            // Snapshot every child's geometry BEFORE the new RowDefinition/ColumnDefinition is
+            // inserted and the two flanking sizes are rewritten - fix for review finding I1.
+            // FixIndicesAfterSplit's contract is "hold every child's visual position stable across
+            // the split", which requires the PRE-split topLeft/ActualWidth/ActualHeight: reading
+            // them after grid.UpdateLayout() has already applied the split (as the brief's original
+            // code did) means a child whose span covers the split row/column reads a *shrunken*
+            // post-split ActualHeight/ActualWidth (the split row's own size drops out of the sum
+            // until RowSpan/ColumnSpan is grown), which can make the
+            // "insertionPosition >= topLeft + size" continue-guard fire incorrectly and leave the
+            // span un-grown - a real visual regression, not a rounding edge case.
+            var preSplitGeometry = SnapshotChildGeometry();
+
             string collectionName = orientation == Orientation.Vertical ? "RowDefinitions" : "ColumnDefinitions";
             string sizeName = orientation == Orientation.Vertical ? "Height" : "Width";
             string indexName = orientation == Orientation.Vertical ? "Row" : "Column";
@@ -345,7 +357,7 @@ namespace WinUIDesigner.Designer.Controls
                     // Layout must settle before FixIndicesAfterSplit reads child positions - there
                     // is no DispatcherPriority.Loaded in WinUI, so force it (spec Known gap #3).
                     grid.UpdateLayout();
-                    FixIndicesAfterSplit(i, indexName, spanName, insertionPosition);
+                    FixIndicesAfterSplit(i, indexName, spanName, insertionPosition, preSplitGeometry);
                     grid.UpdateLayout();
                     changeGroup.Commit();
                     break;
@@ -356,22 +368,46 @@ namespace WinUIDesigner.Designer.Controls
             RefreshLabels();
         }
 
-        /// <summary>The reference's FixIndicesAfterSplit: hold every child's visual position stable
-        /// across the split. WinUI substitutions - View.TranslatePoint becomes
-        /// TransformToVisual(...).TransformPoint(...), and every DependencyProperty-indexed
-        /// Properties[...]/GetAttachedProperty(...) becomes this port's string-keyed form.</summary>
-        void FixIndicesAfterSplit(int splitIndex, string indexName, string spanName, double insertionPosition)
+        /// <summary>Captures every child's topLeft (grid-relative) and ActualWidth/ActualHeight
+        /// before any row/column definition is inserted or resized, so FixIndicesAfterSplit can
+        /// judge each child's PRE-split extent instead of re-reading layout that the split has
+        /// already changed (review finding I1).</summary>
+        Dictionary<DesignItem, (Point TopLeft, double Width, double Height)> SnapshotChildGeometry()
         {
+            var snapshot = new Dictionary<DesignItem, (Point, double, double)>();
             foreach (DesignItem child in gridItem.Properties["Children"].CollectionElements) {
                 if (child.View == null) continue;
                 Point topLeft = child.View.TransformToVisual(grid).TransformPoint(new Point(0, 0));
+                double width = child.Properties["ActualWidth"].GetConvertedValueOnInstance<double>();
+                double height = child.Properties["ActualHeight"].GetConvertedValueOnInstance<double>();
+                snapshot[child] = (topLeft, width, height);
+            }
+            return snapshot;
+        }
+
+        /// <summary>The reference's FixIndicesAfterSplit: hold every child's visual position stable
+        /// across the split. WinUI substitutions - View.TranslatePoint becomes
+        /// TransformToVisual(...).TransformPoint(...), and every DependencyProperty-indexed
+        /// Properties[...]/GetAttachedProperty(...) becomes this port's string-keyed form.
+        /// <paramref name="geometry"/> is the PRE-split snapshot from SnapshotChildGeometry - fix
+        /// for review finding I1 (the brief's own code re-read topLeft/ActualWidth/ActualHeight
+        /// AFTER the split had already been applied and laid out, which is wrong: a child whose
+        /// span straddles the split row/column then reads a shrunken post-split extent, and the
+        /// "insertionPosition >= topLeft + size" guard below can misfire and skip growing its
+        /// span/index even though it should).</summary>
+        void FixIndicesAfterSplit(int splitIndex, string indexName, string spanName, double insertionPosition,
+                                  Dictionary<DesignItem, (Point TopLeft, double Width, double Height)> geometry)
+        {
+            foreach (DesignItem child in gridItem.Properties["Children"].CollectionElements) {
+                if (!geometry.TryGetValue(child, out var g)) continue;
+                Point topLeft = g.TopLeft;
                 var margin = child.Properties["Margin"].GetConvertedValueOnInstance<Thickness>();
                 var start = child.Properties.GetAttachedProperty(typeof(Grid), indexName).GetConvertedValueOnInstance<int>();
                 var span = child.Properties.GetAttachedProperty(typeof(Grid), spanName).GetConvertedValueOnInstance<int>();
 
                 if (start <= splitIndex && splitIndex < start + span) {
                     if (orientation == Orientation.Horizontal) {
-                        var width = child.Properties["ActualWidth"].GetConvertedValueOnInstance<double>();
+                        double width = g.Width;
                         if (insertionPosition >= topLeft.X + width) continue;
                         if (insertionPosition > topLeft.X) {
                             child.Properties.GetAttachedProperty(typeof(Grid), spanName).SetValue(span + 1);
@@ -381,7 +417,7 @@ namespace WinUIDesigner.Designer.Controls
                             child.Properties["Margin"].SetValue(margin);
                         }
                     } else {
-                        var height = child.Properties["ActualHeight"].GetConvertedValueOnInstance<double>();
+                        double height = g.Height;
                         if (insertionPosition >= topLeft.Y + height) continue;
                         if (insertionPosition > topLeft.Y) {
                             child.Properties.GetAttachedProperty(typeof(Grid), spanName).SetValue(span + 1);

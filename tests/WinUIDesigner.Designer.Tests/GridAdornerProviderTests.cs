@@ -28,11 +28,22 @@ namespace WinUIDesigner.Designer.Tests
             "<Button x:Name=\"Target\" Grid.Row=\"1\" Grid.Column=\"1\" Content=\"x\" />" +
             "</Grid>";
 
+        // HorizontalAlignment/VerticalAlignment="Stretch" is deliberate (review finding I1's
+        // regression coverage): a default-aligned Button sizes to its own content and CENTERS
+        // within its spanned rows' combined bounding box, so its rendered topLeft/ActualHeight
+        // shift with that box's total size regardless of split-read timing - "hold visual
+        // position stable" is inherently ambiguous for a child that doesn't fill its cell. A
+        // stretched child's rendered rectangle IS its cell (topLeft always (0,0), ActualHeight
+        // always the full spanned extent), which is both the common real-world case for a
+        // straddling design-time element (a background/container spanning multiple rows) and the
+        // only case where FixIndicesAfterSplit's pixel-position heuristic has one unambiguous
+        // correct answer.
         const string SpanXaml =
             "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"200\" Height=\"120\">" +
             "<Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>" +
-            "<Button x:Name=\"Target\" Grid.Row=\"0\" Grid.RowSpan=\"2\" Content=\"x\" />" +
+            "<Button x:Name=\"Target\" Grid.Row=\"0\" Grid.RowSpan=\"2\" Content=\"x\" " +
+            "HorizontalAlignment=\"Stretch\" VerticalAlignment=\"Stretch\" />" +
             "</Grid>";
 
         internal static DesignSurface Load(Window window, string xaml,
@@ -122,6 +133,32 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(3, grid.RowDefinitions.Count);
                 Assert.AreEqual(0, Grid.GetRow(button));
                 Assert.AreEqual(3, Grid.GetRowSpan(button));
+            });
+        }
+
+        [Test]
+        public void SplittingTheSecondRowOfAStraddlingChildGrowsItsRowSpan()
+        {
+            // Regression for review finding I1: FixIndicesAfterSplit used to read each child's
+            // topLeft/ActualHeight AFTER the split had already been applied and laid out. For a
+            // stretched child spanning row 0 through the split row, the post-split ActualHeight
+            // always equals exactly (insertionPosition - topLeft.Y), so the
+            // "insertionPosition >= topLeft.Y + height" guard misfired and skipped growing
+            // RowSpan. SplittingAStraddlingChildGrowsItsRowSpan above splits the FIRST row of the
+            // span (insertionPosition=30), where the guard happens to still read correctly by
+            // accident; this test splits the SECOND row of the span (insertionPosition=90, inside
+            // row index 1 of two 60px rows) - the exact shape the guard misfired on.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, SpanXaml, out _, out var grid, out var provider);
+                var button = (Button)grid.Children[0];
+                Assert.AreEqual(60, grid.RowDefinitions[1].ActualHeight, 0.5, "precondition");
+
+                provider.LeftRail.SimulateRailPress(90);
+                surface.UpdateLayout();
+
+                Assert.AreEqual(3, grid.RowDefinitions.Count);
+                Assert.AreEqual(0, Grid.GetRow(button));
+                Assert.AreEqual(3, Grid.GetRowSpan(button), "the child must still cover all three rows after the split");
             });
         }
 
