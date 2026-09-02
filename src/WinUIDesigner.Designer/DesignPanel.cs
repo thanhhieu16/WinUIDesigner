@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Windows.Foundation;
 using Windows.System;
 using Microsoft.UI.Xaml;
@@ -66,6 +67,45 @@ namespace WinUIDesigner.Designer
 			set { _rasterWidth = value < 1 ? 1 : value; }
 		}
 		int _rasterWidth = 5;
+
+		readonly Dictionary<IReadOnlyList<MenuFlyoutItemBase>, int> _contextFlyoutGroups =
+			new Dictionary<IReadOnlyList<MenuFlyoutItemBase>, int>();
+
+		/// <summary>Contributes one Order-grouped set of context-menu items, merged with every
+		/// other attached extension's group into a single composite MenuFlyout set as
+		/// this.ContextFlyout - the WinUI-native replacement for the reference's per-extension
+		/// ContextMenu + DesignPanel.AddContextMenu/UpdateContextMenu (WpfDesign.Designer/Project/
+		/// DesignPanel.cs:555-613). Call with the exact same list instance from RemoveContextFlyoutItems
+		/// later - removal is keyed by reference identity. Reusing the same MenuFlyoutItem instances
+		/// across the rebuild this triggers is confirmed safe (spec's "WinUI API surface").</summary>
+		public void AddContextFlyoutItems(IReadOnlyList<MenuFlyoutItemBase> items, int order)
+		{
+			_contextFlyoutGroups[items] = order;
+			UpdateContextFlyout();
+		}
+
+		/// <summary>Removes a group previously added via AddContextFlyoutItems (same list instance).</summary>
+		public void RemoveContextFlyoutItems(IReadOnlyList<MenuFlyoutItemBase> items)
+		{
+			_contextFlyoutGroups.Remove(items);
+			UpdateContextFlyout();
+		}
+
+		void UpdateContextFlyout()
+		{
+			if (_contextFlyoutGroups.Count == 0) {
+				this.ContextFlyout = null;
+				return;
+			}
+			var flyout = new MenuFlyout();
+			foreach (var group in _contextFlyoutGroups.OrderBy(g => g.Value)) {
+				if (flyout.Items.Count > 0)
+					flyout.Items.Add(new MenuFlyoutSeparator());
+				foreach (var item in group.Key)
+					flyout.Items.Add(item);
+			}
+			this.ContextFlyout = flyout;
+		}
 
 		public ICollection<AdornerPanel> Adorners { get { return _adornerLayer.Adorners; } }
 
