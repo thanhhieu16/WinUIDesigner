@@ -135,5 +135,16 @@ namespace WinUIDesigner.DesignModel.Extensions
 				return true;
 			}
 		}
+
+		/// <summary>Special extension server like Permanent - skips applying extensions if
+		/// there is no design panel (e.g. in a bare unit-test fixture without a real
+		/// DesignSurface). Used by PanelMove (Task 15).</summary>
+		internal sealed class PermanentWithDesignPanel : DefaultExtensionServer
+		{
+			public override bool ShouldApplyExtensions(DesignItem extendedItem)
+			{
+				return Services.GetService(typeof(WinUIDesigner.DesignModel.IDesignPanel)) != null;
+			}
+		}
 	}
 }

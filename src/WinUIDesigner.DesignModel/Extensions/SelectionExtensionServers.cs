@@ -73,4 +73,46 @@ namespace WinUIDesigner.DesignModel.Extensions
 			return Services.Selection.PrimarySelection == extendedItem && Services.Selection.SelectionCount < 2;
 		}
 	}
+
+	/// <summary>Applies an extension to whichever DesignItem is the primary selection's
+	/// immediate parent - used by GridAdornerProvider (Task 11), so its rails show whether the
+	/// Grid or one of its direct children is selected. Ported from the reference unchanged;
+	/// DesignItem.ParentChanged already exists (Phase 2), no WPF-specific API.</summary>
+	public class PrimarySelectionParentExtensionServer : DefaultExtensionServer
+	{
+		DesignItem primarySelection;
+		DesignItem primarySelectionParent;
+
+		protected override void OnInitialized()
+		{
+			base.OnInitialized();
+			this.Services.Selection.PrimarySelectionChanged += OnPrimarySelectionChanged;
+		}
+
+		void OnPrimarySelectionChanged(object sender, EventArgs e)
+		{
+			DesignItem newPrimarySelection = this.Services.Selection.PrimarySelection;
+			if (primarySelection != newPrimarySelection) {
+				if (primarySelection != null) primarySelection.ParentChanged -= OnParentChanged;
+				if (newPrimarySelection != null) newPrimarySelection.ParentChanged += OnParentChanged;
+				primarySelection = newPrimarySelection;
+				OnParentChanged(sender, e);
+			}
+		}
+
+		void OnParentChanged(object sender, EventArgs e)
+		{
+			DesignItem newPrimarySelectionParent = primarySelection != null ? primarySelection.Parent : null;
+			if (primarySelectionParent != newPrimarySelectionParent) {
+				DesignItem oldPrimarySelectionParent = primarySelectionParent;
+				primarySelectionParent = newPrimarySelectionParent;
+				ReapplyExtensions(new DesignItem[] { oldPrimarySelectionParent, newPrimarySelectionParent });
+			}
+		}
+
+		public override bool ShouldApplyExtensions(DesignItem extendedItem)
+		{
+			return primarySelectionParent == extendedItem;
+		}
+	}
 }
