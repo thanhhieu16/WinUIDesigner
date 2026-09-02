@@ -22,7 +22,7 @@ namespace WinUIDesigner.Designer.Tests
     /// registration can never collide with a production one.
     /// </summary>
     [ExtensionFor(typeof(SwapChainPanel), OverrideExtension = typeof(DefaultPlacementBehavior))]
-    public sealed class TestContainerPlacementBehavior : RasterPlacementBehavior
+    public sealed class TestContainerPlacementBehavior : SnaplinePlacementBehavior
     {
     }
 }
