@@ -40,6 +40,14 @@ namespace WinUIDesigner.Designer.Extensions
         internal readonly System.Collections.Generic.Dictionary<PlacementAlignment, DragListener> DragListeners =
             new System.Collections.Generic.Dictionary<PlacementAlignment, DragListener>();
 
+        /// <summary>True while a resize drag is in progress on this item. Read by
+        /// StackPanelPlacementSupport, which must not reorder an item that is being resized
+        /// rather than moved. Mirrors the reference's ResizeThumbExtension._isResizing (set at
+        /// the end of drag_Started, cleared at the end of drag_Completed); note this only goes
+        /// true once DragListener's threshold is crossed, since Drag_Started is what
+        /// DragListener raises then - not on pointer-down.</summary>
+        public bool IsResizing { get; private set; }
+
         public ResizeThumbExtension()
         {
             adornerPanel = new AdornerPanel { Order = AdornerOrder.Foreground };
@@ -110,6 +118,7 @@ namespace WinUIDesigner.Designer.Extensions
             // resizeBehavior is null, so no drag can start. Low priority - left as a flagged gap
             // rather than dead-until-4b code (final-review minor finding).
             operation = resizeBehavior != null ? PlacementOperation.Start(extendedItemArray, PlacementType.Resize) : null;
+            IsResizing = true;
         }
 
         void Drag_Changed(DragListener drag)
@@ -155,6 +164,7 @@ namespace WinUIDesigner.Designer.Extensions
                 if (drag.IsCanceled) operation.Abort(); else operation.Commit();
                 operation = null;
             }
+            IsResizing = false;
         }
 
         protected override void OnInitialized()
