@@ -276,7 +276,12 @@ build` against `Microsoft.WindowsAppSDK 1.7.250606001`, then deleted).
 - **`Delete` stays in scope despite depending on `ICopyPasteService`**
   (the same interface `Cut`/`Copy`/`Paste` use). This phase adds one
   concrete `CopyPasteService : ICopyPasteService`
-  (`src/WinUIDesigner.DesignModel/Services/CopyPasteService.cs`, new)
+  (`src/WinUIDesigner.Designer/Services/CopyPasteService.cs`, new — in
+  `WinUIDesigner.Designer`, not `WinUIDesigner.DesignModel`, because it
+  calls `ModelTools`, and `DesignModel` must not reference `Designer`;
+  registered via a `CustomServiceRegisterFunctions` entry in
+  `DesignSurface.LoadDesigner`, the exact pattern already used for
+  `OptionService` — see `DesignSurface.cs:36-40`'s own comment on why)
   with `CanDelete`/`Delete` implemented for real (`ModelTools`-backed)
   and `CanCopy`/`Copy`/`CanCut`/`Cut`/`CanPaste`/`Paste` explicitly
   returning `false`/no-op — documented as deliberately unimplemented,
@@ -306,10 +311,28 @@ build` against `Microsoft.WindowsAppSDK 1.7.250606001`, then deleted).
   global keyboard shortcuts) — Phase 5 shell-app territory, not this
   phase's concern.
 - **`ArrangeItems` drops `Canvas.Right`/`Bottom`-anchored alignment
-  branches** (`Canvas.RightProperty`/`BottomProperty` confirmed absent,
-  CLAUDE.md's known-gaps list) — Left/Top-anchored alignment only,
-  consistent with Phase 4b's `CanvasPlacementSupport` already dropping
-  `Right`/`Bottom` support for the same reason.
+  branches only in its Canvas case** (`Canvas.RightProperty`/
+  `BottomProperty` confirmed absent, CLAUDE.md's known-gaps list) — the
+  Canvas branch becomes Left/Top-anchored only, consistent with Phase
+  4b's `CanvasPlacementSupport` already dropping `Right`/`Bottom` support
+  for the same reason. The Grid branch has no such gap (`Margin.Right`/
+  `Thickness.Right` exist in WinUI) and ports both alignment cases
+  (`HorizontalAlignment.Right`/`VerticalAlignment.Bottom` and their
+  complements) faithfully, reading the item's real, live
+  `HorizontalAlignment`/`VerticalAlignment` property — unlike
+  `WrapItemsNewContainer`/`UnwrapItemsFromContainer`'s dead `ItemPos`
+  fields (see Revision history's plan-writing addendum), `ArrangeItems`
+  reads alignment directly off each `DesignItem`'s own property at the
+  point of use, so this is live, exercised logic, not dead code.
+  Reference's `ArrangeDirection.Top` case has a stray, clearly
+  copy-pasted line inside its Grid branch
+  (`WpfDesign.Designer\Project\ModelTools.cs:783`,
+  `Canvas.TopProperty.SetValue(ymin)` — a WPF attached property that a
+  `Grid` ignores entirely, immediately followed by the actually-correct
+  `margin.Top = ymin`) — dropped in this port, not reproduced, same
+  "fix a latent reference bug while porting" precedent 4a's
+  `ResizeThumbExtension` and 4b's `PlacementOperation.ChangeContainer`
+  already established.
 - **Context-menu extensions subclass `DefaultExtension` directly, not
   `AdornerProvider`** (see "Also verified" above) — each with its own
   `[ExtensionServer(...)]`/`[ExtensionFor(...)]`, extending 4a's already-
@@ -333,23 +356,34 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                          CanEnterContainer guard +
                                          EnterContainer, see Revision
                                          history's plan-writing addendum)
+    WinUIDesigner.Designer\
+      DesignSurface.cs                  (modify: register ICopyPasteService
+                                         via a CustomServiceRegisterFunctions
+                                         entry in LoadDesigner, same pattern
+                                         already used for IDesignPanel/
+                                         ISelectionService/OptionService)
       Services\
         CopyPasteService.cs            (new: concrete ICopyPasteService.
                                          Delete/CanDelete real (ModelTools-
                                          backed); Copy/Cut/Paste/CanCopy/
                                          CanCut/CanPaste explicitly
                                          unimplemented)
-    WinUIDesigner.Designer\
       DesignPanel.cs                    (modify: add
                                          AddContextFlyoutItems(items, order)/
                                          RemoveContextFlyoutItems — internal
                                          Order-grouped merge into one
                                          MenuFlyout set as this.ContextFlyout,
                                          separators between Order groups)
+      ArrangeDirection.cs               (new: enum Top/VerticalMiddle/
+                                         Bottom/Left/HorizontalMiddle/Right —
+                                         standalone file, matching
+                                         PlacementType.cs's convention)
       ModelTools.cs                     (modify: add CanDeleteComponents,
                                          DeleteComponents, ArrangeItems
-                                         (Left/Top-anchored only),
-                                         WrapItemsNewContainer,
+                                         (Canvas branch Left/Top-anchored
+                                         only; Grid branch ports both
+                                         alignment cases faithfully — no
+                                         WinUI gap there), WrapItemsNewContainer,
                                          UnwrapItemsFromContainer)
       Extensions\
         RightClickContextMenuExtension.cs      (new: [ExtensionServer(
