@@ -304,5 +304,119 @@ namespace WinUIDesigner.Designer.Tests
                     "3 columns => 2 interior boundaries, same PropertyChanged(\"ColumnDefinitions\") path");
             });
         }
+
+        [Test]
+        public void UnitSelectorSetsAutoStarAndPixelOnTheHoveredRow()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                provider.LeftRail.SimulateHover(30); // inside row 0 (0..60)
+                var selector = provider.LeftRail.UnitSelector;
+                Assert.IsNotNull(selector.SelectedItem);
+                Assert.AreEqual(GridUnitType.Star, selector.Unit, "an unset RowDefinition.Height is 1*");
+                Assert.AreEqual(Visibility.Visible, selector.Visibility);
+
+                selector.SimulatePick(GridUnitType.Auto);
+                surface.UpdateLayout();
+                Assert.IsTrue(grid.RowDefinitions[0].Height.IsAuto);
+                Assert.AreEqual(GridUnitType.Auto, selector.Unit);
+                CollectionAssert.AreEqual(new[] { "Auto", "*" }, provider.LeftRail.LabelTexts.ToList(),
+                    "the rail caption follows the unit change");
+
+                selector.SimulatePick(GridUnitType.Star);
+                surface.UpdateLayout();
+                Assert.IsTrue(grid.RowDefinitions[0].Height.IsStar);
+
+                selector.SimulatePick(GridUnitType.Pixel);
+                surface.UpdateLayout();
+                Assert.IsTrue(grid.RowDefinitions[0].Height.IsAbsolute);
+            });
+        }
+
+        [Test]
+        public void UnitSelectorTargetsTheHoveredColumnOnly()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                provider.TopRail.SimulateHover(150); // inside column 1 (100..200)
+                var selector = provider.TopRail.UnitSelector;
+                Assert.AreSame(surface.DesignContext.Services.Component.GetDesignItem(grid.ColumnDefinitions[1]),
+                               selector.SelectedItem);
+
+                selector.SimulatePick(GridUnitType.Auto);
+                surface.UpdateLayout();
+                Assert.IsTrue(grid.ColumnDefinitions[1].Width.IsAuto);
+                Assert.IsFalse(grid.ColumnDefinitions[0].Width.IsAuto, "the other column is untouched");
+            });
+        }
+
+        [Test]
+        public void HoveringPastTheLastRowHidesTheUnitSelector()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out _, out var provider);
+                provider.LeftRail.SimulateHover(500); // past the bottom of the grid
+                Assert.AreEqual(Visibility.Collapsed, provider.LeftRail.UnitSelector.Visibility);
+            });
+        }
+
+        [Test]
+        public void SwitchingHoverBetweenRowsOfDifferentUnitsDoesNotCorruptTheNewRow()
+        {
+            // Regression coverage for the suppress-guard (the "updating" field): one
+            // GridUnitSelector instance is reused across every row the pointer moves over, so
+            // moving from a row already picked as Auto onto a still-default (Star) row drives
+            // autoButton from checked to unchecked and starButton from unchecked to checked in
+            // the SAME Unit-setter call - exactly the reentrant ToggleButton.Checked/Unchecked
+            // sequence "updating" exists to make inert. Asserts the real, observable outcome:
+            // the newly hovered row ends up reflecting its OWN unit (not clobbered by whatever
+            // was picked on the previously hovered row), and hovering alone never opens an undo
+            // entry.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+
+                provider.LeftRail.SimulateHover(30); // row 0
+                provider.LeftRail.UnitSelector.SimulatePick(GridUnitType.Auto);
+                surface.UpdateLayout();
+                Assert.IsTrue(grid.RowDefinitions[0].Height.IsAuto, "precondition");
+                int undoCountAfterPick = undo.UndoActions.Count();
+
+                provider.LeftRail.SimulateHover(90); // row 1 - still default *
+                surface.UpdateLayout();
+
+                Assert.IsTrue(grid.RowDefinitions[1].Height.IsStar, "hovering must not force row 1 to Auto");
+                Assert.AreEqual(GridUnitType.Star, provider.LeftRail.UnitSelector.Unit);
+                Assert.AreEqual(undoCountAfterPick, undo.UndoActions.Count(), "hovering must not open a new undo entry");
+            });
+        }
+
+        [Test]
+        public void TheTwoRailsUnitSelectorsActIndependently()
+        {
+            // Regression coverage for the per-instance-isolation adaptation (Task 11 built this as
+            // a unique RadioButton GroupName per instance; this port instead uses per-instance
+            // ToggleButton fields with hand-rolled mutual exclusion, which has no shared/static
+            // state at all - but that structural choice is exactly what this test is guarding:
+            // if a future change reintroduced RadioButtons sharing one literal GroupName across
+            // the two GridUnitSelector siblings GridAdornerProvider adds to the same AdornerPanel,
+            // picking a unit on one rail would clobber the other rail's selection.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+
+                provider.LeftRail.SimulateHover(30); // row 0
+                provider.LeftRail.UnitSelector.SimulatePick(GridUnitType.Auto);
+                surface.UpdateLayout();
+
+                provider.TopRail.SimulateHover(150); // column 1
+                provider.TopRail.UnitSelector.SimulatePick(GridUnitType.Pixel);
+                surface.UpdateLayout();
+
+                Assert.IsTrue(grid.RowDefinitions[0].Height.IsAuto, "the column pick must not clobber the row pick");
+                Assert.AreEqual(GridUnitType.Auto, provider.LeftRail.UnitSelector.Unit);
+                Assert.IsTrue(grid.ColumnDefinitions[1].Width.IsAbsolute);
+                Assert.AreEqual(GridUnitType.Pixel, provider.TopRail.UnitSelector.Unit);
+            });
+        }
     }
 }

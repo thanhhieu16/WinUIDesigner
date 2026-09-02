@@ -1,94 +1,114 @@
-using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel;
 
 namespace WinUIDesigner.Designer.Controls
 {
     /// <summary>
-    /// The Auto / Star(*) / Fixed(px) picker GridRailAdorner shows next to a hovered row/column.
-    /// Ported from the reference's GridUnitSelector.xaml/.xaml.cs. This port builds every
-    /// designer-chrome visual in code rather than loose XAML (the convention Phase 3's
-    /// SelectionHighlight and Phase 4a's DesignerThumb already established - no
-    /// InitializeComponent/BAML pipeline exists here), so the reference's
-    /// Border+StackPanel+3-RadioButton visual tree is constructed directly instead. Base is
-    /// Grid, not UserControl/Border: Border is sealed in this SDK (the same CS0509 DesignerThumb's
-    /// remarks note for Thumb), and Grid already gives Background/BorderBrush/BorderThickness
-    /// without a Control's style/template resolution - the same choice GridRailAdorner/
-    /// GridSplitterAdorner made.
+    /// Size-unit picker (Fixed / star / Auto) for one RowDefinition or ColumnDefinition, shown
+    /// beside the rail while the pointer hovers a row/column. Ported from the reference's
+    /// GridUnitSelector.xaml + .xaml.cs. Built code-only, no generic.xaml and no style resource
+    /// dictionary - the same idiom Controls/Thumbs/DesignerThumb.cs established in 4a, and no loss
+    /// of fidelity here: the reference's three RadioButtons carry a local ControlTemplate that
+    /// retemplates each one into a ToggleButton, so three ToggleButtons with hand-rolled mutual
+    /// exclusion IS the reference's actual UI. Base is Grid rather than UserControl/Border (Border
+    /// is sealed in this SDK) - Grid carries Background/BorderBrush/BorderThickness/CornerRadius/
+    /// Padding directly, so the reference's rounded blue frame needs no extra element.
     ///
-    /// GridRailAdorner's constructor builds one of these per rail (one for rows, one for
-    /// columns) and adds both to the SAME AdornerPanel as siblings, so the reference's
-    /// UserControl-scoped RadioButton GroupName ("group", isolated per instance by the
-    /// UserControl's own NameScope) is replaced with a GroupName unique to this instance -
-    /// otherwise the two pickers would fight over the same three-way selection.
+    /// Three plain ToggleButtons (rather than RadioButtons) also sidesteps a problem the reference
+    /// never had to face: GridRailAdorner builds TWO of these (one for rows, one for columns) as
+    /// siblings inside the SAME AdornerPanel, outside any NameScope. A RadioButton's mutual
+    /// exclusion is scoped by GroupName across the whole visual tree, so two selectors sharing (or
+    /// both omitting) a GroupName would fight each other's selection. Mutual exclusion here is
+    /// hand-rolled per instance (OnUnitPicked clears the other two of THIS selector's own fields),
+    /// so there is no shared/static state for a second instance to collide with.
     /// </summary>
     public sealed class GridUnitSelector : Grid
     {
         readonly GridRailAdorner rail;
-        readonly StackPanel stack;
-        readonly RadioButton fixedButton;
-        readonly RadioButton starButton;
-        readonly RadioButton autoButton;
-        bool suppressChecked;
+        readonly StackPanel buttons;
+        readonly ToggleButton fixedButton, starButton, autoButton;
 
-        public static readonly DependencyProperty OrientationProperty =
-            DependencyProperty.Register(nameof(Orientation), typeof(Orientation), typeof(GridUnitSelector),
-                new PropertyMetadata(Orientation.Vertical, OnOrientationChanged));
+        // The reference relied on SetGridLengthUnit's "if (value != oldValue)" to make the Checked
+        // event it raises while *displaying* a unit a no-op. An explicit flag is clearer and also
+        // stops a display update from opening a spurious undo entry.
+        bool updating;
 
         public GridUnitSelector(GridRailAdorner rail)
         {
-            if (rail == null) throw new ArgumentNullException(nameof(rail));
             this.rail = rail;
 
             Background = new SolidColorBrush(Microsoft.UI.Colors.LightBlue);
             BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.CornflowerBlue);
             BorderThickness = new Thickness(1);
+            CornerRadius = new CornerRadius(3);
+            Padding = new Thickness(1);
+            IsHitTestVisible = true;
+
+            fixedButton = CreateButton("Fixed", 8, "Fixed - size is a fixed pixel width/height", GridUnitType.Pixel);
+            starButton = CreateButton("*", 16, "Star - size is a weighted proportion", GridUnitType.Star);
+            autoButton = CreateButton("Auto", 8, "Auto - size is determined by the content(s)", GridUnitType.Auto);
+
+            buttons = new StackPanel { Orientation = Orientation.Vertical };
+            buttons.Children.Add(fixedButton);
+            buttons.Children.Add(starButton);
+            buttons.Children.Add(autoButton);
+            Children.Add(buttons);
+
+            // WinUI has no Visibility.Hidden - Collapsed is the established replacement, and
+            // AdornerPanel arranges every child independently so a Collapsed sibling perturbs
+            // nothing.
             Visibility = Visibility.Collapsed;
-
-            stack = new StackPanel { Margin = new Thickness(6) };
-            Children.Add(stack);
-
-            string groupName = "GridUnitSelector-" + GetHashCode();
-            fixedButton = CreateOption("Fixed", groupName);
-            starButton = CreateOption("*", groupName);
-            autoButton = CreateOption("Auto", groupName);
-
-            stack.Children.Add(fixedButton);
-            stack.Children.Add(starButton);
-            stack.Children.Add(autoButton);
-
-            AddHandler(UIElement.PointerExitedEvent, (PointerEventHandler)OnPointerExited, true);
+            PointerExited += (s, e) => Visibility = Visibility.Collapsed;
         }
 
-        RadioButton CreateOption(string content, string groupName)
+        ToggleButton CreateButton(string content, double fontSize, string tooltip, GridUnitType unit)
         {
-            var button = new RadioButton { Content = content, GroupName = groupName, FontSize = 10, Margin = new Thickness(1) };
-            button.Checked += OnOptionChecked;
+            var button = new ToggleButton {
+                Content = content,
+                FontSize = fontSize,
+                Margin = new Thickness(1),
+                Padding = new Thickness(6),
+                MinWidth = 0,
+                MinHeight = 0,
+            };
+            ToolTipService.SetToolTip(button, tooltip);
+            button.Checked += (s, e) => OnUnitPicked(button, unit);
+            // A RadioButton group cannot be un-picked; three ToggleButtons can, so re-check the one
+            // the user just cleared rather than leaving the row with no unit selected.
+            button.Unchecked += (s, e) => {
+                if (!updating && !AnyChecked()) {
+                    updating = true;
+                    button.IsChecked = true;
+                    updating = false;
+                }
+            };
             return button;
         }
 
-        void OnOptionChecked(object sender, RoutedEventArgs e)
+        bool AnyChecked()
         {
-            if (suppressChecked) return;
-            rail.SetGridLengthUnit(Unit);
+            return fixedButton.IsChecked == true || starButton.IsChecked == true || autoButton.IsChecked == true;
         }
 
-        void OnPointerExited(object sender, PointerRoutedEventArgs e)
+        void OnUnitPicked(ToggleButton source, GridUnitType unit)
         {
-            Visibility = Visibility.Collapsed;
+            if (updating) return;
+            updating = true;
+            try {
+                foreach (var other in new[] { fixedButton, starButton, autoButton })
+                    if (other != source) other.IsChecked = false;
+            } finally {
+                updating = false;
+            }
+            rail.SetGridLengthUnit(unit);
         }
 
         public Orientation Orientation {
-            get { return (Orientation)GetValue(OrientationProperty); }
-            set { SetValue(OrientationProperty, value); }
-        }
-
-        static void OnOrientationChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-        {
-            ((GridUnitSelector)d).stack.Orientation = (Orientation)e.NewValue;
+            get { return buttons.Orientation; }
+            set { buttons.Orientation = value; }
         }
 
         public DesignItem SelectedItem { get; set; }
@@ -100,15 +120,28 @@ namespace WinUIDesigner.Designer.Controls
                 return GridUnitType.Pixel;
             }
             set {
-                // Reflects existing state into the radio group without re-triggering
-                // rail.SetGridLengthUnit - only a user click should rewrite the model.
-                suppressChecked = true;
-                switch (value) {
-                    case GridUnitType.Auto: autoButton.IsChecked = true; break;
-                    case GridUnitType.Star: starButton.IsChecked = true; break;
-                    default: fixedButton.IsChecked = true; break;
+                updating = true;
+                try {
+                    autoButton.IsChecked = value == GridUnitType.Auto;
+                    starButton.IsChecked = value == GridUnitType.Star;
+                    fixedButton.IsChecked = value == GridUnitType.Pixel;
+                } finally {
+                    updating = false;
                 }
-                suppressChecked = false;
+            }
+        }
+
+        /// <summary>Test seam: drives the same path a real click on one of the three buttons does.
+        /// ToggleButton.Checked cannot be raised without a live click, so tests call this.</summary>
+        internal void SimulatePick(GridUnitType unit)
+        {
+            var button = unit == GridUnitType.Auto ? autoButton : unit == GridUnitType.Star ? starButton : fixedButton;
+            OnUnitPicked(button, unit);
+            updating = true;
+            try {
+                button.IsChecked = true;
+            } finally {
+                updating = false;
             }
         }
     }
