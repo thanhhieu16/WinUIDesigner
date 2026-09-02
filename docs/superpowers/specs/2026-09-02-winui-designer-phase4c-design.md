@@ -144,23 +144,29 @@ build` against `Microsoft.WindowsAppSDK 1.7.250606001`, then deleted).
   has `Canvas.Right`-anchored branches for right/bottom-edge alignment.
   See Decisions.
 
-**Not yet empirically verified — flagged, not guessed:**
-- Whether a live `MenuFlyoutItemBase` can be safely removed from one
-  `MenuFlyout`/`MenuFlyoutSubItem.Items` collection and added to
-  another's, the same way WPF's `ContextMenu.Items` (an `ItemsControl`
-  collection) supports reparenting a live `MenuItem`. WPF's
-  `DesignPanel.UpdateContextMenu`
-  (`WpfDesign.Designer\Project\DesignPanel.cs:555-613`) depends on this:
-  it snapshots each extension's private `ContextMenu.Items` into a
-  dictionary keyed by `Order`, then rebuilds one composite menu by
-  removing each item from its origin `ItemsControl` and adding it to the
-  composite, in `Order` groups separated by a `Separator`.
-  `MenuFlyoutItemBase` is a WinRT `DependencyObject`, not a WPF
-  `FrameworkElement`/`Freezable`-adjacent type, and this port has
-  already hit other "does a live instance survive being moved between
-  collections" gaps in 4a/4b (`TransformGroup` sharing). **Must be
-  verified empirically as the plan's first task**, same precedent as
-  every prior phase's first Known gap.
+**Empirically verified during plan-writing (not just SDK docs):**
+- Whether a `MenuFlyoutItem` instance can be added to a second
+  `MenuFlyout.Items` collection after being added to a first one that is
+  then simply discarded (no explicit `.Remove()` call on the origin) —
+  the exact pattern `UpdateContextFlyout`'s rebuild-from-scratch approach
+  needs, and the thing WPF's `DesignPanel.UpdateContextMenu`
+  (`WpfDesign.Designer\Project\DesignPanel.cs:555-613`) does by
+  reparenting items between `ItemsControl.Items` collections. Checked
+  directly: a throwaway test
+  (`tests/WinUIDesigner.Designer.Tests/__Probe4cMenuFlyout.cs`, built and
+  run via the real `.exe` runner, then deleted — `git status` confirmed
+  no residue) added two `MenuFlyoutItem`s to one `MenuFlyout`, discarded
+  that flyout without calling `Items.Remove`, then added the *same two
+  instances* (plus a new `MenuFlyoutSeparator`) to a second `MenuFlyout`
+  — passed cleanly, no exception, both items present at the expected
+  indices in the second flyout. **Confirmed working**, not merely
+  assumed: `MenuFlyoutItemBase` (a WinRT `DependencyObject`, not a WPF
+  `FrameworkElement`) does not enforce the single-visual-parent
+  constraint `UIElement`/`Panel.Children` would. This resolves the
+  design question the composite-rebuild mechanism (Architecture,
+  Task 1) depends on — no special per-rebuild item-recreation logic is
+  needed, reusing the same `MenuFlyoutItem` instances across rebuilds is
+  safe.
 
 ## Also verified against the current codebase
 
@@ -243,14 +249,18 @@ build` against `Microsoft.WindowsAppSDK 1.7.250606001`, then deleted).
   ports unchanged: direct `CollectionElements.Remove`/`Add`/`Insert`/
   `IndexOf`, no new API needed.
 - **`IComponentService.ComponentRemoved` event exists**
-  (`src/WinUIDesigner.DesignModel/Services.cs:29`), but whether removing
-  an item from its parent's `CollectionElements` fires it automatically
-  or needs an explicit raise — the way the reference's `DeleteComponents`
-  calls `service.RaiseComponentRemoved(item)`, a method on the
-  reference's concrete `XamlComponentService`, not part of the
-  `IComponentService` interface — is **unverified**. Plan-time detail:
-  check this port's concrete `IComponentService` implementation before
-  assuming either way.
+  (`src/WinUIDesigner.DesignModel/Services.cs:29`), and — checked
+  directly, plan-writing — is **not** fired automatically by removing an
+  item from `CollectionElements`. This port's concrete
+  `XamlComponentService`
+  (`src/WinUIDesigner.DesignModel/Xaml/XamlComponentService.cs:235-238`)
+  has the same `internal void RaiseComponentRemoved(DesignItem item)`
+  method as the reference, called explicitly, not automatically —
+  confirming `DeleteComponents` must call it explicitly too, exactly
+  like the reference. Reachable from `WinUIDesigner.Designer.ModelTools`
+  via the existing `InternalsVisibleTo("WinUIDesigner.Designer")`
+  (`src/WinUIDesigner.DesignModel/AssemblyInfo.cs:13`) — no new
+  visibility grant needed.
 
 ## Decisions already made
 
@@ -406,7 +416,7 @@ D:\Project\ST4I\Research\WinUIDesigner\
 
 | WPF mechanism | WinUI replacement |
 | --- | --- |
-| `ContextMenu` + `DesignPanel.AddContextMenu(menu, order)`/`RemoveContextMenu`, merge-by-`Order` into one composite `ContextMenu` assigned to `DesignPanel.ContextMenu` | `MenuFlyout` + `DesignPanel.AddContextFlyoutItems(items, order)`/`RemoveContextFlyoutItems`, merge-by-`Order` into one composite `MenuFlyout` assigned to `DesignPanel.ContextFlyout`. Live-instance move between `Items` collections unverified — Known gap #1. |
+| `ContextMenu` + `DesignPanel.AddContextMenu(menu, order)`/`RemoveContextMenu`, merge-by-`Order` into one composite `ContextMenu` assigned to `DesignPanel.ContextMenu` | `MenuFlyout` + `DesignPanel.AddContextFlyoutItems(items, order)`/`RemoveContextFlyoutItems`, merge-by-`Order` into one composite `MenuFlyout` assigned to `DesignPanel.ContextFlyout`. Reusing the same `MenuFlyoutItem` instances across a discarded-and-rebuilt `MenuFlyout` is confirmed safe (empirically verified above). |
 | `MenuItem`, `MenuItem.Click` | `MenuFlyoutItem`, `MenuFlyoutItem.Click` |
 | `RoutedCommand`/`ApplicationCommands`/`CommandBinding`/`MenuItem.Command` | Not present (compiler-confirmed, no equivalent class). Direct `Click` handler per item, calling `ModelTools`/`ICopyPasteService`/`UndoService`. No command-pattern indirection layer replaces it — nothing in this phase's scope needs one (see Decisions). |
 | `Canvas.RightProperty`/`BottomProperty` (`ArrangeItems`' right/bottom-anchored branches) | Not present (known gap, CLAUDE.md) — dropped, Left/Top-anchored alignment only. |
@@ -470,9 +480,10 @@ Phase 4c is done when:
 - A test attaches two context-menu extensions with different `Order`
   values to the same item, triggers the merge, and asserts the resulting
   `MenuFlyout.Items` contains both groups' items in ascending `Order`
-  with exactly one separator between them — the plan's first task,
-  resolving Known gap #1 (does moving a live `MenuFlyoutItemBase`
-  between `Items` collections actually work).
+  with exactly one separator between them — reusing the same
+  `MenuFlyoutItem` instances across a rebuild is already confirmed safe
+  (see WinUI API surface above), so this test covers the merge/ordering
+  logic itself, not instance-reuse safety.
 - A test right-clicks a single selected item and asserts the z-order
   menu items (`Bring to Front`/`Send to Back`/`Forward`/`Backward`) move
   it to the correct index in its parent's `CollectionElements`, with
@@ -504,24 +515,16 @@ Phase 4c is done when:
   `ArrangeItemsContextMenuExtension` only present when 2+ items are
   selected) and that removing an extension removes its items from the
   merged `MenuFlyout`.
-- Known gap #1 has an explicit, tested resolution (first bullet above).
-  Known gap #2 (`ComponentRemoved` auto-fire vs. explicit raise) is
+- Known gap #1 (`ComponentRemoved` auto-fire vs. explicit raise) is
   checked directly against this port's concrete `IComponentService`
-  before `DeleteComponents` is written, not guessed. Known gap #3 (exact
+  before `DeleteComponents` is written, not guessed. Known gap #2 (exact
   `MenuFlyout` rebuild strategy on attach/detach) is a plan-time
   implementation choice, not something a test needs to "resolve" beyond
   covering whatever the plan settles on.
 
 ## Known gaps — flagged, not guessed
 
-1. **Whether a live `MenuFlyoutItemBase` can be moved between
-   `MenuFlyout`/`MenuFlyoutSubItem.Items` collections the way WPF's
-   `ContextMenu.Items` supports.** The merge mechanism (`Order`-grouped,
-   separator-divided, rebuilt on attach/detach) depends on this working.
-   **Must be verified empirically as the plan's first task**, same
-   precedent as every prior phase's first Known gap (4a's `DragListener`
-   bug hunt, 4b's `ChangeContainer` sequencing check).
-2. **Whether removing an item from its parent's `CollectionElements`
+1. **Whether removing an item from its parent's `CollectionElements`
    fires `IComponentService.ComponentRemoved` automatically, or needs an
    explicit raise** the way the reference's `DeleteComponents` calls
    `service.RaiseComponentRemoved(item)` on its concrete
@@ -529,7 +532,7 @@ Phase 4c is done when:
    interface). Check this port's concrete `IComponentService`
    implementation directly before writing `DeleteComponents` — a small,
    quick check, not a deep research risk.
-3. **Exact `MenuFlyout` rebuild strategy when an extension attaches or
+2. **Exact `MenuFlyout` rebuild strategy when an extension attaches or
    detaches at runtime** (selection changes causing
    `OnlyOneItemSelectedExtensionServer`/
    `PrimarySelectionButOnlyWhenMultipleSelectedExtensionServer`-gated
