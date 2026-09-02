@@ -68,6 +68,51 @@ Not yet sent through adversarial review, unlike 4a (two rounds) and 4b
 be re-checked empirically before or during planning, not assumed correct
 from this document alone.
 
+**Plan-writing addendum.** Tracing `ModelTools.WrapItemsNewContainer`'s
+full reference body (`WpfDesign.Designer\Project\ModelTools.cs:257-380`)
+found two more things this document's first version missed:
+
+1. **`WrapItemsNewContainer`'s `doInsert=true` path calls
+   `PlacementOperation.TryStartInsertNewComponents`** — a *second*
+   `PlacementOperation` member Phase 3 explicitly dropped, alongside
+   `DeleteItemsAndCommit` (same doc comment,
+   `src/WinUIDesigner.DesignModel/PlacementOperation.cs:11-17`: "...and
+   `TryStartInsertNewComponents` dropped: their only callers are the
+   delete command... and toolbox-drop insertion (no Phase 4a/4b
+   caller)"). Without it, a wrapped item's new container is created and
+   populated but never actually inserted into the old container's own
+   collection — silently broken, not merely incomplete. Small to
+   re-add: the reference body
+   (`WpfDesign\Project\PlacementOperation.cs:307-342`) is a private-
+   constructor call plus a `CanEnterContainer`/`EnterContainer` guard,
+   using only members already present in this port
+   (`PlacementInformation.OriginalBounds`/`Bounds` are public-settable,
+   `IPlacementBehavior.CanEnterContainer`/`EnterContainer` already on
+   the interface). Added to Architecture below, alongside
+   `DeleteItemsAndCommit`.
+2. **The reference's own `ItemPos.HorizontalAlignment`/`VerticalAlignment`
+   fields (`ModelTools.cs:229,231`) are never assigned anywhere in the
+   file** — `GetItemPos` (`ModelTools.cs:244-255`), the only place
+   `ItemPos` instances are constructed, never sets them, so every
+   comparison against them (`item.HorizontalAlignment ==
+   HorizontalAlignment.Right`, `item.VerticalAlignment ==
+   VerticalAlignment.Bottom`, 8 call sites across `ArrangeItems`/
+   `WrapItemsNewContainer`/`UnwrapItemsFromContainer`) always reads the
+   default enum value (`Left`/`Top`) and is therefore always `false` —
+   dead code in the reference itself, not a WinUI-specific concern. This
+   means the Left/Top-only decision below (originally justified purely
+   by `Canvas.RightProperty`/`BottomProperty` being absent in WinUI) also
+   **matches the reference's actual runtime behavior** for
+   `WrapItemsNewContainer`/`UnwrapItemsFromContainer`, not just
+   `ArrangeItems` — porting only the Left/Top branch everywhere
+   reproduces exactly what the reference does today, nothing is being
+   removed that the reference actually exercises. `ExtensionManager.
+   CreateInstanceWithCustomInstanceFactory(Type, object[])`, the other
+   API `WrapItemsNewContainer` needs to construct the new container
+   instance, already exists in this port
+   (`src/WinUIDesigner.DesignModel/Extensions/ExtensionManager.cs:264`)
+   — confirmed, not a gap.
+
 ## WinUI API surface — verified, not assumed
 
 Checked via SDK XML docs (`Microsoft.WinUI.xml`) and a throwaway compiler
@@ -272,7 +317,12 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                          PrimarySelectionButOnlyWhenMultipleSelectedExtensionServer)
       PlacementOperation.cs            (modify: re-add DeleteItemsAndCommit
                                          — CanLeaveContainer guard +
-                                         LeaveContainer + Commit)
+                                         LeaveContainer + Commit — and
+                                         TryStartInsertNewComponents —
+                                         private-constructor call +
+                                         CanEnterContainer guard +
+                                         EnterContainer, see Revision
+                                         history's plan-writing addendum)
       Services\
         CopyPasteService.cs            (new: concrete ICopyPasteService.
                                          Delete/CanDelete real (ModelTools-
