@@ -1,16 +1,20 @@
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel;
+using WinUIDesigner.DesignModel.Xaml;
 
 namespace WinUIDesigner.Designer
 {
     /// <summary>
     /// Static helper methods for working with the designer DOM. Ported from the reference's
-    /// ModelTools.cs (890 lines) with only the four members Phase 4a actually calls -
-    /// WrapItemsNewContainer/UnwrapItemsFromContainer/ArrangeItems/StretchItems/
-    /// CanDeleteComponents/IsInDocument/ComparePositionInModelFile are all multi-selection/
-    /// context-menu helpers with no 4a consumer (4c/4e territory).
+    /// ModelTools.cs (890 lines) with only the members actually called by a phase so far -
+    /// Phase 4a added GetWidth/GetHeight/Resize/ApplyTransform; Phase 4c Task 4 added
+    /// CanDeleteComponents/DeleteComponents (below). WrapItemsNewContainer/
+    /// UnwrapItemsFromContainer/ArrangeItems/StretchItems/IsInDocument/
+    /// ComparePositionInModelFile remain unported multi-selection/context-menu helpers with
+    /// no consumer yet (4e territory).
     /// </summary>
     public static class ModelTools
     {
@@ -126,6 +130,61 @@ namespace WinUIDesigner.Designer
 
             ((DesignPanel)designItem.Services.DesignPanel).AdornerLayer.UpdateAdornersForElement(designItem.View, true);
             changeGroup.Commit();
+        }
+
+        /// <summary>Gets if the specified components can be deleted. Ported unchanged from the
+        /// reference (WpfDesign.Designer/Project/ModelTools.cs:84-89) - DefaultPlacementBehavior.
+        /// CanPlace already returns true unconditionally for any PlacementType (Extensions/
+        /// DefaultPlacementBehavior.cs:46), so this works against every placement behavior in
+        /// this port with zero changes to any of them.</summary>
+        public static bool CanDeleteComponents(ICollection<DesignItem> items)
+        {
+            IPlacementBehavior b = PlacementOperation.GetPlacementBehavior(items);
+            return b != null && b.CanPlace(items, PlacementType.Delete, PlacementAlignment.Center);
+        }
+
+        /// <summary>Deletes the specified components from their parent containers, as one
+        /// undo entry regardless of how many distinct parents are involved. Ported from the
+        /// reference (WpfDesign.Designer/Project/ModelTools.cs:100-138) - RaiseComponentRemoved
+        /// must be called explicitly (checked directly against this port's XamlComponentService,
+        /// not automatic - see this plan's Global Constraints).</summary>
+        public static void DeleteComponents(ICollection<DesignItem> deleteItems)
+        {
+            if (deleteItems.Count == 0) return;
+
+            var changeGroup = deleteItems.First().OpenGroup("Delete Items");
+            try {
+                var itemsGrpParent = deleteItems.GroupBy(x => x.Parent);
+                foreach (var itemsList in itemsGrpParent) {
+                    var items = itemsList.ToList();
+                    DesignItem parent = items.First().Parent;
+                    PlacementOperation operation = PlacementOperation.Start(items, PlacementType.Delete);
+                    try {
+                        var selectionService = items.First().Services.Selection;
+                        selectionService.SetSelectedComponents(items, SelectionTypes.Remove);
+                        if (selectionService.SelectionCount == 0 && !items.Contains(parent)) {
+                            selectionService.SetSelectedComponents(new[] { parent });
+                        }
+                        foreach (var designItem in items) {
+                            designItem.Name = null;
+                        }
+
+                        var service = parent.Services.Component as XamlComponentService;
+                        foreach (var item in items) {
+                            service.RaiseComponentRemoved(item);
+                        }
+
+                        operation.DeleteItemsAndCommit();
+                    } catch {
+                        operation.Abort();
+                        throw;
+                    }
+                }
+                changeGroup.Commit();
+            } catch {
+                changeGroup.Abort();
+                throw;
+            }
         }
     }
 }

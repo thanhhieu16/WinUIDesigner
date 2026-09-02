@@ -39,6 +39,7 @@ namespace WinUIDesigner.Designer
 			// which does not (and must not) reference Designer. Registered here instead, exactly
 			// like IDesignPanel and ISelectionService above.
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(OptionService), new OptionService()));
+			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.Services.ICopyPasteService), new Services.CopyPasteService()));
 			InitializeDesigner(new XamlDesignContext(xamlReader, loadSettings));
 		}
 
