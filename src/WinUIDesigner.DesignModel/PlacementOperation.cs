@@ -10,10 +10,11 @@ namespace WinUIDesigner.DesignModel
 {
     /// <summary>
     /// Stores data about a placement operation. Ported from the reference's
-    /// PlacementOperation.cs with DeleteItemsAndCommit and TryStartInsertNewComponents
-    /// dropped: their only callers are the delete command (out of scope per Phase 3) and
-    /// toolbox-drop insertion (no Phase 4a/4b caller). Same "port only the called surface"
-    /// treatment already applied to ModelTools.cs/Metadata.cs.
+    /// PlacementOperation.cs. Phase 3 initially dropped DeleteItemsAndCommit and
+    /// TryStartInsertNewComponents for lack of a caller (their only callers are the delete
+    /// command and toolbox-drop/wrap-with-insert, both out of scope then) - same "port only the
+    /// called surface" treatment already applied to ModelTools.cs/Metadata.cs. Phase 4c re-adds
+    /// both: the Delete command and Wrap-with-insert feature are their first real callers.
     /// </summary>
     public sealed class PlacementOperation
     {
@@ -54,6 +55,44 @@ namespace WinUIDesigner.DesignModel
                     info.OriginalBounds = op.currentContainerBehavior.GetPosition(op, info.Item);
                     info.Bounds = info.OriginalBounds;
                 }
+            } catch {
+                op.changeGroup.Abort();
+                throw;
+            }
+            return op;
+        }
+
+        /// <summary>Starts a placement operation that inserts newly-created item(s) directly
+        /// into an existing container at given positions, bypassing Start()'s
+        /// BeginPlacement/GetPosition initialization (there is no existing position to read -
+        /// the positions are supplied). Ported from the reference (WpfDesign/Project/
+        /// PlacementOperation.cs:307-342) - dropped in Phase 3 for lack of a caller; Phase 4c's
+        /// WrapItemsNewContainer (Task 6) is the first real caller. Returns null if the
+        /// container's placement behavior refuses (matches the reference; the reference also
+        /// swallows and rethrows unexpected exceptions through Debug.WriteLine, dropped here -
+        /// no debug-output-only side channel anywhere else in this port).</summary>
+        public static PlacementOperation TryStartInsertNewComponents(DesignItem container, IList<DesignItem> placedItems, IList<Rect> positions, PlacementType type)
+        {
+            if (container == null) throw new ArgumentNullException(nameof(container));
+            if (placedItems == null) throw new ArgumentNullException(nameof(placedItems));
+            if (positions == null) throw new ArgumentNullException(nameof(positions));
+            if (type == null) throw new ArgumentNullException(nameof(type));
+            if (placedItems.Count == 0) throw new ArgumentException("placedItems.Count must be > 0");
+            if (placedItems.Count != positions.Count) throw new ArgumentException("positions.Count must be = placedItems.Count");
+
+            DesignItem[] items = placedItems.ToArray();
+            PlacementOperation op = new PlacementOperation(items, type);
+            try {
+                for (int i = 0; i < items.Length; i++) {
+                    op.placedItems[i].OriginalBounds = op.placedItems[i].Bounds = positions[i];
+                }
+                op.currentContainer = container;
+                op.currentContainerBehavior = container.GetBehavior<IPlacementBehavior>();
+                if (op.currentContainerBehavior == null || !op.currentContainerBehavior.CanEnterContainer(op, true)) {
+                    op.changeGroup.Abort();
+                    return null;
+                }
+                op.currentContainerBehavior.EnterContainer(op);
             } catch {
                 op.changeGroup.Abort();
                 throw;
@@ -117,6 +156,21 @@ namespace WinUIDesigner.DesignModel
                 Abort();
                 throw;
             }
+        }
+
+        /// <summary>Removes the placed item(s) from their container and commits, as one step.
+        /// Ported from the reference (WpfDesign/Project/PlacementOperation.cs:159-168) -
+        /// dropped in Phase 3 for lack of a caller (see this file's class doc comment); Phase
+        /// 4c's Delete command is the first real caller.</summary>
+        public void DeleteItemsAndCommit()
+        {
+            if (isAborted || isCommitted)
+                throw new PlacementOperationException("The operation is not running anymore.");
+            if (!currentContainerBehavior.CanLeaveContainer(this))
+                throw new PlacementOperationException("The items cannot be removed from their parent container.");
+
+            currentContainerBehavior.LeaveContainer(this);
+            Commit();
         }
 
         static Rect TransformRectByMiddlePoint(GeneralTransform transform, Rect r)
