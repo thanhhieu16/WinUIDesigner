@@ -281,5 +281,43 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(25, top, 0.5);
             });
         }
+
+        // Design-intent regression (see task context): PanelMove moves the CONTAINER, not
+        // whatever child happens to be selected inside it. If the child, not the container, is
+        // the primary selection, clicking-and-dragging the container's own body must be a no-op -
+        // it must not silently move the container out from under its actually-selected child.
+        [Test]
+        public void ClickingAndDraggingAContainersBodyWhileAChildInsideItIsSelectedDoesNotMoveTheContainer()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(NestedCanvasXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                surface.DesignPanel.UseSnaplinePlacement = false;
+                surface.UpdateLayout();
+
+                var rootCanvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+                var innerCanvas = (Microsoft.UI.Xaml.Controls.Canvas)rootCanvas.Children[0];
+                var targetButton = (Microsoft.UI.Xaml.Controls.Button)innerCanvas.Children[0];
+                var services = surface.DesignContext.Services;
+                var innerItem = services.Component.GetDesignItem(innerCanvas);
+                var targetItem = services.Component.GetDesignItem(targetButton);
+                // The child (Target), not the container (InnerCanvas), is the primary selection.
+                services.Selection.SetSelectedComponents(new[] { targetItem }, SelectionTypes.Primary);
+                surface.UpdateLayout();
+                var extension = innerItem.Extensions.OfType<PanelMove>().Single();
+
+                extension.DragListener.SimulateDown(new Windows.Foundation.Point(150, 150));
+                extension.DragListener.SimulateMove(new Windows.Foundation.Point(170, 165));
+                extension.DragListener.SimulateUp(new Windows.Foundation.Point(170, 165));
+                surface.UpdateLayout();
+
+                var left = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").GetConvertedValueOnInstance<double>();
+                var top = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").GetConvertedValueOnInstance<double>();
+                Assert.AreEqual(10, left, 0.5, "dragging the container's body must not move it when a child inside it is selected instead");
+                Assert.AreEqual(10, top, 0.5, "dragging the container's body must not move it when a child inside it is selected instead");
+            });
+        }
     }
 }
