@@ -59,6 +59,35 @@ namespace WinUIDesigner.Designer.Tests
                 .Sum(c => c.Children.OfType<Line>().Count());
         }
 
+        // 10x10 - smaller in both dimensions than 2*SnaplineMargin (default 8), so BuildMaps'
+        // AddLines(containerRect, -SnaplineMargin, false) call inflates (0,0,10,10) by -8:
+        // width/height = 10 - 8 - 8 = -6. That is InflateRect's collapse-to-Rect.Empty branch -
+        // the exact WPF platform gap this task exists to reproduce by hand, since
+        // Windows.Foundation.Rect's constructor throws ArgumentException for a negative
+        // width/height instead of silently accepting it the way WPF's Rect struct does.
+        const string TinyPanelXaml =
+            "<SwapChainPanel xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"10\" Height=\"10\">" +
+            "<Button x:Name=\"Tiny\" Width=\"4\" Height=\"4\" HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" />" +
+            "</SwapChainPanel>";
+
+        static DesignSurface LoadTiny(Microsoft.UI.Xaml.Window window, out DesignItem movedItem)
+        {
+            var surface = new DesignSurface();
+            window.Content = surface;
+            var settings = new XamlLoadSettings();
+            settings.DesignerAssemblies.Add(typeof(SnaplinePlacementBehaviorTests).Assembly);
+            using (var reader = XmlReader.Create(new StringReader(TinyPanelXaml)))
+                surface.LoadDesigner(reader, settings);
+            surface.UpdateLayout();
+
+            var panel = (SwapChainPanel)surface.DesignContext.RootItem.Component;
+            movedItem = surface.DesignContext.Services.Component.GetDesignItem(panel.Children[0]);
+            surface.DesignPanel.UseSnaplinePlacement = true;
+            surface.DesignPanel.UseRasterPlacement = false;
+            return surface;
+        }
+
         [Test]
         public void PlacePointSnapsToASiblingsLeftAndTopEdges()
         {
@@ -210,6 +239,32 @@ namespace WinUIDesigner.Designer.Tests
                         "a sibling with DisableSnaplines set contributes no snaplines");
                 } finally {
                     operation.Abort();
+                }
+            });
+        }
+
+        [Test]
+        public void ContainerSmallerThanTwiceTheSnaplineMarginCollapsesInsteadOfThrowing()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadTiny(window, out var movedItem);
+                PlacementOperation operation = null;
+                try {
+                    // BeginPlacement -> CreateSurface -> BuildMaps runs the negative-inflate
+                    // AddLines call against the 10x10 container before this line returns. If
+                    // InflateRect ever regressed to naive arithmetic (new Rect(x, y, -6, -6)
+                    // instead of returning Rect.Empty), this Start call would throw here.
+                    Assert.DoesNotThrow(() => operation = PlacementOperation.Start(new[] { movedItem }, PlacementType.Move),
+                        "a container smaller than 2*SnaplineMargin must collapse the inset-margin rect to Rect.Empty, not throw");
+
+                    Point placed = default;
+                    Assert.DoesNotThrow(() => placed = operation.CurrentContainerBehavior.PlacePoint(new Point(5, 5), VirtualKeyModifiers.None));
+                    Assert.IsFalse(double.IsNaN(placed.X) || double.IsInfinity(placed.X) ||
+                                   double.IsNaN(placed.Y) || double.IsInfinity(placed.Y),
+                        "the collapsed inset-margin snapline's Infinity/NaN offset must never leak into a placed point " +
+                        "(DrawLine already guards this for the drawn lines themselves; this checks the returned Point)");
+                } finally {
+                    operation?.Abort();
                 }
             });
         }
