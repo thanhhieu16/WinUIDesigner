@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Xaml;
 
@@ -11,10 +12,10 @@ namespace WinUIDesigner.Designer
     /// Static helper methods for working with the designer DOM. Ported from the reference's
     /// ModelTools.cs (890 lines) with only the members actually called by a phase so far -
     /// Phase 4a added GetWidth/GetHeight/Resize/ApplyTransform; Phase 4c Task 4 added
-    /// CanDeleteComponents/DeleteComponents; Phase 4c Task 5 added ArrangeItems (below).
-    /// WrapItemsNewContainer/UnwrapItemsFromContainer/StretchItems/IsInDocument/
-    /// ComparePositionInModelFile remain unported multi-selection/context-menu helpers with
-    /// no consumer yet (4e territory).
+    /// CanDeleteComponents/DeleteComponents; Phase 4c Task 5 added ArrangeItems; Phase 4c
+    /// Task 6 added WrapItemsNewContainer/UnwrapItemsFromContainer (below).
+    /// StretchItems/IsInDocument/ComparePositionInModelFile remain unported multi-selection/
+    /// context-menu helpers with no consumer yet (4e territory).
     /// </summary>
     public static class ModelTools
     {
@@ -312,6 +313,138 @@ namespace WinUIDesigner.Designer
             var margin = item.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Thickness>();
             if (isBottomAligned) margin.Bottom = bottomValue; else margin.Top = topValue;
             item.Properties.GetProperty("Margin").SetValue(margin);
+        }
+
+        /// <summary>Wraps the given items (all siblings under the same parent) in a new
+        /// container instance, replacing them at their combined position. Ported from the
+        /// reference (WpfDesign.Designer/Project/ModelTools.cs:257-380) with the reference's own
+        /// dead Right/Bottom-anchored branches (ItemPos.HorizontalAlignment/VerticalAlignment
+        /// are read but never assigned anywhere in the reference - always false) collapsed to
+        /// their always-taken Left/Top-anchored case - see this plan's Task 6 note. Canvas.Right/
+        /// BottomProperty resets also dropped (don't exist in WinUI, and were resetting
+        /// properties this port never sets in the first place).</summary>
+        public static System.Tuple<DesignItem, Rect> WrapItemsNewContainer(IEnumerable<DesignItem> items, System.Type containerType, bool doInsert = true)
+        {
+            var collection = items.ToList();
+            var context = collection.First().Context;
+            var container = collection.First().Parent;
+            if (collection.Any(x => x.Parent != container)) return null;
+
+            var placement = container.GetBehavior<IPlacementBehavior>();
+            if (placement == null) return null;
+
+            var operation = PlacementOperation.Start(collection, PlacementType.Move);
+
+            var newInstance = context.Services.ExtensionManager.CreateInstanceWithCustomInstanceFactory(containerType, null);
+            DesignItem newPanel = context.Services.Component.RegisterComponentForDesigner(newInstance);
+
+            var itemList = new List<ItemPos>();
+            int? firstIndex = null;
+
+            foreach (var item in collection) {
+                itemList.Add(GetItemPos(operation, item));
+                if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                    item.Properties.GetProperty("HorizontalAlignment").Reset();
+                    item.Properties.GetProperty("VerticalAlignment").Reset();
+                    item.Properties.GetProperty("Margin").Reset();
+                }
+
+                if (item.ParentProperty.IsCollection) {
+                    var parentCollection = item.ParentProperty.CollectionElements;
+                    if (!firstIndex.HasValue) firstIndex = parentCollection.IndexOf(item);
+                    parentCollection.Remove(item);
+                } else {
+                    item.ParentProperty.Reset();
+                }
+            }
+
+            var xmin = itemList.Min(x => x.Xmin);
+            var xmax = itemList.Max(x => x.Xmax);
+            var ymin = itemList.Min(x => x.Ymin);
+            var ymax = itemList.Max(x => x.Ymax);
+
+            foreach (var item in itemList) {
+                if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin - xmin);
+                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin - ymin);
+                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                    var thickness = new Thickness(item.Xmin - xmin, item.Ymin - ymin, 0, 0);
+                    item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
+                    item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
+                    item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
+                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
+                    newPanel.ContentProperty.SetValue(item.DesignItem);
+                }
+            }
+
+            if (doInsert) {
+                var operation2 = PlacementOperation.TryStartInsertNewComponents(
+                    container,
+                    new[] { newPanel },
+                    new[] { new Rect(xmin, ymin, xmax - xmin, ymax - ymin) },
+                    PlacementType.AddItem);
+
+                if (collection.Count == 1 && container.ContentProperty != null && container.ContentProperty.IsCollection) {
+                    container.ContentProperty.CollectionElements.Remove(newPanel);
+                    container.ContentProperty.CollectionElements.Insert(firstIndex.Value, newPanel);
+                }
+
+                operation2.Commit();
+                context.Services.Selection.SetSelectedComponents(new[] { newPanel });
+            }
+
+            operation.Commit();
+            return new System.Tuple<DesignItem, Rect>(newPanel, new Rect(xmin, ymin, xmax - xmin, ymax - ymin));
+        }
+
+        /// <summary>Moves a container's children back out to the container's own parent,
+        /// removing the now-empty container. Ported unchanged in shape from the reference
+        /// (WpfDesign.Designer/Project/ModelTools.cs:382-502) - same dead-branch collapse as
+        /// WrapItemsNewContainer above.</summary>
+        public static void UnwrapItemsFromContainer(DesignItem container)
+        {
+            var collection = container.ContentProperty.CollectionElements.ToList();
+            var newPanel = container.Parent;
+            if (collection.Any(x => x.Parent != container)) return;
+
+            var placement = container.GetBehavior<IPlacementBehavior>();
+            if (placement == null) return;
+
+            var operation = PlacementOperation.Start(collection, PlacementType.Move);
+            var containerPos = GetItemPos(operation, container);
+            var itemList = new List<ItemPos>();
+
+            foreach (var item in collection) {
+                itemList.Add(GetItemPos(operation, item));
+                if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                    item.Properties.GetProperty("HorizontalAlignment").Reset();
+                    item.Properties.GetProperty("VerticalAlignment").Reset();
+                    item.Properties.GetProperty("Margin").Reset();
+                }
+                item.ParentProperty.CollectionElements.Remove(item);
+            }
+
+            newPanel.ContentProperty.CollectionElements.Remove(container);
+
+            foreach (var item in itemList) {
+                if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin + containerPos.Xmin);
+                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin + containerPos.Ymin);
+                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                    var thickness = new Thickness(item.Xmin, item.Ymin, 0, 0);
+                    item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
+                    item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
+                    item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
+                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
+                    newPanel.ContentProperty.SetValue(item.DesignItem);
+                }
+            }
+
+            operation.Commit();
         }
     }
 }
