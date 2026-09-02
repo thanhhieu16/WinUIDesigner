@@ -53,7 +53,26 @@ namespace WinUIDesigner.DesignModel.Extensions
 
 	/// <summary>Applies an extension to the primary selection only when exactly one item is
 	/// selected - used by the resize/rotate/skew thumb extensions (Task 4/5), which don't make
-	/// sense for a multi-selection. No WPF-specific API - mechanical port.</summary>
+	/// sense for a multi-selection. No WPF-specific API - mechanical port.
+	///
+	/// Phase 4c Task 8 fix: OnSelectionChanged originally mirrored the reference exactly
+	/// (WpfDesign/Project/Extensions/SelectionExtensionServers.cs:181-185), including its
+	/// `if (SelectedItems.Count > 1)` guard - reapplying only on the "grow to multi-select"
+	/// transition. That guard silently drops the opposite transition: shrinking a two-item
+	/// selection back down to one *without* changing which item is primary (e.g.
+	/// SetSelectedComponents(new[] { primaryItem })) doesn't fire PrimarySelectionChanged
+	/// either (DefaultSelectionService/the reference's DefaultSelectionService both only raise
+	/// it when the primary item itself changes), so with the guard in place no code path ever
+	/// re-evaluates ShouldApplyExtensions and the extension stays detached. Caught by this
+	/// port's own ArrangeWrapUnwrapContextMenuExtensionTests.WrapItemExtensionOnlyAttachesWith
+	/// ExactlyOneSelected exercising exactly that shrink transition - a scenario no earlier
+	/// test (Task 4/5's resize/rotate/skew thumb tests, Task 7's right-click tests) exercised.
+	/// Fixed by dropping the guard, matching the already-correct, already-tested sibling
+	/// PrimarySelectionButOnlyWhenMultipleSelectedExtensionServer.OnSelectionChanged below,
+	/// which reapplies unconditionally on every SelectionChanged and handles both directions.
+	/// Unconditional reapply is safe here too: ReapplyExtensionServer only actually attaches/
+	/// detaches when ShouldApplyExtensions's result differs from the currently-applied state,
+	/// so the extra calls for the "nothing changed" case are no-ops.</summary>
 	public class OnlyOneItemSelectedExtensionServer : PrimarySelectionExtensionServer
 	{
 		protected override void OnInitialized()
@@ -64,8 +83,7 @@ namespace WinUIDesigner.DesignModel.Extensions
 
 		void OnSelectionChanged(object sender, System.EventArgs e)
 		{
-			if (this.Services.Selection.SelectedItems.Count > 1)
-				ReapplyExtensions(this.Services.Selection.SelectedItems);
+			ReapplyExtensions(this.Services.Selection.SelectedItems);
 		}
 
 		public override bool ShouldApplyExtensions(DesignItem extendedItem)
