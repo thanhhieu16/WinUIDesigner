@@ -4,18 +4,16 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using Windows.Foundation;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 
 namespace WinUIDesigner.DesignModel
 {
     /// <summary>
     /// Stores data about a placement operation. Ported from the reference's
-    /// PlacementOperation.cs with ChangeContainer, DeleteItemsAndCommit, and
-    /// TryStartInsertNewComponents dropped: their only callers are container-to-container
-    /// move (Phase 4b), the delete command (out of scope per Phase 3), and toolbox-drop
-    /// insertion (no Phase 4a caller) - and ChangeContainer's own TransformRectByMiddlePoint
-    /// helper used Vector/Rect.TopLeft/Rect.Size/GeneralTransform.Transform(Point), none of
-    /// which exist in WinUI (compiler-confirmed during spec brainstorming). Same "port only
-    /// the called surface" treatment already applied to ModelTools.cs/Metadata.cs.
+    /// PlacementOperation.cs with DeleteItemsAndCommit and TryStartInsertNewComponents
+    /// dropped: their only callers are the delete command (out of scope per Phase 3) and
+    /// toolbox-drop insertion (no Phase 4a/4b caller). Same "port only the called surface"
+    /// treatment already applied to ModelTools.cs/Metadata.cs.
     /// </summary>
     public sealed class PlacementOperation
     {
@@ -77,6 +75,63 @@ namespace WinUIDesigner.DesignModel
             changeGroup = moveableItems[0].Context.OpenGroup(type.ToString(), moveableItems);
         }
 
+        /// <summary>
+        /// Makes the placed item(s) switch container. Ported from the reference's
+        /// ChangeContainer - the only two changes from the reference are the coordinate math
+        /// (GeneralTransform.Transform(Point)/Vector/Rect.TopLeft/Rect.Size don't exist in
+        /// WinUI - TransformPoint plus component-wise double arithmetic replaces them) and a
+        /// latent NullReferenceException the reference has (it Debug.Asserts
+        /// currentContainerBehavior non-null after reassigning it, then dereferences
+        /// unconditionally - Debug.Assert is a no-op in Release builds). This port validates
+        /// the new behavior before it ever replaces the field, so a null new-container
+        /// behavior throws a clear PlacementOperationException instead, and the catch below
+        /// still finds the OLD (already-left) behavior on currentContainerBehavior to run
+        /// Abort()'s EndPlacement against, instead of null-derefing there too.
+        /// </summary>
+        public void ChangeContainer(DesignItem newContainer)
+        {
+            if (newContainer == null) throw new ArgumentNullException(nameof(newContainer));
+            if (isAborted || isCommitted) throw new PlacementOperationException("The operation is not running anymore.");
+            if (currentContainer == newContainer) return;
+
+            if (!currentContainerBehavior.CanLeaveContainer(this))
+                throw new PlacementOperationException("The items cannot be removed from their parent container.");
+
+            try {
+                currentContainerBehavior.LeaveContainer(this);
+
+                var transform = currentContainer.View.TransformToVisual(newContainer.View);
+                foreach (var info in placedItems) {
+                    info.OriginalBounds = TransformRectByMiddlePoint(transform, info.OriginalBounds);
+                    info.Bounds = TransformRectByMiddlePoint(transform, info.Bounds).Round();
+                }
+
+                var newBehavior = newContainer.GetBehavior<IPlacementBehavior>();
+                if (newBehavior == null)
+                    throw new PlacementOperationException("The new container has no placement behavior.");
+
+                currentContainer = newContainer;
+                currentContainerBehavior = newBehavior;
+                currentContainerBehavior.EnterContainer(this);
+            } catch {
+                Abort();
+                throw;
+            }
+        }
+
+        static Rect TransformRectByMiddlePoint(GeneralTransform transform, Rect r)
+        {
+            // We don't want to adjust the size of the control when moving it out of a scaled
+            // container - just move it correctly. Transforming the middle point and taking the
+            // component-wise delta is the Vector-free equivalent of the reference's
+            // "transform.Transform(p) - p" Vector subtraction (Vector doesn't exist in WinUI).
+            var p = new Point(r.X + r.Width / 2, r.Y + r.Height / 2);
+            var transformedP = transform.TransformPoint(p);
+            double dx = transformedP.X - p.X;
+            double dy = transformedP.Y - p.Y;
+            return new Rect(r.X + dx, r.Y + dy, r.Width, r.Height);
+        }
+
         /// <summary>The size an element really should have (even if smaller-rendered, like an
         /// empty Image).</summary>
         public static Size GetRealElementSize(UIElement element)
@@ -129,10 +184,11 @@ namespace WinUIDesigner.DesignModel
             set => changeGroup.Title = value;
         }
 
-        // Abort/Commit dereference currentContainerBehavior unguarded (no null check). Safe today
-        // because Start() only ever returns a PlacementOperation once currentContainerBehavior is
-        // non-null (it aborts and throws otherwise, see Start above) - flagged here for a future
-        // reader rather than left implicit (final-review minor finding).
+        // Abort/Commit dereference currentContainerBehavior unguarded (no null check). Safe
+        // because Start() only ever returns a PlacementOperation once currentContainerBehavior
+        // is non-null, and ChangeContainer validates the new behavior before ever assigning it
+        // to this field (see ChangeContainer above) - currentContainerBehavior can never become
+        // null over this object's lifetime.
         public void Abort()
         {
             if (isAborted) return;
