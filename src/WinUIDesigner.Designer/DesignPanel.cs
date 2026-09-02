@@ -43,6 +43,22 @@ namespace WinUIDesigner.Designer
 			set { _adornerLayer.IsHitTestVisible = value; }
 		}
 
+		/// <summary>Enables/disables snapline placement. Same default (true) as the reference's
+		/// DesignPanel.UseSnaplinePlacement. Plain auto-property, not the reference's
+		/// INotifyPropertyChanged-backed one: the reference raises OnPropertyChanged purely so
+		/// DesignSurface.xaml's toolbar can two-way bind to it, and this port's DesignSurface is
+		/// code-only with no such toolbar.</summary>
+		public bool UseSnaplinePlacement { get; set; } = true;
+
+		/// <summary>Enables/disables raster placement. Same default (false) as the reference's
+		/// DesignPanel.UseRasterPlacement - see UseSnaplinePlacement for why this is a plain
+		/// auto-property.</summary>
+		public bool UseRasterPlacement { get; set; } = false;
+
+		/// <summary>The raster cell size used when UseRasterPlacement is on. Same default (5)
+		/// and same int type as the reference's DesignPanel.RasterWidth.</summary>
+		public int RasterWidth { get; set; } = 5;
+
 		public ICollection<AdornerPanel> Adorners { get { return _adornerLayer.Adorners; } }
 
 		public Controls.AdornerLayer AdornerLayer { get { return _adornerLayer; } }

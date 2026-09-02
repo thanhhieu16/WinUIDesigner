@@ -33,6 +33,12 @@ namespace WinUIDesigner.Designer
 			loadSettings.DesignerAssemblies.Add(typeof(DesignSurface).Assembly);
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IDesignPanel), _designPanel));
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(ISelectionService), new DefaultSelectionService()));
+			// The reference registers OptionService inside XamlDesignContext's own constructor
+			// (Xaml/XamlDesignContext.cs:80). That is not possible here: OptionService lives in
+			// WinUIDesigner.Designer and XamlDesignContext lives in WinUIDesigner.DesignModel,
+			// which does not (and must not) reference Designer. Registered here instead, exactly
+			// like IDesignPanel and ISelectionService above.
+			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(OptionService), new OptionService()));
 			InitializeDesigner(new XamlDesignContext(xamlReader, loadSettings));
 		}
 

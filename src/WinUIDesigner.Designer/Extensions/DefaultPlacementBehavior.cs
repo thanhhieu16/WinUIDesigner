@@ -48,7 +48,7 @@ namespace WinUIDesigner.Designer.Extensions
             return new Rect(p, PlacementOperation.GetRealElementSize(item.View));
         }
 
-        public virtual void BeforeSetPosition(PlacementOperation operation) { }
+        public virtual void BeforeSetPosition(PlacementOperation operation, Windows.System.VirtualKeyModifiers modifiers) { }
 
         public virtual void SetPosition(PlacementInformation info)
         {
@@ -107,6 +107,6 @@ namespace WinUIDesigner.Designer.Extensions
             }
         }
 
-        public virtual Point PlacePoint(Point point) => new Point(System.Math.Round(point.X), System.Math.Round(point.Y));
+        public virtual Point PlacePoint(Point point, Windows.System.VirtualKeyModifiers modifiers) => new Point(System.Math.Round(point.X), System.Math.Round(point.Y));
     }
 }

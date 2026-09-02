@@ -18,13 +18,13 @@ namespace WinUIDesigner.DesignModel.Tests
             public void BeginPlacement(PlacementOperation operation) => BeganPlacement = true;
             public void EndPlacement(PlacementOperation operation) => EndedPlacement = true;
             public Windows.Foundation.Rect GetPosition(PlacementOperation operation, DesignItem child) => new Windows.Foundation.Rect(0, 0, 10, 10);
-            public void BeforeSetPosition(PlacementOperation operation) { }
+            public void BeforeSetPosition(PlacementOperation operation, Windows.System.VirtualKeyModifiers modifiers) { }
             public void SetPosition(PlacementInformation info) { }
             public bool CanLeaveContainer(PlacementOperation operation) => true;
             public void LeaveContainer(PlacementOperation operation) { }
             public bool CanEnterContainer(PlacementOperation operation, bool shouldAlwaysEnter) => true;
             public void EnterContainer(PlacementOperation operation) { }
-            public Windows.Foundation.Point PlacePoint(Windows.Foundation.Point point) => point;
+            public Windows.Foundation.Point PlacePoint(Windows.Foundation.Point point, Windows.System.VirtualKeyModifiers modifiers) => point;
         }
 
         [Test]

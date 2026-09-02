@@ -144,7 +144,7 @@ namespace WinUIDesigner.Designer.Extensions
 
                 info.Bounds = result.Round();
                 info.ResizeThumbAlignment = alignment;
-                operation.CurrentContainerBehavior.BeforeSetPosition(operation);
+                operation.CurrentContainerBehavior.BeforeSetPosition(operation, drag.KeyModifiers);
                 operation.CurrentContainerBehavior.SetPosition(info);
             }
         }
