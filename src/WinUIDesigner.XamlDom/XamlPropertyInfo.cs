@@ -273,6 +273,17 @@ namespace WinUIDesigner.XamlDom
 
 		public override void ResetValue(object instance)
 		{
+			// PropertyDescriptor.ResetValue is a no-op for WinUI's DP-backed CLR wrappers (there is
+			// no DefaultValueAttribute and no ResetXxx method on them), so undoing a *newly set*
+			// property used to leave the live instance holding the new value while the XAML was
+			// correctly reverted. WPF never hit this because DependencyPropertyDescriptor.ResetValue
+			// cleared the DP. Clear the DependencyProperty directly whenever we know which one backs
+			// this property (XamlNormalPropertyInfo already resolves it via WinUIStaticMemberLocator).
+			var depObj = instance as DependencyObject;
+			if (dependencyProperty != null && depObj != null) {
+				depObj.ClearValue(dependencyProperty);
+				return;
+			}
 			try {
 				_propertyDescriptor.ResetValue(instance);
 			} catch (Exception) {
