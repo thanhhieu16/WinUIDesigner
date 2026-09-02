@@ -173,5 +173,136 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(2, Grid.GetColumn((Button)grid.Children[0]));
             });
         }
+
+        [Test]
+        public void OneSplitterExistsPerInteriorRowAndColumnBoundary()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out _, out var provider);
+                Assert.AreEqual(2, provider.Splitters.Count, "two rows and two columns => one boundary each");
+                Assert.AreEqual(1, provider.Splitters.OfType<GridRowSplitterAdorner>().Count());
+                Assert.AreEqual(1, provider.Splitters.OfType<GridColumnSplitterAdorner>().Count());
+                var inTree = surface.DesignPanel.Adorners.SelectMany(a => a.Children).OfType<GridSplitterAdorner>().ToList();
+                CollectionAssert.IsSubsetOf(provider.Splitters.ToList(), inTree);
+            });
+        }
+
+        [Test]
+        public void DraggingRowSplitterResizesBothRowsAndCommitsOneChangeGroup()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var splitter = provider.Splitters.OfType<GridRowSplitterAdorner>().Single();
+
+                splitter.SimulateDown(new Windows.Foundation.Point(0, 60));
+                splitter.SimulateMove(new Windows.Foundation.Point(0, 80));
+                splitter.SimulateUp(new Windows.Foundation.Point(0, 80));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(80, grid.RowDefinitions[0].ActualHeight, 0.5);
+                Assert.AreEqual(40, grid.RowDefinitions[1].ActualHeight, 0.5);
+                Assert.AreEqual(1, undo.UndoActions.Count(), "one ChangeGroup for the whole drag");
+
+                undo.Undo();
+                surface.UpdateLayout();
+                Assert.AreEqual(60, grid.RowDefinitions[0].ActualHeight, 0.5);
+                Assert.AreEqual(60, grid.RowDefinitions[1].ActualHeight, 0.5);
+            });
+        }
+
+        [Test]
+        public void DraggingColumnSplitterResizesBothColumns()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                var splitter = provider.Splitters.OfType<GridColumnSplitterAdorner>().Single();
+
+                splitter.SimulateDown(new Windows.Foundation.Point(100, 0));
+                splitter.SimulateMove(new Windows.Foundation.Point(140, 0));
+                splitter.SimulateUp(new Windows.Foundation.Point(140, 0));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(140, grid.ColumnDefinitions[0].ActualWidth, 0.5);
+                Assert.AreEqual(60, grid.ColumnDefinitions[1].ActualWidth, 0.5);
+            });
+        }
+
+        [Test]
+        public void EscapeCancelsSplitterDragWithNoUndoEntry()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var splitter = provider.Splitters.OfType<GridRowSplitterAdorner>().Single();
+
+                splitter.SimulateDown(new Windows.Foundation.Point(0, 60));
+                splitter.SimulateMove(new Windows.Foundation.Point(0, 90));
+                splitter.SimulateEscape();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(60, grid.RowDefinitions[0].ActualHeight, 0.5, "aborted drag reverts the live size");
+                Assert.IsFalse(undo.CanUndo, "an aborted ChangeGroup pushes nothing onto the undo stack");
+                Assert.IsFalse(splitter.HasOpenChangeGroup);
+                Assert.IsFalse(splitter.IsDragging);
+            });
+        }
+
+        [Test]
+        public void MoveBelowTheDragThresholdOpensNoChangeGroup()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var splitter = provider.Splitters.OfType<GridRowSplitterAdorner>().Single();
+
+                splitter.SimulateDown(new Windows.Foundation.Point(0, 60));
+                splitter.SimulateMove(new Windows.Foundation.Point(0, 61)); // < MinimumVerticalDragDistance
+                Assert.IsFalse(splitter.HasOpenChangeGroup);
+                splitter.SimulateUp(new Windows.Foundation.Point(0, 61));
+
+                Assert.IsFalse(undo.CanUndo);
+                Assert.AreEqual(60, grid.RowDefinitions[0].ActualHeight, 0.5);
+            });
+        }
+
+        [Test]
+        public void SplitterListRebuildsAfterRailClickCreatesRowAndColumn()
+        {
+            // Task 11 review finding M8 (deferred, flagged for this task): the rebuild path
+            // triggered by DesignItem.PropertyChanged (PropertyName=="RowDefinitions"/
+            // "ColumnDefinitions") firing after a CollectionElements.Insert - as opposed to the
+            // *initial* Rebuild() that OnInitialized's own RequestRebuild triggers, which every
+            // other test in this file exercises via Load() - was never exercised by Task 11's own
+            // tests. A click-created row/column (SimulateRailPress) is exactly the code path that
+            // fires that PropertyChanged (see GridRailAdorner.SplitAt -> collection.CollectionElements.Insert),
+            // so this test drives that path explicitly and confirms a splitter appears at the new
+            // interior boundary once the resulting rebuild is flushed.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window, GridXaml, out _, out var grid, out var provider);
+                Assert.AreEqual(1, provider.Splitters.OfType<GridRowSplitterAdorner>().Count(), "precondition: 2 rows => 1 boundary");
+                Assert.AreEqual(1, provider.Splitters.OfType<GridColumnSplitterAdorner>().Count(), "precondition: 2 columns => 1 boundary");
+
+                provider.LeftRail.SimulateRailPress(30);
+                surface.UpdateLayout();
+                provider.FlushPendingRebuild();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(3, grid.RowDefinitions.Count, "precondition: the click did create a third row");
+                Assert.AreEqual(2, provider.Splitters.OfType<GridRowSplitterAdorner>().Count(),
+                    "3 rows => 2 interior boundaries, once DesignItem.PropertyChanged(\"RowDefinitions\") after the Insert triggers and flushes a rebuild");
+                var inTree = surface.DesignPanel.Adorners.SelectMany(a => a.Children).OfType<GridSplitterAdorner>().ToList();
+                CollectionAssert.IsSubsetOf(provider.Splitters.ToList(), inTree);
+
+                provider.TopRail.SimulateRailPress(50);
+                surface.UpdateLayout();
+                provider.FlushPendingRebuild();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(3, grid.ColumnDefinitions.Count, "precondition: the click did create a third column");
+                Assert.AreEqual(2, provider.Splitters.OfType<GridColumnSplitterAdorner>().Count(),
+                    "3 columns => 2 interior boundaries, same PropertyChanged(\"ColumnDefinitions\") path");
+            });
+        }
     }
 }
