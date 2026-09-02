@@ -96,12 +96,76 @@ in 4b — was answered **keep it in 4b**: `GridPlacementSupport` alone
 (placing an item into an existing cell) is a crippled result without a
 way to create/resize/remove the rows and columns to place it into.
 
-All six Critical findings and the follow-up scope call are folded into
-this revision. Findings 3-6 above were then independently re-verified
-here (not just trusted from the reviewers) via the same compiler-probe
-method Phase 4a's round 2 used: a throwaway file added to
-`src/WinUIDesigner.Designer/`, `dotnet build`, the exact diagnostics
-read, the probe deleted — see "WinUI API surface" below.
+All six Critical findings and the follow-up scope call were folded into
+a rewritten spec (this document's first committed version, `2e536a5`).
+Findings 3-6 above were independently re-verified there via the same
+compiler-probe method Phase 4a's round 2 used.
+
+**Round 2** sent that committed spec — the document itself, not a prose
+summary — to one more expert reviewer, instructed to re-verify every
+compiler claim and file:line citation independently and, critically, to
+read the reference files the round-1 reviewers had only read *about*
+secondhand (`StackPanelPlacementSupport.cs`, `GridPlacementSupport.cs`,
+`RasterPlacementBehavior.cs`, `SnaplinePlacementBehavior.cs`,
+`GridAdornerProvider.cs` — all in full). Every API/citation claim from
+round 1 held up under independent re-verification. Round 2 found three
+further Critical defects this document's first version still had:
+
+7. **The StackPanel DoD bullet described behavior the reference doesn't
+   have.** `StackPanelPlacementSupport.cs` doesn't constrain a resize —
+   it computes an insertion index from child centers and **reorders the
+   item inside the parent's `ContentProperty` collection** as it's
+   dragged past siblings, plus draws a 2px insertion-point indicator.
+   Corrected below (Architecture, Data flow, DoD).
+8. **Three load-bearing files/members were missing entirely**:
+   `DesignPanel.RasterWidth`/`UseRasterPlacement`,
+   `DesignPanel.UseSnaplinePlacement`, and a **new `OptionService`**
+   (doesn't exist anywhere in this port) for
+   `OptionService.SnaplinePlacementRoundValues`; separately, Known gap
+   #5's modifier-parameter change touches the shared
+   `PlacementBehavior.cs` interface (`PlacePoint`/`BeforeSetPosition`),
+   also unlisted. Added to Architecture below.
+9. **`GridAdornerProvider`/`GridAdorner.cs` is an interaction system, not
+   a rendering one — the first revision treated it as visuals-only.**
+   Reading the reference in full: clicking a rail **creates** a new row
+   or column (`RegisterComponentForDesigner(new RowDefinition())`,
+   collection insert) and rewrites every child's `Grid.Row`/`RowSpan`/
+   `Column`/`ColumnSpan`/margins to keep positions stable across the
+   split. Dragging an existing splitter is a **second, independent drag
+   controller** (its own capture/`ChangeGroup`/Escape-cancel life cycle,
+   separate from `DragListener`). A third file, **`GridUnitSelector`**
+   (176 lines, a small picker UI for a row/column's size-unit — `Auto`/
+   `*`/pixel), is a dependency of the rail visuals and was entirely
+   unlisted. `GrayOutDesignerExceptActiveArea`'s animated transition
+   (`AnimateActiveAreaRectTo`, called on every `GridPlacementSupport.
+   SetPosition`) also depends on WPF's `Animatable`/`RectAnimation`/
+   `Geometry.BeginAnimation` — all three confirmed absent, on top of the
+   `CombinedGeometry` gap round 1 already found. Folded into Architecture,
+   the mechanism table, and Known gaps below.
+
+Given finding 9, the human was asked again — now with the corrected
+picture (row/column creation + a second full drag controller + a
+dependent picker UI, not a visuals-only redesign) — whether to keep this
+inside 4b or split it out. Answered **keep it in 4b**, a second time,
+with the larger scope now disclosed.
+
+Round 2 also found five Important gaps (all folded in below):
+`DispatcherPriority.Loaded` (used by `GridAdornerProvider` specifically
+*because* its delay guarantees a new row/column's layout has settled)
+has no WinUI equivalent — `DispatcherQueuePriority.Normal` is not a
+substitute, and the mechanism table's first-revision claim that this was
+a settled type-swap was wrong; `Visibility.Hidden` is absent (used by
+both `StackPanelPlacementSupport` and `GridAdorner`) and was missing
+from the mechanism table; `GridPlacementSupport`'s real scope also
+includes `HorizontalAlignment`/`VerticalAlignment`/`Margin`/`Width`/
+`Height` resets and deletes `RowDefinition`/`ColumnDefinition`
+`DesignItem`s on `LeaveContainer`, understated as "Row/Column/RowSpan/
+ColumnSpan-aware"; and several more absent WPF APIs specific to the
+`GridAdorner` stack (`InvalidateVisual`, `System.Windows.Input.Cursors`/
+`CursorProperty.OverrideMetadata` — same already-established
+`InputSystemCursorShape` replacement pattern as 4a, `SolidColorBrush.
+Freeze`, `DoubleCollection(IEnumerable)`, and a `TextBox.
+GetRectFromCharacterIndex` signature change) not previously called out.
 
 ## WinUI API surface — verified, not assumed
 
@@ -132,6 +196,37 @@ independently agreed with every result below).
   "gray out everything except this rect" effect (built on
   `GeometryCombineMode.Exclude`) needs a different WinUI-native
   construction — see Known gap #2.
+- `Animatable` / `Geometry.BeginAnimation` / `RectAnimation` / the 3-arg
+  `DoubleAnimation(fromValue, toValue, duration)` constructor — round-2
+  finding, all absent. `GrayOutDesignerExceptActiveArea.
+  AnimateActiveAreaRectTo` (called on every `GridPlacementSupport.
+  SetPosition`, not just Canvas) uses WPF's imperative
+  `Freezable.BeginAnimation(DependencyProperty, AnimationTimeline)`
+  model, which WinUI doesn't have at all — WinUI's animation model is
+  the declarative `Storyboard`/`Microsoft.UI.Xaml.Media.Animation.
+  DoubleAnimation` (a different API shape, not a drop-in rename). See
+  Known gap #2.
+- `Visibility.Hidden` — round-2 finding, absent (`CS0117`; WinUI's
+  `Visibility` enum has only `Visible`/`Collapsed`, same fact 4a's own
+  spec already established for `ResizeThumbExtension`). Used by
+  `StackPanelPlacementSupport.cs:100` and `GridAdorner.cs:81,258` — same
+  `Visibility.Collapsed` replacement 4a already adopted, but not
+  previously listed for these two files.
+- `System.Windows.Threading.DispatcherPriority.Loaded` — round-2
+  finding, absent (`CS0117`; `Microsoft.UI.Dispatching.
+  DispatcherQueuePriority` has no `Loaded` member, only `Low`/`Normal`/
+  `High`). `GridAdornerProvider.cs` picks `Loaded` specifically because
+  the delay guarantees a newly-created row/column's layout has actually
+  settled before the code reads it — `.Normal` is not a substitute for
+  that guarantee, only for the type name. Corrects this document's
+  first-revision mechanism-table entry, which wrongly treated this as a
+  settled type swap. See Known gap #3.
+- `InvalidateVisual`, `SolidColorBrush.Freeze()`, `DoubleCollection`'s
+  `IEnumerable<double>` constructor, `TextBox.
+  GetRectFromCharacterIndex(int)` (single-arg) — round-2 findings, all
+  absent from the `GridAdorner`/`GridUnitSelector` stack specifically.
+  `GetRectFromCharacterIndex` does exist but requires a second `bool`
+  argument in this SDK version.
 
 **Confirmed present — compiler-verified:**
 - `UIElement.PointerCaptureLost` event — compiles clean. `DragListener`
@@ -144,10 +239,13 @@ independently agreed with every result below).
   even-odd-filled, renders as cover-with-a-hole without needing geometry
   boolean ops. Visual correctness is still a Known gap — the API exists,
   the resulting rendering hasn't been eyeballed.
-- `Microsoft.UI.Dispatching.DispatcherQueuePriority` — exists (different
-  namespace/type than WPF's `System.Windows.Threading.DispatcherPriority`,
-  but a `.Normal` member is available for the one reference call site
-  that needs a priority argument).
+- `Microsoft.UI.Dispatching.DispatcherQueuePriority` — the type exists
+  (different namespace than WPF's `System.Windows.Threading.
+  DispatcherPriority`) with `Low`/`Normal`/`High` members, but **not**
+  a `Loaded` member — see the "confirmed absent" list above and Known
+  gap #3. `.Normal` compiles as a priority argument but does not carry
+  the reference's "after layout has settled" guarantee, so it isn't a
+  like-for-like substitute at the one call site that needs `Loaded`.
 - `RowDefinition.ActualHeight` / `ColumnDefinition.ActualWidth`, read
   through a live `Grid`'s `RowDefinitions[i]`/`ColumnDefinitions[i]` —
   compiles clean, confirming the running-sum reconstruction above is
@@ -196,7 +294,7 @@ independently agreed with every result below).
   need (`[ExtensionFor(typeof(Canvas), OverrideExtension =
   typeof(DefaultPlacementBehavior))]`, confirmed present at
   `CanvasPlacementSupport.cs:30`) and exactly the forward-flag 4a's own
-  spec raised at its line 462-469 ("4b's spec needs
+  spec raised at its lines 465-470 ("4b's spec needs
   `ExtensionForAttribute.OverrideExtensions` or equivalent") — already
   built, nothing to add.
 - **`DesignItemProperty.GetAttachedProperty` is `(Type ownerType, string
@@ -220,6 +318,22 @@ independently agreed with every result below).
   present (reviewer-confirmed against SDK metadata), needed by
   `CanvasPlacementSupport`'s "is Canvas.Left explicitly set, or should we
   fall back to computing from Canvas.Right" check.
+- **`DesignPanel.RasterWidth`/`UseRasterPlacement`/`UseSnaplinePlacement`
+  don't exist yet (round-2 finding, grep-confirmed zero hits)** — all
+  three are new properties this phase adds to
+  `src/WinUIDesigner.Designer/DesignPanel.cs`, not existing surface to
+  read. **`OptionService` doesn't exist anywhere in this port at all**
+  (grep-confirmed) — `SnaplinePlacementRoundValues` needs a new small
+  service (`Services/OptionService.cs`), registered the same way other
+  Phase 2/3 services are.
+- **`PlacementBehavior.cs`'s `IPlacementBehavior` interface currently
+  declares `PlacePoint(Point)`/`BeforeSetPosition(PlacementOperation)`
+  with no modifier parameter** (round-2 finding) — Known gap #5's
+  Ctrl-modifier threading is therefore an interface change, not just an
+  implementation detail inside Raster/Snapline, since every other
+  `IPlacementBehavior` implementor (`DefaultPlacementBehavior`,
+  `CanvasPlacementSupport`, etc.) must update its override signature to
+  match.
 
 ## Decisions already made
 
@@ -255,15 +369,59 @@ independently agreed with every result below).
   own exception/abort path can't leave `UndoService`'s transaction stack
   in a state that trips its LIFO nesting assertion — a test, not a new
   `OpenGroup` wrapper.
-- **`GridAdornerProvider`/`GridAdorner.cs` stay in scope (explicit user
-  call, see Revision history), redesigned rather than ported.** The
-  splitter-rail visuals move from `OnRender`/`DrawingContext`/
-  `FormattedText` to XAML `Shapes`/`Path` elements arranged via the same
+- **`GridAdornerProvider`/`GridAdorner.cs` stay in scope, as a full
+  three-part system, not just visuals (explicit user call, made twice —
+  see Revision history).** The three parts: (1) rail visuals plus
+  click-to-create a new row/column, which also rewrites every affected
+  child's `Grid.Row`/`RowSpan`/`Column`/`ColumnSpan`/margins to hold
+  positions stable across the split; (2) an existing splitter's drag —
+  its own capture/`ChangeGroup`/Escape-cancel life cycle, independent of
+  `DragListener`, resizing an existing `RowDefinition`/`ColumnDefinition`
+  rather than creating a new one; (3) `GridUnitSelector`, a small picker
+  UI (`Auto`/`*`/pixel) the rail visuals depend on. All three move from
+  `OnRender`/`DrawingContext`/`FormattedText` to ordinary XAML `Shapes`/
+  `Path`/`Control` visual-tree children, positioned via the same
   `AdornerPanel`/`AdornerPlacement` mechanism 4a's thumbs already use —
-  the rails become normal WinUI visual-tree children like every other
-  adorner in this port, not a custom-painted control. Exact shape
-  composition is a plan-time detail; Known gap #2 covers the remaining
-  visual-correctness question for the gray-out effect specifically.
+  not custom-painted controls. Unlike 4a's thumbs, which all use the
+  ready-made `RelativePlacement`, the rails need their own
+  `AdornerPlacement` subclasses (mirroring the reference's
+  `RowSplitterPlacement`/`ColumnSplitterPlacement`, each arranging its
+  rail at a specific row/column boundary rather than a fixed corner/edge
+  alignment) — confirmed workable, since this port's `AdornerPlacement`
+  base (`src/WinUIDesigner.DesignModel/Adorners/AdornerPlacement.cs`) is
+  `public abstract`. Exact shape/visual composition is a plan-time detail
+  (Known gap #4); Known gap #2 covers the gray-out effect's visual
+  correctness specifically, including its animated transition (see
+  below).
+- **`GrayOutDesignerExceptActiveArea`'s redesign covers both its static
+  geometry (Known gap #2, `PathGeometry`/`FillRule.EvenOdd`) and its
+  animated transition.** `AnimateActiveAreaRectTo` — called on every
+  `GridPlacementSupport.SetPosition`, not just `CanvasPlacementSupport`'s
+  — uses WPF's `Freezable.BeginAnimation`/`RectAnimation`, which has no
+  WinUI equivalent (round-2 finding, confirmed absent above). Replacement
+  is WinUI's declarative `Storyboard`/`Microsoft.UI.Xaml.Media.Animation.
+  DoubleAnimation` driven against the `PathGeometry`'s figure points —
+  a different API shape from the reference's imperative call, exact
+  composition a plan-time detail alongside gap #2's visual-correctness
+  question.
+- **`StackPanelPlacementSupport` reorders the dragged item's position in
+  its parent's `ContentProperty` collection (an insertion-index change,
+  driven by comparing the drag position against sibling centers) plus
+  draws a thin insertion-point indicator — it does not constrain a
+  resize.** (Round-2 correction — the first revision of this document
+  wrongly described it as resize-constraining.) It still bases directly
+  on `DefaultPlacementBehavior` (no Snapline/Raster chain — reordering
+  isn't a coordinate-snapping concern), and still needs
+  `ResizeThumbExtension.IsResizing` to suppress the reorder indicator
+  while an actual resize (not a move) is in progress.
+- **`GridPlacementSupport`'s real scope is larger than "Row/Column/
+  RowSpan/ColumnSpan-aware."** (Round-2 correction.) Its `SetPosition`
+  also resets `HorizontalAlignment`/`VerticalAlignment`/all four
+  `Margin` sides and clears `Width`/`Height` when the item stretches to
+  fill a cell; its `LeaveContainer` deletes the `RowDefinition`/
+  `ColumnDefinition` `DesignItem`s a moved-away item's row/column would
+  leave behind. Both port unchanged in shape, just more surface than the
+  short name suggested.
 - **`TopLeftContainerDragHandle`/`PanelMove` are rebuilt on the existing
   `DragListener` primitive (extended with `PointerCaptureLost` handling
   — see above), not on a ported `MouseGestureBase`/`ClickOrDragMouseGesture`/
@@ -299,6 +457,12 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                              using TransformToVisual-based
                                              coordinate math, not Vector/
                                              Rect.TopLeft/Rect.Size)
+      PlacementBehavior.cs                (modify: PlacePoint/BeforeSetPosition
+                                             gain a modifier parameter —
+                                             IPlacementBehavior interface
+                                             change, every implementor's
+                                             override signature updates
+                                             to match)
       Extensions\
         SelectionExtensionServers.cs      (modify: add
                                              PrimarySelectionParentExtensionServer)
@@ -306,6 +470,16 @@ D:\Project\ST4I\Research\WinUIDesigner\
         DefaultExtension.cs               (modify: add
                                              DefaultExtensionServer.PermanentWithDesignPanel)
     WinUIDesigner.Designer\
+      DesignPanel.cs                       (modify: add RasterWidth/
+                                             UseRasterPlacement/
+                                             UseSnaplinePlacement properties
+                                             — none exist yet, grep-confirmed)
+      Services\
+        OptionService.cs                  (new: doesn't exist anywhere in
+                                             this port yet;
+                                             SnaplinePlacementRoundValues,
+                                             registered like other Phase
+                                             2/3 services)
       Extensions\
         RasterPlacementBehavior.cs        (new: DefaultPlacementBehavior base
                                              for snap-to-grid; needs
@@ -321,15 +495,34 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                              OverrideExtension=typeof(DefaultPlacementBehavior))])
         StackPanelPlacementSupport.cs     (new: DefaultPlacementBehavior base
                                              directly — no Snapline chain;
-                                             needs ResizeThumbExtension.IsResizing,
+                                             reorders the dragged item's index
+                                             in ContentProperty's collection by
+                                             comparing drag position against
+                                             sibling centers, does not
+                                             constrain a resize; needs
+                                             ResizeThumbExtension.IsResizing,
                                              a public flag 4a's ResizeThumbExtension
                                              doesn't currently expose)
         GridPlacementSupport.cs           (new: SnaplinePlacementBehavior base;
-                                             Grid.Row/Column/RowSpan/ColumnSpan-aware;
+                                             Grid.Row/Column/RowSpan/ColumnSpan
+                                             plus HorizontalAlignment/
+                                             VerticalAlignment/Margin/Width/
+                                             Height resets on placement, and
+                                             deletes now-unneeded
+                                             RowDefinition/ColumnDefinition
+                                             DesignItems on LeaveContainer;
                                              Offset reconstructed from
                                              ActualHeight/ActualWidth running sums)
-        GridAdornerProvider.cs            (new: row/column splitter rails on a
-                                             selected Grid;
+        GridAdornerProvider.cs            (new: three-part system on a selected
+                                             Grid — rail visuals + click-to-
+                                             create a row/column (rewrites
+                                             every affected child's Grid.Row/
+                                             RowSpan/Column/ColumnSpan/margins),
+                                             a second independent drag
+                                             controller for resizing an
+                                             existing splitter, and
+                                             GridUnitSelector for picking a
+                                             row/column's size unit;
                                              [ExtensionServer(typeof(LogicalOrExtensionServer<
                                              PrimarySelectionExtensionServer,
                                              PrimarySelectionParentExtensionServer>))])
@@ -344,21 +537,34 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                              targets Panel/Border/ContentControl/Viewbox)
         ResizeThumbExtension.cs           (modify: expose public IsResizing,
                                              read by StackPanelPlacementSupport
-                                             to suppress its own drag feedback
+                                             to suppress its reorder indicator
                                              while a resize is in progress)
       Controls\
         DragListener.cs                   (modify: add PointerCaptureLost
                                              handling — Cancel() on capture
                                              loss, mirrors the existing
                                              PointerReleased guard)
-        GridAdorner.cs                    (new, redesigned: XAML Shapes/Path
-                                             rail visuals via AdornerPanel/
-                                             AdornerPlacement, not OnRender/
-                                             DrawingContext/FormattedText)
+        GridAdorner.cs                    (new, redesigned: rail visuals +
+                                             row/column-creation click handling
+                                             + a second, independent
+                                             splitter-drag controller, all as
+                                             ordinary XAML Shapes/Path/Control
+                                             visual-tree children via
+                                             AdornerPanel/AdornerPlacement,
+                                             not OnRender/DrawingContext/
+                                             FormattedText)
+        GridUnitSelector.cs               (new, redesigned: Auto/*/pixel
+                                             size-unit picker UI the
+                                             GridAdorner rail visuals depend
+                                             on; reference is 176 lines)
         GrayOutDesignerExceptActiveArea.cs (new, redesigned: PathGeometry +
-                                             FillRule.EvenOdd cover-with-a-hole,
-                                             not CombinedGeometry/
-                                             GeometryCombineMode.Exclude)
+                                             FillRule.EvenOdd cover-with-a-hole
+                                             geometry (not CombinedGeometry/
+                                             GeometryCombineMode.Exclude) plus
+                                             a Storyboard/DoubleAnimation-based
+                                             transition (not Animatable.
+                                             BeginAnimation/RectAnimation) for
+                                             AnimateActiveAreaRectTo)
         ContainerDragHandle.cs            (new: small square visual for
                                              TopLeftContainerDragHandle,
                                              same "code-only, no generic.xaml"
@@ -370,15 +576,23 @@ D:\Project\ST4I\Research\WinUIDesigner\
                                              and PanelMove — DragListener-driven,
                                              not the reference's MouseGestureBase)
   tests\
+    WinUIDesigner.DesignModel.Tests\
+      LogicalExtensionServersTests.cs     (new: LogicalOrExtensionServer<A,B>)
+      SelectionExtensionServersTests.cs   (modify, Phase 3 file: add
+                                             PrimarySelectionParentExtensionServer
+                                             coverage)
     WinUIDesigner.Designer.Tests\
       DragListenerTests.cs                (modify, Phase 4a file: add a
                                              PointerCaptureLost-mid-drag
                                              test — simulate capture loss,
                                              assert Cancel() fired)
       CanvasPlacementSupportTests.cs      (new)
-      StackPanelPlacementSupportTests.cs  (new)
+      StackPanelPlacementSupportTests.cs  (new: reorder-by-drag-index
+                                             assertions, not resize-constraint)
       GridPlacementSupportTests.cs        (new)
-      GridAdornerProviderTests.cs         (new)
+      GridAdornerProviderTests.cs         (new: covers all three parts —
+                                             row/column creation, splitter
+                                             drag, GridUnitSelector)
       SnaplinePlacementBehaviorTests.cs   (new)
       MoveTests.cs                        (new: TopLeftContainerDragHandle +
                                              PanelMove + cross-container
@@ -402,7 +616,9 @@ D:\Project\ST4I\Research\WinUIDesigner\
 | `Properties.GetAttachedProperty(Canvas.LeftProperty)` (DP-indexed) | `Properties.GetAttachedProperty(typeof(Canvas), "Left")` (`Type, string`-indexed) — same string-keyed convention 4a established for `Properties.GetProperty`. |
 | `Keyboard.IsKeyDown(Key.LeftCtrl)` (Raster/Snapline override) | Not read ambiently — `PlacePoint`/`BeforeSetPosition` gain a modifier parameter threaded from the originating pointer event's `KeyModifiers`, same choice 4a made for resize's aspect-lock and rotate's 15°-snap-disable. |
 | `MouseGestureBase`/`ClickOrDragMouseGesture`/`DragMoveMouseGesture` (`TopLeftContainerDragHandle`/`PanelMove`) | The existing `DragListener` primitive (4a), extended with a `PointerCaptureLost` handler. |
-| `System.Windows.Threading.DispatcherPriority` (`GridAdornerProvider`) | `Microsoft.UI.Dispatching.DispatcherQueuePriority` — different type, `.Normal` member confirmed present. |
+| `DispatcherPriority.Loaded` (`GridAdornerProvider`, delays a read until a new row/column's layout has settled) | **No equivalent** (compiler-confirmed, `DispatcherQueuePriority` has only `Low`/`Normal`/`High`) — `.Normal` does not carry the same "after layout" guarantee. Timing risk, see Known gap #3. |
+| `Visibility.Hidden` (`StackPanelPlacementSupport`, `GridAdorner`) | `Visibility.Collapsed` — same replacement 4a already established for `ResizeThumbExtension`, confirmed absent again here (compiler-verified). |
+| `Freezable.BeginAnimation`/`RectAnimation` (`GrayOutDesignerExceptActiveArea.AnimateActiveAreaRectTo`) | Not present (compiler-confirmed) — WinUI's declarative `Storyboard`/`Microsoft.UI.Xaml.Media.Animation.DoubleAnimation`, a different API shape (imperative-timeline vs. declarative-storyboard), driving the `PathGeometry` replacement's figure points instead of an animated `CombinedGeometry`. |
 
 ## Data flow
 
@@ -423,6 +639,15 @@ duration of the operation) and `RasterPlacementBehavior`'s `PlacePoint`
 (rounds a proposed point to the nearest raster cell when raster snapping
 is enabled) — both fire for resize operations exactly the same as move,
 since they're `PlacementOperation`-lifecycle hooks, not move-specific.
+Inside a `StackPanel`, `StackPanelPlacementSupport` takes a different
+path entirely — it does not chain through Snapline/Raster at all
+(reordering isn't a coordinate-snapping concern): each drag tick compares
+the pointer position against sibling elements' centers to compute a
+target insertion index, updates a thin visual indicator at that index,
+and — on drop — reorders the dragged item to that index inside its
+parent's `ContentProperty` collection. It checks the new
+`ResizeThumbExtension.IsResizing` flag (4a) first and no-ops entirely
+while an actual resize (not a move) is in progress on the same item.
 
 **Drag-move.** Pointer press on `TopLeftContainerDragHandle`'s corner
 handle (or anywhere inside a container's own body, via `PanelMove`) →
@@ -445,6 +670,25 @@ release (or `PointerCaptureLost`) commits or aborts the single
 whichever container the item ended up in, however many times it
 switched mid-drag, the whole gesture is one undo-stack entry.
 
+**Grid row/column editing (`GridAdornerProvider`).** Independent of
+`GridPlacementSupport`'s per-item placement — this operates on the
+`Grid` itself, gated by
+`[ExtensionServer(typeof(LogicalOrExtensionServer<
+PrimarySelectionExtensionServer, PrimarySelectionParentExtensionServer>))]`
+so its rails show whether the `Grid` or one of its direct children is
+selected. A rail click starts row/column *creation*: opens a
+`ChangeGroup`, registers a new `RowDefinition`/`ColumnDefinition` as a
+`DesignItem`, inserts it into the `Grid`'s collection at the split
+point, then rewrites every affected child's `Grid.Row`/`RowSpan`/
+`Column`/`ColumnSpan` (and margins) so existing content doesn't visually
+shift. Dragging an *existing* splitter is a separate, independent drag
+controller (its own pointer capture, its own `ChangeGroup`, its own
+Escape-cancel — not routed through `DragListener`) that resizes the
+adjacent `RowDefinition`/`ColumnDefinition`'s `Height`/`Width` on each
+tick and commits one `ChangeGroup` per whole drag on release.
+`GridUnitSelector` is a small picker control (not a drag gesture) that
+sets a row/column's size to `Auto`, star (`*`), or a fixed pixel value.
+
 ## Testing / Definition of Done
 
 Same `.exe` NUnitLite runner and live-`Window`/real-`DesignSurface`
@@ -456,17 +700,30 @@ Phase 4b is done when:
 - A test resizes a selected item inside a `Canvas` and asserts
   `Canvas.Left`/`Top` (not `Width`/`Height` alone) update, and that the
   `Right`/`Bottom` fallback path is exercised when only those are set.
-- A test resizes a selected item inside a `StackPanel` and asserts the
-  cross-axis dimension is constrained the way the reference constrains
-  it (exact assertion is a plan-time detail, driven by reading
-  `StackPanelPlacementSupport.cs` in full at plan time).
+- A test drags a selected item inside a `StackPanel` past a sibling and
+  asserts the dragged item's index in `ContentProperty`'s collection
+  changes to the expected slot (not a `Width`/`Height` assertion — see
+  Revision history, round 2's correction), and that a resize (via 4a's
+  `ResizeThumbExtension`, `IsResizing` true) on the same item produces no
+  reorder.
 - A test places/resizes a selected item inside a `Grid` and asserts
   `Grid.Row`/`Column`/`RowSpan`/`ColumnSpan` update correctly, including
   at least one case that exercises the `Offset`-replacement running-sum
-  math against a `Grid` with unequal row/column sizes.
-- A test drags a `GridAdornerProvider` row or column splitter rail and
-  asserts the corresponding `RowDefinition`/`ColumnDefinition`'s
-  `Height`/`Width` updates, with a single undo reverting the whole drag.
+  math against a `Grid` with unequal row/column sizes, and a case that
+  asserts `HorizontalAlignment`/`VerticalAlignment`/`Margin`/`Width`/
+  `Height` reset on entry and that a now-empty `RowDefinition`/
+  `ColumnDefinition` `DesignItem` is removed on exit.
+- A test clicks a `GridAdornerProvider` rail to create a new row/column
+  and asserts the `Grid`'s `RowDefinitions`/`ColumnDefinitions` collection
+  grows by one and every affected sibling's `Grid.Row`/`RowSpan`/
+  `Column`/`ColumnSpan` updates to hold its visual position — with a
+  single undo reverting the whole creation, siblings included.
+- A separate test drags an *existing* `GridAdornerProvider` splitter
+  and asserts the corresponding `RowDefinition`/`ColumnDefinition`'s
+  `Height`/`Width` updates, with a single undo reverting the whole drag
+  — this is a distinct code path from row/column creation (Known gap #4).
+- A test drives `GridUnitSelector` and asserts a row/column's size
+  becomes `Auto`, star, or a fixed pixel value as selected.
 - A test drags an item via `TopLeftContainerDragHandle` from one
   container into a different one (e.g. `Canvas` into `Grid`) and asserts
   both the `DesignItem`'s new parent and its `IPlacementBehavior`-specific
@@ -481,7 +738,11 @@ Phase 4b is done when:
   real `PointerReleased`) mid-gesture, and asserts the operation aborts
   cleanly — item stays in its original container at its original
   position, no `ChangeGroup` committed.
-- Each of the five flagged gaps below has an explicit, tested resolution.
+- Gaps #1 and #3 below each have an explicit, tested resolution. Gap #2
+  is checked by eye (visual correctness isn't unit-testable) with a
+  fallback documented if it fails. Gaps #4-#6 are plan-time design
+  choices, not open research questions — no test is expected to "resolve"
+  them, only to cover whatever the plan settles on.
 
 ## Known gaps — flagged, not guessed
 
@@ -493,33 +754,56 @@ Phase 4b is done when:
    called them one after another. **Must be verified empirically as the
    plan's first task**, same precedent as Phase 3's live-Window
    investigation and 4a's `DragListener`-bug-hunting task.
-2. **Visual correctness of the `PathGeometry`/`FillRule.EvenOdd`
-   replacement for `GrayOutDesignerExceptActiveArea`'s cover-with-a-hole
-   effect.** The API compiles (confirmed above); whether the rendered
-   result actually looks like "everything gray except this rectangle" —
-   correct z-order against the design surface's content, no seam
-   artifacts at the hole's edge — hasn't been visually checked. Fallback
-   if it doesn't: four separate opaque rectangles covering the four
-   strips around the active area instead of one hole-punched shape.
+2. **Visual correctness of `GrayOutDesignerExceptActiveArea`'s redesign
+   — both its static geometry and its animated transition.** The
+   `PathGeometry`/`FillRule.EvenOdd` cover-with-a-hole geometry and the
+   `Storyboard`/`DoubleAnimation` transition that replaces
+   `AnimateActiveAreaRectTo` both compile (confirmed above); whether the
+   rendered result actually looks like "everything gray except this
+   rectangle," animates smoothly between rectangles, and has correct
+   z-order/no seam artifacts at the hole's edge hasn't been visually
+   checked. Fallback if the geometry approach doesn't render correctly:
+   four separate opaque rectangles covering the four strips around the
+   active area instead of one hole-punched shape (loses the animated
+   transition, which would need its own fallback — e.g. a plain
+   visibility swap — if `Storyboard`-driving a `PathGeometry`'s figure
+   points doesn't work smoothly).
 3. **Timing of `RowDefinition.ActualHeight`/`ColumnDefinition.ActualWidth`
-   during a live drag.** These are post-layout values; the reference's
-   `.Offset` was presumably kept in sync by WPF's own layout system on a
-   similar cadence. Whether reading `ActualHeight`/`ActualWidth` inside
-   a `PointerMoved` handler (mid-drag, potentially between layout passes)
-   returns stale values needs empirical confirmation — same class of
-   concern as Phase 3's live-`Window` layout-timing investigation.
-4. **Exact rail/handle visual composition for `GridAdorner`'s XAML
-   redesign** — shapes, thickness, hit-test width, hover/drag visual
-   feedback. A plan-time design choice once gap #1's reparenting
-   question and gap #2's gray-out approach are settled, not resolved
-   here.
-5. **Ctrl-modifier threading into `RasterPlacementBehavior`/
-   `SnaplinePlacementBehavior`'s `PlacePoint`/`BeforeSetPosition`.** Both
-   methods' current (4a-inherited) signatures carry no modifier
-   parameter; extending them to accept one (sourced from the
+   during a live drag or immediately after `GridAdornerProvider` creates
+   a new row/column.** These are post-layout values, and — unlike the
+   first revision of this document assumed — there is no
+   `DispatcherPriority.Loaded` equivalent to delay a read until layout
+   has settled (`DispatcherQueuePriority` has no `Loaded` member,
+   compiler-confirmed). Whether reading `ActualHeight`/`ActualWidth`
+   inside a `PointerMoved` handler, or immediately after inserting a new
+   `RowDefinition`/`ColumnDefinition`, returns stale values — and if so,
+   what WinUI mechanism (e.g. `LayoutUpdated`, `DispatcherQueue.
+   TryEnqueue` at a lower priority, or awaiting a frame) reliably
+   substitutes for the reference's `Loaded`-priority delay — **must be
+   verified empirically**, same class of concern as Phase 3's live-
+   `Window` layout-timing investigation. Elevated from the first
+   revision's framing (a settled type-swap) to a real open question.
+4. **Exact rail/handle/splitter/GridUnitSelector visual composition for
+   `GridAdorner`'s XAML redesign** — shapes, thickness, hit-test width,
+   hover/drag visual feedback for all three parts (creation rails,
+   splitter drag, unit picker). A plan-time design choice once gap #1's
+   reparenting question, gap #2's gray-out approach, and gap #3's
+   layout-timing question are settled, not resolved here.
+5. **Ctrl-modifier threading into `IPlacementBehavior.PlacePoint`/
+   `BeforeSetPosition`.** Both methods' current (4a-inherited, defined on
+   the shared interface in `PlacementBehavior.cs`) signatures carry no
+   modifier parameter; extending them to accept one (sourced from the
    originating pointer event's `KeyModifiers`, same mechanism 4a already
-   uses elsewhere) is a signature change whose exact shape is a
-   plan-time detail, not a research risk.
+   uses elsewhere) is an interface change every `IPlacementBehavior`
+   implementor must follow — exact shape a plan-time detail, not a
+   research risk.
+6. **`OptionService`'s scope beyond `SnaplinePlacementRoundValues`.**
+   This service doesn't exist anywhere in this port; the reference's own
+   `OptionService` likely carries other designer-wide options beyond the
+   one member 4b needs. Whether to port a narrow single-purpose service
+   (mirroring 4a's "port only the members this phase calls" precedent
+   for `ModelTools`/`PlacementOperation`) or the reference's fuller
+   surface is a plan-time scope call, not resolved here.
 
 ## Out of scope for Phase 4b
 
