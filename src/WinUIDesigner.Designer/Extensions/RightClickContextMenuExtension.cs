@@ -44,36 +44,64 @@ namespace WinUIDesigner.Designer.Extensions
         internal void BringToFront()
         {
             if (ExtendedItem.ParentProperty == null || !ExtendedItem.ParentProperty.IsCollection) return;
-            var collection = ExtendedItem.ParentProperty.CollectionElements;
-            collection.Remove(ExtendedItem);
-            collection.Add(ExtendedItem);
+            var changeGroup = ExtendedItem.OpenGroup("Bring to Front");
+            try {
+                var collection = ExtendedItem.ParentProperty.CollectionElements;
+                collection.Remove(ExtendedItem);
+                collection.Add(ExtendedItem);
+                changeGroup.Commit();
+            } catch {
+                changeGroup.Abort();
+                throw;
+            }
         }
 
         internal void SendToBack()
         {
             if (ExtendedItem.ParentProperty == null || !ExtendedItem.ParentProperty.IsCollection) return;
-            var collection = ExtendedItem.ParentProperty.CollectionElements;
-            collection.Remove(ExtendedItem);
-            collection.Insert(0, ExtendedItem);
+            var changeGroup = ExtendedItem.OpenGroup("Send to Back");
+            try {
+                var collection = ExtendedItem.ParentProperty.CollectionElements;
+                collection.Remove(ExtendedItem);
+                collection.Insert(0, ExtendedItem);
+                changeGroup.Commit();
+            } catch {
+                changeGroup.Abort();
+                throw;
+            }
         }
 
         internal void SendBackward()
         {
             if (ExtendedItem.ParentProperty == null || !ExtendedItem.ParentProperty.IsCollection) return;
-            var collection = ExtendedItem.ParentProperty.CollectionElements;
-            var idx = collection.IndexOf(ExtendedItem);
-            collection.RemoveAt(idx);
-            collection.Insert(idx <= 0 ? 0 : idx - 1, ExtendedItem);
+            var changeGroup = ExtendedItem.OpenGroup("Send Backward");
+            try {
+                var collection = ExtendedItem.ParentProperty.CollectionElements;
+                var idx = collection.IndexOf(ExtendedItem);
+                collection.RemoveAt(idx);
+                collection.Insert(idx <= 0 ? 0 : idx - 1, ExtendedItem);
+                changeGroup.Commit();
+            } catch {
+                changeGroup.Abort();
+                throw;
+            }
         }
 
         internal void SendForward()
         {
             if (ExtendedItem.ParentProperty == null || !ExtendedItem.ParentProperty.IsCollection) return;
-            var collection = ExtendedItem.ParentProperty.CollectionElements;
-            var idx = collection.IndexOf(ExtendedItem);
-            collection.RemoveAt(idx);
-            var count = collection.Count;
-            collection.Insert(idx + 1 > count ? count : idx + 1, ExtendedItem);
+            var changeGroup = ExtendedItem.OpenGroup("Send Forward");
+            try {
+                var collection = ExtendedItem.ParentProperty.CollectionElements;
+                var idx = collection.IndexOf(ExtendedItem);
+                collection.RemoveAt(idx);
+                var count = collection.Count;
+                collection.Insert(idx + 1 > count ? count : idx + 1, ExtendedItem);
+                changeGroup.Commit();
+            } catch {
+                changeGroup.Abort();
+                throw;
+            }
         }
     }
 }

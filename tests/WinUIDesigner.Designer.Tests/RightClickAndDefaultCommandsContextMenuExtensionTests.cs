@@ -4,6 +4,7 @@ using System.Xml;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
+using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.DesignModel.Xaml;
 using WinUIDesigner.Designer.Extensions;
 using WinUIDesigner.TestHost;
@@ -56,6 +57,35 @@ namespace WinUIDesigner.Designer.Tests
         }
 
         [Test]
+        public void BringToFrontCommitsAsOneUndoEntryAndUndoRevertsFully()
+        {
+            // Final-review fix I1: BringToFront used to be two independent Remove/Add undo
+            // entries with nothing wrapping them, so a single Undo only reverted the Add half,
+            // leaving the item removed from the collection entirely. Mirrors
+            // ModelToolsContextMenuTests.DeleteComponentsRemovesItemsAndCommitsAsOneUndoEntry's
+            // undo-count-plus-one-and-full-round-trip shape.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, canvasItem, aItem, bItem) = Load(window);
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new[] { aItem });
+                var undoService = surface.DesignContext.Services.GetService<UndoService>();
+                var undoCountBefore = undoService.UndoActions.Count();
+
+                var extension = aItem.Extensions.OfType<RightClickContextMenuExtension>().Single();
+                extension.BringToFront();
+
+                var elementsAfter = canvasItem.ContentProperty.CollectionElements.ToList();
+                Assert.AreEqual(aItem, elementsAfter[1], "A should now be last (front)");
+                Assert.AreEqual(undoCountBefore + 1, undoService.UndoActions.Count());
+
+                undoService.Undo();
+
+                var elementsAfterUndo = canvasItem.ContentProperty.CollectionElements.ToList();
+                Assert.AreEqual(aItem, elementsAfterUndo[0], "A should be back at its original index");
+                Assert.AreEqual(bItem, elementsAfterUndo[1]);
+            });
+        }
+
+        [Test]
         public void DeleteMenuItemDeletesTheSelectedItem()
         {
             WinUITestHost.RunWithWindow(window => {
@@ -83,6 +113,28 @@ namespace WinUIDesigner.Designer.Tests
                 extension.Undo();
 
                 Assert.AreEqual(20.0, ((Microsoft.UI.Xaml.FrameworkElement)aItem.Component).Width);
+            });
+        }
+
+        [Test]
+        public void RedoMenuItemReappliesTheLastUndoneChange()
+        {
+            // Final-review fix I4: Redo() had zero test coverage anywhere in the branch. Mirrors
+            // UndoMenuItemUndoesTheLastChange above, one step further: Undo then Redo the same
+            // Width change and confirm it's back in effect.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, canvasItem, aItem, bItem) = Load(window);
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new[] { aItem });
+                var groupBefore = aItem.OpenGroup("test change");
+                aItem.Properties.GetProperty("Width").SetValue(99.0);
+                groupBefore.Commit();
+
+                var extension = aItem.Extensions.OfType<DefaultCommandsContextMenuExtension>().Single();
+                extension.Undo();
+                Assert.AreEqual(20.0, ((Microsoft.UI.Xaml.FrameworkElement)aItem.Component).Width);
+
+                extension.Redo();
+                Assert.AreEqual(99.0, ((Microsoft.UI.Xaml.FrameworkElement)aItem.Component).Width);
             });
         }
     }

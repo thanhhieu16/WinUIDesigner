@@ -225,74 +225,78 @@ namespace WinUIDesigner.Designer
             if (placement == null) return;
 
             var operation = PlacementOperation.Start(collection, PlacementType.Move);
+            try {
+                var itemList = collection.Select(item => GetItemPos(operation, item)).ToList();
+                var xmin = itemList.Min(x => x.Xmin);
+                var xmax = itemList.Max(x => x.Xmax);
+                var mpos = (xmax - xmin) / 2 + xmin;
+                var ymin = itemList.Min(x => x.Ymin);
+                var ymax = itemList.Max(x => x.Ymax);
+                var ympos = (ymax - ymin) / 2 + ymin;
 
-            var itemList = collection.Select(item => GetItemPos(operation, item)).ToList();
-            var xmin = itemList.Min(x => x.Xmin);
-            var xmax = itemList.Max(x => x.Xmax);
-            var mpos = (xmax - xmin) / 2 + xmin;
-            var ymin = itemList.Min(x => x.Ymin);
-            var ymax = itemList.Max(x => x.Ymax);
-            var ympos = (ymax - ymin) / 2 + ymin;
-
-            foreach (var item in collection) {
-                var fe = (FrameworkElement)item.Component;
-                switch (arrangeDirection) {
-                    case ArrangeDirection.Left:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmin);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
-                                leftValue: xmin, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - (xmin + fe.ActualWidth));
-                        }
-                        break;
-                    case ArrangeDirection.HorizontalMiddle:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(mpos - fe.ActualWidth / 2);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            var left = mpos - fe.ActualWidth / 2;
-                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
-                                leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - left - fe.ActualWidth);
-                        }
-                        break;
-                    case ArrangeDirection.Right:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmax - fe.ActualWidth);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            var left = xmax - fe.ActualWidth;
-                            SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
-                                leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - xmax);
-                        }
-                        break;
-                    case ArrangeDirection.Top:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymin);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
-                                topValue: ymin, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - (ymin + fe.ActualHeight));
-                        }
-                        break;
-                    case ArrangeDirection.VerticalMiddle:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ympos - fe.ActualHeight / 2);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            var top = ympos - fe.ActualHeight / 2;
-                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
-                                topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - top - fe.ActualHeight);
-                        }
-                        break;
-                    case ArrangeDirection.Bottom:
-                        if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                            item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymax - fe.ActualHeight);
-                        } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                            var top = ymax - fe.ActualHeight;
-                            SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
-                                topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - ymax);
-                        }
-                        break;
+                foreach (var item in collection) {
+                    var fe = (FrameworkElement)item.Component;
+                    switch (arrangeDirection) {
+                        case ArrangeDirection.Left:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmin);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                    leftValue: xmin, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - (xmin + fe.ActualWidth));
+                            }
+                            break;
+                        case ArrangeDirection.HorizontalMiddle:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(mpos - fe.ActualWidth / 2);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                var left = mpos - fe.ActualWidth / 2;
+                                SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                    leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - left - fe.ActualWidth);
+                            }
+                            break;
+                        case ArrangeDirection.Right:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(xmax - fe.ActualWidth);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                var left = xmax - fe.ActualWidth;
+                                SetGridMargin(item, isRightAligned: HAlign(item) == HorizontalAlignment.Right,
+                                    leftValue: left, rightValue: ((FrameworkElement)item.Parent.Component).ActualWidth - xmax);
+                            }
+                            break;
+                        case ArrangeDirection.Top:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymin);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                    topValue: ymin, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - (ymin + fe.ActualHeight));
+                            }
+                            break;
+                        case ArrangeDirection.VerticalMiddle:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ympos - fe.ActualHeight / 2);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                var top = ympos - fe.ActualHeight / 2;
+                                SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                    topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - top - fe.ActualHeight);
+                            }
+                            break;
+                        case ArrangeDirection.Bottom:
+                            if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                                item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(ymax - fe.ActualHeight);
+                            } else if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                                var top = ymax - fe.ActualHeight;
+                                SetGridMarginVertical(item, isBottomAligned: VAlign(item) == VerticalAlignment.Bottom,
+                                    topValue: top, bottomValue: ((FrameworkElement)item.Parent.Component).ActualHeight - ymax);
+                            }
+                            break;
+                    }
                 }
-            }
 
-            operation.Commit();
+                operation.Commit();
+            } catch {
+                operation.Abort();
+                throw;
+            }
         }
 
         static HorizontalAlignment HAlign(DesignItem item) =>
@@ -320,131 +324,169 @@ namespace WinUIDesigner.Designer
         /// reference (WpfDesign.Designer/Project/ModelTools.cs:257-380) with the reference's own
         /// dead Right/Bottom-anchored branches (ItemPos.HorizontalAlignment/VerticalAlignment
         /// are read but never assigned anywhere in the reference - always false) collapsed to
-        /// their always-taken Left/Top-anchored case - see this plan's Task 6 note. Canvas.Right/
-        /// BottomProperty resets also dropped (don't exist in WinUI, and were resetting
-        /// properties this port never sets in the first place).</summary>
+        /// their always-taken Left/Top-anchored case - see this plan's Task 6 note. When the old
+        /// container is a Canvas, the wrapped items' Canvas.Left/Top ARE reset here (final-review
+        /// fix I3 - stale values would otherwise persist in the serialized XAML on an item no
+        /// longer inside a Canvas); only Canvas.Right/BottomProperty resets are dropped, because
+        /// those attached properties don't exist in WinUI (confirmed absent, CLAUDE.md) and this
+        /// port never sets them in the first place.</summary>
         public static System.Tuple<DesignItem, Rect> WrapItemsNewContainer(IEnumerable<DesignItem> items, System.Type containerType, bool doInsert = true)
         {
             var collection = items.ToList();
             var context = collection.First().Context;
             var container = collection.First().Parent;
+            if (container == null) return null;
             if (collection.Any(x => x.Parent != container)) return null;
 
             var placement = container.GetBehavior<IPlacementBehavior>();
             if (placement == null) return null;
 
             var operation = PlacementOperation.Start(collection, PlacementType.Move);
+            try {
+                var newInstance = context.Services.ExtensionManager.CreateInstanceWithCustomInstanceFactory(containerType, null);
+                DesignItem newPanel = context.Services.Component.RegisterComponentForDesigner(newInstance);
 
-            var newInstance = context.Services.ExtensionManager.CreateInstanceWithCustomInstanceFactory(containerType, null);
-            DesignItem newPanel = context.Services.Component.RegisterComponentForDesigner(newInstance);
+                var itemList = new List<ItemPos>();
+                int? firstIndex = null;
 
-            var itemList = new List<ItemPos>();
-            int? firstIndex = null;
+                foreach (var item in collection) {
+                    itemList.Add(GetItemPos(operation, item));
+                    if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                        item.Properties.GetProperty("HorizontalAlignment").Reset();
+                        item.Properties.GetProperty("VerticalAlignment").Reset();
+                        item.Properties.GetProperty("Margin").Reset();
+                    } else if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                        item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").Reset();
+                        item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").Reset();
+                    }
 
-            foreach (var item in collection) {
-                itemList.Add(GetItemPos(operation, item));
-                if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                    item.Properties.GetProperty("HorizontalAlignment").Reset();
-                    item.Properties.GetProperty("VerticalAlignment").Reset();
-                    item.Properties.GetProperty("Margin").Reset();
+                    if (item.ParentProperty.IsCollection) {
+                        var parentCollection = item.ParentProperty.CollectionElements;
+                        if (!firstIndex.HasValue) firstIndex = parentCollection.IndexOf(item);
+                        parentCollection.Remove(item);
+                    } else {
+                        item.ParentProperty.Reset();
+                    }
                 }
 
-                if (item.ParentProperty.IsCollection) {
-                    var parentCollection = item.ParentProperty.CollectionElements;
-                    if (!firstIndex.HasValue) firstIndex = parentCollection.IndexOf(item);
-                    parentCollection.Remove(item);
-                } else {
-                    item.ParentProperty.Reset();
+                var xmin = itemList.Min(x => x.Xmin);
+                var xmax = itemList.Max(x => x.Xmax);
+                var ymin = itemList.Min(x => x.Ymin);
+                var ymax = itemList.Max(x => x.Ymax);
+
+                foreach (var item in itemList) {
+                    if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                        item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin - xmin);
+                        item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin - ymin);
+                        newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                    } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                        var thickness = new Thickness(item.Xmin - xmin, item.Ymin - ymin, 0, 0);
+                        item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
+                        item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
+                        item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
+                        newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                    } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
+                        newPanel.ContentProperty.SetValue(item.DesignItem);
+                    }
                 }
+
+                if (doInsert) {
+                    var operation2 = PlacementOperation.TryStartInsertNewComponents(
+                        container,
+                        new[] { newPanel },
+                        new[] { new Rect(xmin, ymin, xmax - xmin, ymax - ymin) },
+                        PlacementType.AddItem);
+
+                    if (operation2 == null) {
+                        operation.Abort();
+                        return null;
+                    }
+
+                    try {
+                        if (collection.Count == 1 && firstIndex.HasValue && container.ContentProperty != null && container.ContentProperty.IsCollection) {
+                            container.ContentProperty.CollectionElements.Remove(newPanel);
+                            container.ContentProperty.CollectionElements.Insert(firstIndex.Value, newPanel);
+                        }
+
+                        operation2.Commit();
+                        context.Services.Selection.SetSelectedComponents(new[] { newPanel });
+                    } catch {
+                        operation2.Abort();
+                        throw;
+                    }
+                }
+
+                operation.Commit();
+                return new System.Tuple<DesignItem, Rect>(newPanel, new Rect(xmin, ymin, xmax - xmin, ymax - ymin));
+            } catch {
+                operation.Abort();
+                throw;
             }
-
-            var xmin = itemList.Min(x => x.Xmin);
-            var xmax = itemList.Max(x => x.Xmax);
-            var ymin = itemList.Min(x => x.Ymin);
-            var ymax = itemList.Max(x => x.Ymax);
-
-            foreach (var item in itemList) {
-                if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin - xmin);
-                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin - ymin);
-                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
-                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                    var thickness = new Thickness(item.Xmin - xmin, item.Ymin - ymin, 0, 0);
-                    item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
-                    item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
-                    item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
-                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
-                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
-                    newPanel.ContentProperty.SetValue(item.DesignItem);
-                }
-            }
-
-            if (doInsert) {
-                var operation2 = PlacementOperation.TryStartInsertNewComponents(
-                    container,
-                    new[] { newPanel },
-                    new[] { new Rect(xmin, ymin, xmax - xmin, ymax - ymin) },
-                    PlacementType.AddItem);
-
-                if (collection.Count == 1 && container.ContentProperty != null && container.ContentProperty.IsCollection) {
-                    container.ContentProperty.CollectionElements.Remove(newPanel);
-                    container.ContentProperty.CollectionElements.Insert(firstIndex.Value, newPanel);
-                }
-
-                operation2.Commit();
-                context.Services.Selection.SetSelectedComponents(new[] { newPanel });
-            }
-
-            operation.Commit();
-            return new System.Tuple<DesignItem, Rect>(newPanel, new Rect(xmin, ymin, xmax - xmin, ymax - ymin));
         }
 
         /// <summary>Moves a container's children back out to the container's own parent,
         /// removing the now-empty container. Ported unchanged in shape from the reference
         /// (WpfDesign.Designer/Project/ModelTools.cs:382-502) - same dead-branch collapse as
-        /// WrapItemsNewContainer above.</summary>
+        /// WrapItemsNewContainer above. When the container being unwrapped is itself a Canvas,
+        /// each child's Canvas.Left/Top ARE reset here (final-review fix I3) before it's re-
+        /// parented; only Canvas.Right/BottomProperty resets are dropped (don't exist in WinUI -
+        /// confirmed absent, CLAUDE.md - and this port never sets them). Guards against a null
+        /// root Parent and an empty container (final-review fixes C1/C2) return before
+        /// PlacementOperation.Start is ever called - otherwise the null Parent dereference used
+        /// to happen only after the transaction had already removed every child from the tree,
+        /// and an empty collection made PlacementOperation.Start itself throw.</summary>
         public static void UnwrapItemsFromContainer(DesignItem container)
         {
             var collection = container.ContentProperty.CollectionElements.ToList();
+            if (collection.Count == 0) return;
             var newPanel = container.Parent;
+            if (newPanel == null) return;
             if (collection.Any(x => x.Parent != container)) return;
 
             var placement = container.GetBehavior<IPlacementBehavior>();
             if (placement == null) return;
 
             var operation = PlacementOperation.Start(collection, PlacementType.Move);
-            var containerPos = GetItemPos(operation, container);
-            var itemList = new List<ItemPos>();
+            try {
+                var containerPos = GetItemPos(operation, container);
+                var itemList = new List<ItemPos>();
 
-            foreach (var item in collection) {
-                itemList.Add(GetItemPos(operation, item));
-                if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                    item.Properties.GetProperty("HorizontalAlignment").Reset();
-                    item.Properties.GetProperty("VerticalAlignment").Reset();
-                    item.Properties.GetProperty("Margin").Reset();
+                foreach (var item in collection) {
+                    itemList.Add(GetItemPos(operation, item));
+                    if (container.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                        item.Properties.GetProperty("HorizontalAlignment").Reset();
+                        item.Properties.GetProperty("VerticalAlignment").Reset();
+                        item.Properties.GetProperty("Margin").Reset();
+                    } else if (container.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                        item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").Reset();
+                        item.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").Reset();
+                    }
+                    item.ParentProperty.CollectionElements.Remove(item);
                 }
-                item.ParentProperty.CollectionElements.Remove(item);
-            }
 
-            newPanel.ContentProperty.CollectionElements.Remove(container);
+                newPanel.ContentProperty.CollectionElements.Remove(container);
 
-            foreach (var item in itemList) {
-                if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
-                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin + containerPos.Xmin);
-                    item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin + containerPos.Ymin);
-                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
-                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
-                    var thickness = new Thickness(item.Xmin, item.Ymin, 0, 0);
-                    item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
-                    item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
-                    item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
-                    newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
-                } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
-                    newPanel.ContentProperty.SetValue(item.DesignItem);
+                foreach (var item in itemList) {
+                    if (newPanel.Component is Microsoft.UI.Xaml.Controls.Canvas) {
+                        item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").SetValue(item.Xmin + containerPos.Xmin);
+                        item.DesignItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").SetValue(item.Ymin + containerPos.Ymin);
+                        newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                    } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Grid) {
+                        var thickness = new Thickness(item.Xmin, item.Ymin, 0, 0);
+                        item.DesignItem.Properties.GetProperty("HorizontalAlignment").SetValue(HorizontalAlignment.Left);
+                        item.DesignItem.Properties.GetProperty("VerticalAlignment").SetValue(VerticalAlignment.Top);
+                        item.DesignItem.Properties.GetProperty("Margin").SetValue(thickness);
+                        newPanel.ContentProperty.CollectionElements.Add(item.DesignItem);
+                    } else if (newPanel.Component is Microsoft.UI.Xaml.Controls.Viewbox || newPanel.Component is Microsoft.UI.Xaml.Controls.ContentControl) {
+                        newPanel.ContentProperty.SetValue(item.DesignItem);
+                    }
                 }
-            }
 
-            operation.Commit();
+                operation.Commit();
+            } catch {
+                operation.Abort();
+                throw;
+            }
         }
     }
 }

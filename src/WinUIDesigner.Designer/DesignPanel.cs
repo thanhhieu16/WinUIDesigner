@@ -99,6 +99,7 @@ namespace WinUIDesigner.Designer
 			}
 			var flyout = new MenuFlyout();
 			foreach (var group in _contextFlyoutGroups.OrderBy(g => g.Value)) {
+				if (group.Key.Count == 0) continue;
 				if (flyout.Items.Count > 0)
 					flyout.Items.Add(new MenuFlyoutSeparator());
 				foreach (var item in group.Key)

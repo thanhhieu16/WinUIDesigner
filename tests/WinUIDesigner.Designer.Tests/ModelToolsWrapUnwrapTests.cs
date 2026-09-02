@@ -74,6 +74,35 @@ namespace WinUIDesigner.Designer.Tests
         }
 
         [Test]
+        public void WrapItemsNewContainerInGridSetsAlignmentAndMarginOnTheWrappedItems()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (context, canvasItem, aItem, bItem) = LoadTwoButtonsInCanvas(window);
+
+                WinUIDesigner.Designer.ModelTools.WrapItemsNewContainer(new[] { aItem, bItem }, typeof(Microsoft.UI.Xaml.Controls.Grid));
+
+                // Both items move into a new Grid, re-anchored relative to their own combined
+                // bounds (0,0)-(70,50) via HorizontalAlignment/VerticalAlignment=Left/Top and a
+                // Margin - A stays at (0,0) since it's already the min corner, B's Margin
+                // reflects its (50,30) offset from that corner. Also exercises the old-container-
+                // is-Canvas Left/Top reset (final-review fix I3): the attached properties must no
+                // longer be set once the items live under a Grid.
+                Assert.AreEqual(Microsoft.UI.Xaml.HorizontalAlignment.Left, aItem.Properties.GetProperty("HorizontalAlignment").GetConvertedValueOnInstance<Microsoft.UI.Xaml.HorizontalAlignment>());
+                Assert.AreEqual(Microsoft.UI.Xaml.VerticalAlignment.Top, aItem.Properties.GetProperty("VerticalAlignment").GetConvertedValueOnInstance<Microsoft.UI.Xaml.VerticalAlignment>());
+                var marginA = aItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>();
+                Assert.AreEqual(0.0, marginA.Left);
+                Assert.AreEqual(0.0, marginA.Top);
+
+                var marginB = bItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>();
+                Assert.AreEqual(50.0, marginB.Left);
+                Assert.AreEqual(30.0, marginB.Top);
+
+                Assert.IsFalse(aItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").IsSet, "stale Canvas.Left should be reset (final-review fix I3)");
+                Assert.IsFalse(aItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").IsSet, "stale Canvas.Top should be reset (final-review fix I3)");
+            });
+        }
+
+        [Test]
         public void UnwrapItemsFromContainerMovesChildrenBackToTheOuterContainer()
         {
             WinUITestHost.RunWithWindow(window => {
