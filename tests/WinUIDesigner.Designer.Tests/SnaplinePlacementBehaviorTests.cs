@@ -202,12 +202,18 @@ namespace WinUIDesigner.Designer.Tests
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = Load(window, out var movedItem);
-                Assert.AreEqual(0, surface.DesignPanel.Adorners.Count);
+                // Brief-defect correction: PanelMove (Phase 4b Task 15) is a permanent extension -
+                // present on the root SwapChainPanel (Panel) and both Button children
+                // (ContentControl) any time a DesignPanel exists, regardless of whether a placement
+                // operation is active - so the adorner count is no longer 0 at rest. Track it as a
+                // baseline instead; this test's own subject is whether *placement* adds/removes
+                // exactly its own two surfaces (Raster's and Snapline's).
+                int baselineAdorners = surface.DesignPanel.Adorners.Count;
 
                 var operation = PlacementOperation.Start(new[] { movedItem }, PlacementType.Move);
                 // Two surfaces: RasterPlacementBehavior's and SnaplinePlacementBehavior's - both
                 // BeginPlacement overrides run, one per level of the chain.
-                Assert.AreEqual(2, surface.DesignPanel.Adorners.Count);
+                Assert.AreEqual(baselineAdorners + 2, surface.DesignPanel.Adorners.Count);
                 Assert.AreEqual(0, SnaplineCount(surface));
 
                 operation.PlacedItems[0].Bounds = new Rect(152, 300, 40, 20);
@@ -219,7 +225,7 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(0, SnaplineCount(surface), "moving out of range clears the guides");
 
                 operation.Abort();
-                Assert.AreEqual(0, surface.DesignPanel.Adorners.Count, "EndPlacement tears both surfaces down");
+                Assert.AreEqual(baselineAdorners, surface.DesignPanel.Adorners.Count, "EndPlacement tears both surfaces down");
             });
         }
 

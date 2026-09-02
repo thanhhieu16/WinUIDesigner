@@ -203,5 +203,83 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(canUndoBefore, undoService.CanUndo);
             });
         }
+
+        const string NestedCanvasXaml =
+            "<Canvas x:Name=\"RootCanvas\" Width=\"300\" Height=\"300\" " +
+            "xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Canvas x:Name=\"InnerCanvas\" Width=\"100\" Height=\"100\" Canvas.Left=\"10\" Canvas.Top=\"10\">" +
+            "<Button x:Name=\"Target\" Width=\"20\" Height=\"20\" />" +
+            "</Canvas></Canvas>";
+
+        [Test]
+        public void ClickingAndDraggingAnUnselectedContainersBodyDoesNothing()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(NestedCanvasXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                // Brief-defect correction (same call as LoadSelected above): UseSnaplinePlacement
+                // defaults to true and would nudge a real move by SnaplineAccuracy (5px); this
+                // test doesn't expect any move to happen at all, but disabling it keeps the
+                // fixture consistent with the sibling test below and immune to that noise either
+                // way.
+                surface.DesignPanel.UseSnaplinePlacement = false;
+                surface.UpdateLayout();
+
+                var rootCanvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+                var innerCanvas = (Microsoft.UI.Xaml.Controls.Canvas)rootCanvas.Children[0];
+                var services = surface.DesignContext.Services;
+                var innerItem = services.Component.GetDesignItem(innerCanvas);
+                // Nothing selected - InnerCanvas is not the primary selection.
+                var extension = innerItem.Extensions.OfType<PanelMove>().Single();
+
+                extension.DragListener.SimulateDown(new Windows.Foundation.Point(150, 150));
+                extension.DragListener.SimulateMove(new Windows.Foundation.Point(170, 165));
+                extension.DragListener.SimulateUp(new Windows.Foundation.Point(170, 165));
+                surface.UpdateLayout();
+
+                var left = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").GetConvertedValueOnInstance<double>();
+                Assert.AreEqual(10, left, 0.5, "dragging an unselected container's body must not move it");
+            });
+        }
+
+        [Test]
+        public void ClickingAndDraggingASelectedContainersOwnBodyMovesTheContainerItself()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(NestedCanvasXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                // Brief-defect correction: UseSnaplinePlacement defaults to true (DesignPanel.cs),
+                // and SnaplinePlacementBehavior.BuildMaps treats the move's own CurrentContainer
+                // (RootCanvas) as a snap-to sibling in its own right - its own edge/center guides
+                // land close enough to this fixture's exact +20/+15 delta to nudge the result by
+                // SnaplineAccuracy (5px), confirmed empirically (Top measured 20 instead of 25
+                // with the flag left on). Same root cause and same fix as LoadSelected above.
+                surface.DesignPanel.UseSnaplinePlacement = false;
+                surface.UpdateLayout();
+
+                var rootCanvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+                var innerCanvas = (Microsoft.UI.Xaml.Controls.Canvas)rootCanvas.Children[0];
+                var services = surface.DesignContext.Services;
+                var innerItem = services.Component.GetDesignItem(innerCanvas);
+                services.Selection.SetSelectedComponents(new[] { innerItem }, SelectionTypes.Primary);
+                surface.UpdateLayout();
+                var extension = innerItem.Extensions.OfType<PanelMove>().Single();
+
+                extension.DragListener.SimulateDown(new Windows.Foundation.Point(150, 150));
+                extension.DragListener.SimulateMove(new Windows.Foundation.Point(170, 165)); // +20,+15
+                extension.DragListener.SimulateUp(new Windows.Foundation.Point(170, 165));
+                surface.UpdateLayout();
+
+                var left = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Left").GetConvertedValueOnInstance<double>();
+                var top = innerItem.Properties.GetAttachedProperty(typeof(Microsoft.UI.Xaml.Controls.Canvas), "Top").GetConvertedValueOnInstance<double>();
+                Assert.AreEqual(30, left, 0.5);
+                Assert.AreEqual(25, top, 0.5);
+            });
+        }
     }
 }

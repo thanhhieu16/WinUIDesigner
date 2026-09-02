@@ -121,10 +121,16 @@ namespace WinUIDesigner.Designer.Tests
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = Load(window, out var buttonItem);
-                Assert.AreEqual(0, surface.DesignPanel.Adorners.Count, "no placement operation, no raster surface");
+                // Brief-defect correction: PanelMove (Phase 4b Task 15) is a permanent extension -
+                // present on both the root SwapChainPanel (Panel) and its Button child
+                // (ContentControl) any time a DesignPanel exists, regardless of whether a placement
+                // operation is active - so the adorner count is no longer 0 at rest. Track it as a
+                // baseline instead; this test's own subject is whether *placement* adds/removes
+                // exactly its own raster-surface adorner.
+                int baselineAdorners = surface.DesignPanel.Adorners.Count;
 
                 var operation = PlacementOperation.Start(new[] { buttonItem }, PlacementType.Move);
-                Assert.GreaterOrEqual(surface.DesignPanel.Adorners.Count, 1, "BeginPlacement adds the raster surface");
+                Assert.Greater(surface.DesignPanel.Adorners.Count, baselineAdorners, "BeginPlacement adds the raster surface");
                 Assert.AreEqual(0, RasterLineCount(surface), "the raster is not drawn until it is actually used");
 
                 operation.CurrentContainerBehavior.PlacePoint(new Point(13.4, 27.9), VirtualKeyModifiers.None);
@@ -137,7 +143,7 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(0, RasterLineCount(surface), "Ctrl clears the raster visuals");
 
                 operation.Abort();
-                Assert.AreEqual(0, surface.DesignPanel.Adorners.Count, "EndPlacement removes the raster surface");
+                Assert.AreEqual(baselineAdorners, surface.DesignPanel.Adorners.Count, "EndPlacement removes the raster surface");
             });
         }
     }

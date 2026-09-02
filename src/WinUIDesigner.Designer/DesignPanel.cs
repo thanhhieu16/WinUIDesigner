@@ -107,13 +107,46 @@ namespace WinUIDesigner.Designer
 			if (testAdorners) {
 				foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, _adornerLayer)) {
 					if (!continueHitTest) break;
-					var customResult = new DesignPanelHitTestResult(element);
+
 					DependencyObject obj = element;
+					AdornerPanel adorner = null;
 					while (obj != null && obj != _adornerLayer) {
-						var adorner = obj as AdornerPanel;
-						if (adorner != null) customResult.AdornerHit = adorner;
+						var candidate = obj as AdornerPanel;
+						if (candidate != null) adorner = candidate;
 						obj = VisualTreeHelper.GetParent(obj);
 					}
+
+					// No specific AdornerPanel was found along this hit's own ancestor chain - the
+					// hit resolved only to _adornerLayer itself (or some other non-AdornerPanel
+					// descendant of it). _adornerLayer is always Arrange()'d to the DesignPanel's
+					// full size regardless of DesiredSize (DesignPanel.ArrangeOverride) - empirically
+					// confirmed (Task 15) that once it has at least one real child anywhere,
+					// FindElementsInHostCoordinates can report _adornerLayer itself as "hit" at ANY
+					// point within that full-size rect, even far from where any actual adorner is
+					// positioned. That is not a real adorner hit, so it must not block
+					// ElementSelection hit-testing (this method's own single-result convenience
+					// overload, and DesignPanel.OnPointerPressed's real click-to-select path) from
+					// reaching the design-surface content underneath.
+					if (adorner == null) continue;
+
+					// PanelMove (Task 15)'s PanelMoveAdorner is a full-fill overlay permanently
+					// present over every Panel/Border/ContentControl/Viewbox (regardless of
+					// selection), unlike every other adorner (resize/rotate/skew thumbs,
+					// TopLeftContainerDragHandle), which only exists once something is already
+					// selected and is meant to swallow the click rather than fall through. If a
+					// PanelMoveAdorner hit stopped this loop like any other adorner would, it
+					// would permanently shadow ElementSelection hit-testing for every element it
+					// covers - including nested children, since it fills its whole container's
+					// bounds. Skipping it here lets the point fall through to the real
+					// design-surface content beneath it, so normal click-to-select still resolves
+					// the actually-clicked element; PanelMove's own move gesture is driven
+					// separately, directly off the overlay's own routed pointer events
+					// (DragListener), not through this hit-test path.
+					if (adorner.Children.Count == 1 && adorner.Children[0] is PanelMoveAdorner)
+						continue;
+
+					var customResult = new DesignPanelHitTestResult(element);
+					customResult.AdornerHit = adorner;
 					continueHitTest = callback(customResult);
 				}
 			}
