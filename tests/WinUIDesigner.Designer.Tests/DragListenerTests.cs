@@ -145,5 +145,30 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreSame(target, focusedElement);
             });
         }
+
+        [Test]
+        public void PointerCaptureLostMidDragCancelsTheGesture()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var target = new Grid { Width = 100, Height = 100 };
+                window.Content = target;
+                window.Activate();
+                var drag = new DragListener(target);
+
+                bool completedFired = false;
+                bool canceledAtCompletion = false;
+                drag.Completed += d => { completedFired = true; canceledAtCompletion = d.IsCanceled; };
+
+                drag.SimulateDown(new Point(0, 0));
+                drag.SimulateMove(new Point(20, 20));
+                Assert.IsTrue(drag.IsActive, "precondition: the drag must be active before capture loss");
+
+                drag.RaisePointerCaptureLostForTest();
+
+                Assert.IsFalse(drag.IsDown, "a lost capture must end the gesture the same way a release does");
+                Assert.IsTrue(completedFired, "Completed must still fire, so callers can distinguish success from cancellation");
+                Assert.IsTrue(canceledAtCompletion, "the gesture must be reported as canceled, not completed");
+            });
+        }
     }
 }

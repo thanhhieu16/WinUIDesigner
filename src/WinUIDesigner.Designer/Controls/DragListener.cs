@@ -59,6 +59,7 @@ namespace WinUIDesigner.Designer.Controls
             Target.AddHandler(UIElement.PointerPressedEvent, (PointerEventHandler)OnPointerPressed, true);
             Target.AddHandler(UIElement.PointerMovedEvent, (PointerEventHandler)OnPointerMoved, true);
             Target.AddHandler(UIElement.PointerReleasedEvent, (PointerEventHandler)OnPointerReleased, true);
+            Target.PointerCaptureLost += OnPointerCaptureLost;
             Target.KeyDown += OnKeyDown;
         }
 
@@ -97,6 +98,17 @@ namespace WinUIDesigner.Designer.Controls
         {
             if (!IsDown || e.Pointer.PointerId != _capturedPointer?.PointerId) return;
             EndAt();
+        }
+
+        void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+        {
+            // The OS can revoke capture without a matching PointerReleased (e.g. a system
+            // interruption). Without this handler IsDown would stay true forever and Completed
+            // would never fire - stranding an open ChangeGroup, and for a move gesture that had
+            // already called PlacementOperation.ChangeContainer mid-drag, a partially-reparented
+            // item too. Cancel() is the same safe unwind Escape already uses.
+            if (!IsDown || e.Pointer.PointerId != _capturedPointer?.PointerId) return;
+            Cancel();
         }
 
         void OnKeyDown(object sender, KeyRoutedEventArgs e)
@@ -210,6 +222,15 @@ namespace WinUIDesigner.Designer.Controls
         {
             CurrentPoint = point;
             EndAt();
+        }
+
+        /// <summary>Test-only entry point: drives the same PointerCaptureLost path
+        /// OnPointerCaptureLost does, without a real PointerRoutedEventArgs (which has no
+        /// public constructor). See SimulateDown.</summary>
+        public void RaisePointerCaptureLostForTest()
+        {
+            if (!IsDown) return;
+            Cancel();
         }
     }
 }
