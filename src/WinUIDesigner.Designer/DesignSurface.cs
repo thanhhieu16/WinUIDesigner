@@ -40,6 +40,7 @@ namespace WinUIDesigner.Designer
 			// like IDesignPanel and ISelectionService above.
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(OptionService), new OptionService()));
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.Services.ICopyPasteService), new Services.CopyPasteService()));
+			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IToolService), new Services.ToolService(_designPanel)));
 			InitializeDesigner(new XamlDesignContext(xamlReader, loadSettings));
 		}
 

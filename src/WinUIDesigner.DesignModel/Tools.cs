@@ -20,6 +20,8 @@ using System;
 using System.Collections.Generic;
 using Windows.Foundation;
 using Microsoft.UI.Input;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Input;
 using WinUIDesigner.DesignModel.Adorners;
 
 namespace WinUIDesigner.DesignModel
@@ -46,5 +48,32 @@ namespace WinUIDesigner.DesignModel
 		ICollection<AdornerPanel> Adorners { get; }
 		DesignPanelHitTestResult HitTest(Point mousePosition, bool testAdorners, bool testDesignSurface, HitTestType hitTestType);
 		void HitTest(Point mousePosition, bool testAdorners, bool testDesignSurface, Predicate<DesignPanelHitTestResult> callback, HitTestType hitTestType);
+
+		// Added Phase 4d (spec decision 1): the reference's IDesignPanel : IInputElement gets
+		// MouseMove/CaptureMouse()/LostMouseCapture/keyboard input for free from that WPF
+		// interface. WinUI's IDesignPanel inherits nothing - every member below is explicit.
+		// DesignPanel (the only implementation) satisfies all of these automatically via its own
+		// inherited UIElement members (PointerPressed, PointerMoved, etc. are already public on
+		// UIElement with matching signatures) - no forwarding code needed in DesignPanel itself,
+		// except SetCursor (UIElement.ProtectedCursor is protected, not public).
+		event PointerEventHandler PointerPressed;
+		event PointerEventHandler PointerMoved;
+		event PointerEventHandler PointerReleased;
+		event PointerEventHandler PointerCaptureLost;
+		event KeyEventHandler KeyDown;
+		event DoubleTappedEventHandler DoubleTapped;
+		event DragEventHandler DragEnter;
+		event DragEventHandler DragOver;
+		event DragEventHandler DragLeave;
+		event DragEventHandler Drop;
+		bool CapturePointer(Pointer pointer);
+		void ReleasePointerCaptures();
+		bool Focus(FocusState value);
+
+		/// <summary>Sets the panel's visible pointer cursor to match the active ITool.Cursor.
+		/// Not on UIElement as a public member (UIElement.ProtectedCursor is protected), so this
+		/// needs an explicit DesignPanel implementation - see DesignerThumb.SetDesignCursor for
+		/// the established equivalent pattern on a different UIElement subclass.</summary>
+		void SetCursor(InputCursor cursor);
 	}
 }

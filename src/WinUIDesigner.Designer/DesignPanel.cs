@@ -22,8 +22,8 @@ namespace WinUIDesigner.Designer
 		{
 			_adornerLayer = new AdornerLayer(this);
 			Children.Add(_adornerLayer);
-			this.PointerPressed += OnPointerPressed;
 			IsContentHitTestVisible = true;
+			IsTabStop = true; // makes Focus()/KeyDown reachable - same reasoning as DesignerThumb's own IsTabStop=true (DragListener.cs's Escape-to-cancel comment)
 		}
 
 		public UIElement Content {
@@ -231,12 +231,6 @@ namespace WinUIDesigner.Designer
 			}
 		}
 
-		void OnPointerPressed(object sender, PointerRoutedEventArgs e)
-		{
-			var point = e.GetCurrentPoint(this).Position;
-			HandlePointerPressed(point, e.KeyModifiers);
-		}
-
 		/// <summary>The real OnPointerPressed hit-test-and-select logic, extracted so a test can
 		/// drive it directly with a Point and modifiers instead of a real pointer event.
 		/// PointerRoutedEventArgs has no public constructor (Global Constraints), so this
@@ -263,6 +257,11 @@ namespace WinUIDesigner.Designer
 				selectionType = SelectionTypes.Primary;
 
 			Context.Services.Selection.SetSelectedComponents(new DesignItem[] { result.ModelHit }, selectionType);
+		}
+
+		public void SetCursor(Microsoft.UI.Input.InputCursor cursor)
+		{
+			ProtectedCursor = cursor;
 		}
 	}
 }

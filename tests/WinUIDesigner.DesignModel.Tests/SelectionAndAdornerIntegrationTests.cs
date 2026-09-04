@@ -64,6 +64,24 @@ namespace WinUIDesigner.DesignModel.Tests
             public ICollection<AdornerPanel> Adorners { get; } = new List<AdornerPanel>();
             public DesignPanelHitTestResult HitTest(Windows.Foundation.Point p, bool a, bool b, HitTestType t) { return DesignPanelHitTestResult.NoHit; }
             public void HitTest(Windows.Foundation.Point p, bool a, bool b, Predicate<DesignPanelHitTestResult> c, HitTestType t) { }
+
+            // Phase 4d Task 2: IDesignPanel grew tool-swap/gesture members. This fake predates that
+            // extension and has no need to drive any of them - stubs only, so the interface is
+            // satisfied.
+            public event Microsoft.UI.Xaml.Input.PointerEventHandler PointerPressed;
+            public event Microsoft.UI.Xaml.Input.PointerEventHandler PointerMoved;
+            public event Microsoft.UI.Xaml.Input.PointerEventHandler PointerReleased;
+            public event Microsoft.UI.Xaml.Input.PointerEventHandler PointerCaptureLost;
+            public event Microsoft.UI.Xaml.Input.KeyEventHandler KeyDown;
+            public event Microsoft.UI.Xaml.Input.DoubleTappedEventHandler DoubleTapped;
+            public event Microsoft.UI.Xaml.DragEventHandler DragEnter;
+            public event Microsoft.UI.Xaml.DragEventHandler DragOver;
+            public event Microsoft.UI.Xaml.DragEventHandler DragLeave;
+            public event Microsoft.UI.Xaml.DragEventHandler Drop;
+            public bool CapturePointer(Microsoft.UI.Xaml.Input.Pointer pointer) { return false; }
+            public void ReleasePointerCaptures() { }
+            public bool Focus(Microsoft.UI.Xaml.FocusState value) { return false; }
+            public void SetCursor(Microsoft.UI.Input.InputCursor cursor) { }
         }
 
         [Test]
