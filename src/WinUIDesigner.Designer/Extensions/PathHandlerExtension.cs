@@ -370,6 +370,7 @@ namespace WinUIDesigner.Designer.Extensions
             thumb.IsEllipse = point.TargetPathPoint != null;
             thumb.Point = point.Point;
             thumb.RelativeToPoint = point.TargetPathPoint?.Point;
+            thumb.ContextFlyout = BuildMenu(point);
             // Deviation from the brief: the brief's CreateThumb never published the thumb's own
             // PointPlacementSupport to the panel, so AdornerPanel.ArrangeOverride would have used
             // the AdornerPlacement.FillContent default (AdornerPanel.cs:31) and every thumb would
