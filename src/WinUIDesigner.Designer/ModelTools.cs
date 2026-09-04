@@ -33,6 +33,32 @@ namespace WinUIDesigner.Designer
             return double.IsNaN(v) ? element.RenderSize.Height : v;
         }
 
+        /// <summary>Gets the default size to use for a newly-created item with no explicit size
+        /// of its own, so a click-without-drag placement (CreateComponentTool.
+        /// AddItemsWithDefaultSize, Phase 4d Task 4) doesn't add a 0x0 control. Ported in
+        /// trimmed form from the reference's ModelTools.GetDefaultSize (WpfDesign.Designer/
+        /// Project/ModelTools.cs:161-190). Two reference layers are dropped, not ported:
+        /// Metadata.GetDefaultSize's per-type registry (Metadata.cs - the class, not just this
+        /// one method - was never ported to this codebase at all; grep across src/ turns up no
+        /// caller that ever registered a default size through it) and CreateVisualTree's
+        /// XPS-serializer trick (a WPF-only device to force layout on an element with no visual
+        /// parent - WinUI's UIElement.Measure works directly on an unparented element without
+        /// it). Despite both this file's own doc comment and the Phase 4d spec/plan explicitly
+        /// asserting GetDefaultSize "already exists per 4c's ModelTools.cs", it did not - added
+        /// here as Task 4's own prerequisite, since CreateComponentTool.AddItemsWithDefaultSize
+        /// cannot compile without it.</summary>
+        public static Size GetDefaultSize(DesignItem createdItem)
+        {
+            var view = createdItem.View;
+            view.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var s = view.DesiredSize;
+
+            if (double.IsNaN(s.Width) && GetWidth(view) > 0) s.Width = GetWidth(view);
+            if (double.IsNaN(s.Height) && GetHeight(view) > 0) s.Height = GetHeight(view);
+
+            return s;
+        }
+
         public static void Resize(DesignItem item, double newWidth, double newHeight)
         {
             if (newWidth != GetWidth(item.View)) {
