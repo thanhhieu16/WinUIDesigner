@@ -1,5 +1,3 @@
-using System.Linq;
-using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
@@ -11,12 +9,23 @@ namespace WinUIDesigner.Designer.Tests
 {
     // Investigates the spec's decision 10 / "Known gaps" #1: WinUI has no Shape.RenderedGeometry
     // to query, so PointTrackerPlacementSupport (Task 9) must use a shape's raw logical point
-    // (X1/Y1/X2/Y2, Points[i]) directly. This test empirically confirms that substitute is exact
-    // for Stretch.None (what every shape this phase's own Draw*Extension tools ever create uses -
-    // spec decision 5) and empirically confirms it is NOT exact for Stretch != None (a shape
-    // loaded from existing XAML could have any Stretch value - this phase's own tools never
-    // produce one, but PointTrackerPlacementSupport still attaches unconditionally to any
-    // selected Line/Polygon/Polyline via [ExtensionFor], so the gap is real, not hypothetical).
+    // (X1/Y1/X2/Y2, Points[i]) directly. TransformToVisual only reports an element's own layout
+    // position - it cannot see Stretch's internal geometry scaling (empirically confirmed: the
+    // same element's TransformToVisual result is identical regardless of its Stretch value), so
+    // these tests use VisualTreeHelper.FindElementsInHostCoordinates instead - real hit-testing
+    // against the actual rendered/composited geometry, already proven working elsewhere in this
+    // codebase (LiveLayoutTests.cs, DesignPanel.HitTest).
+    //
+    // Ruling (this task's deliverable - Task 9 should cite this comment rather than re-deriving
+    // it): PointTrackerPlacementSupport uses a shape's raw logical point directly, with no
+    // transform. This is correct for Stretch.None with no explicit Width/Height - the only
+    // configuration this phase's own Draw*Extension tools ever produce (spec decision 5) - and is
+    // an explicitly accepted, documented limitation for Stretch != None shapes loaded from
+    // hand-authored or external XAML: their point-thumbs may not sit exactly on the rendered
+    // pixel. This is a scope decision, not a bug to fix in this plan - replicating WPF/WinUI's
+    // internal Stretch geometry-scaling algorithm from scratch is disproportionate net-new scope
+    // nothing in this phase's stated goals requires, and no crash or data corruption results
+    // (only a cosmetic thumb-placement offset on an edge-case shape configuration).
     [TestFixture]
     public class RenderedGeometryInvestigationTests
     {
@@ -25,32 +34,38 @@ namespace WinUIDesigner.Designer.Tests
         {
             WinUITestHost.RunWithWindow(window => {
                 var canvas = new Canvas { Width = 300, Height = 300 };
-                var line = new Line { X1 = 50, Y1 = 50, X2 = 10, Y2 = 10, Stretch = Stretch.None, Stroke = new SolidColorBrush(Microsoft.UI.Colors.Black), StrokeThickness = 2 };
+                // No explicit Width/Height on the Line itself - matches every shape this phase's
+                // own Draw*Extension tools ever create (spec decision 5).
+                var line = new Line { X1 = 50, Y1 = 150, X2 = 250, Y2 = 150, Stretch = Stretch.None, Stroke = new SolidColorBrush(Microsoft.UI.Colors.Black), StrokeThickness = 8 };
                 canvas.Children.Add(line);
                 window.Content = canvas;
                 window.Activate();
                 canvas.UpdateLayout();
 
-                // Line with Stretch.None has no layout-driven offset of its own: the element's
-                // own top-left in its parent's coordinate space is (0,0) regardless of X1/Y1/X2/Y2
-                // (Canvas does not auto-position children by their content). So the raw X1/Y1/X2/Y2
-                // values ARE directly usable as canvas-relative coordinates with no further
-                // transform - confirming the substitute for Stretch.None.
-                var topLeft = line.TransformToVisual(canvas).TransformPoint(new Point(0, 0));
-                Assert.AreEqual(0, topLeft.X, 0.5, "Stretch.None Line's own origin should sit at (0,0) in its parent - no auto-repositioning");
-                Assert.AreEqual(0, topLeft.Y, 0.5);
+                // Real hit-test (not TransformToVisual, which is Stretch-blind) at the line's own
+                // raw midpoint, taken with zero correction: canvas-relative ((X1+X2)/2,(Y1+Y2)/2).
+                // If this hits the line, the raw point is a valid substitute for its actual
+                // rendered position - this would fail if WinUI applied any internal translation to
+                // normalize the geometry's bounding box, which the weaker TransformToVisual check
+                // this test previously used could not have detected either way.
+                var rawMidpoint = new Point((line.X1 + line.X2) / 2, (line.Y1 + line.Y2) / 2);
+                var hostPoint = canvas.TransformToVisual(null).TransformPoint(rawMidpoint);
+                var hits = VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, canvas);
+
+                CollectionAssert.Contains(hits, line,
+                    "raw X1/Y1/X2/Y2 midpoint should hit the actual rendered line under Stretch.None with no explicit Width/Height");
             });
         }
 
         [Test]
-        public void StretchFillPolylineRepositionsAndRescalesItsPointsRelativeToTheRawValues()
+        public void StretchFillPolylineRendersAwayFromItsRawPointValues()
         {
             WinUITestHost.RunWithWindow(window => {
                 var canvas = new Canvas { Width = 300, Height = 300 };
                 // Natural span of these points is (0,0)-(50,50). Width/Height below deliberately
-                // don't match that span, and Stretch.Fill forces WinUI to scale+reposition the
-                // rendered geometry to fill the given box - exactly the WPF RenderedGeometry
-                // transform behavior the spec worried about not being able to query directly.
+                // don't match that span, and Stretch.Fill forces WinUI to scale the rendered
+                // geometry to fill the given box - exactly the WPF RenderedGeometry-transform
+                // behavior the spec worried about not being able to query directly.
                 var points = new PointCollection();
                 points.Add(new Point(0, 0));
                 points.Add(new Point(50, 0));
@@ -61,24 +76,27 @@ namespace WinUIDesigner.Designer.Tests
                     Width = 200,
                     Height = 200,
                     Stroke = new SolidColorBrush(Microsoft.UI.Colors.Black),
-                    StrokeThickness = 2
+                    StrokeThickness = 8
                 };
                 canvas.Children.Add(polyline);
                 window.Content = canvas;
                 window.Activate();
                 canvas.UpdateLayout();
 
-                // If raw points mapped 1:1 onto canvas coordinates, the polyline's rendered ink
-                // would span only (0,0)-(50,50) inside a 200x200 element - a small mark in the
-                // corner. Under Stretch.Fill it instead fills the full 200x200 box, so the second
-                // point (50,0) - 25% of the natural span along X - should render at roughly 25% of
-                // 200 = 50px from the element's own left edge, NOT at raw x=50 relative to a
-                // (0,0)-(50,50) frame. This proves the raw-point substitute is NOT accurate for
-                // Stretch != None: point-thumb placement (Task 9) is only correct for Stretch.None.
-                var renderedSecondPoint = polyline.TransformToVisual(canvas).TransformPoint(new Point(50, 200)); // bottom-right approx of the 200x200 box
-                var polylineTopLeft = polyline.TransformToVisual(canvas).TransformPoint(new Point(0, 0));
-                double approxRenderedWidth = polyline.ActualWidth;
-                Assert.Greater(approxRenderedWidth, 100, "Stretch.Fill should have expanded the polyline's rendered box well past the raw points' 50-unit natural span");
+                // The raw second point (50,0) sits at 100% of the natural 0-50 X-span and 0% of
+                // the natural 0-50 Y-span. Taken with zero correction relative to the polyline's
+                // own canvas-relative origin (Canvas does not auto-position children, so that
+                // origin is (0,0)), that would place the raw point at canvas (50,0). Under
+                // Stretch.Fill scaling that same corner into the 200x200 box, it actually renders
+                // at canvas (200,0) instead - a point no raw X/Y value in this polyline (all <=50)
+                // could ever reach unscaled. A hit there can only be explained by Stretch's scale
+                // transform, proving the raw-point substitute is NOT accurate for Stretch != None.
+                var stretchedCorner = new Point(200, 0);
+                var hostPoint = canvas.TransformToVisual(null).TransformPoint(stretchedCorner);
+                var hits = VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, canvas);
+
+                CollectionAssert.Contains(hits, polyline,
+                    "Stretch.Fill should have rescaled the polyline's rendered corner well past any of its own raw point values");
             });
         }
     }
