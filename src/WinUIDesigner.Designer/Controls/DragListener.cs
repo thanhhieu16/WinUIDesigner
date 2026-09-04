@@ -224,6 +224,26 @@ namespace WinUIDesigner.Designer.Controls
             EndAt();
         }
 
+        /// <summary>Production entry point: re-drives this DragListener's state machine from a
+        /// pointer press that landed somewhere other than Target (e.g. a Draw*Extension creating a
+        /// new Line and immediately handing the drag to its endpoint thumb's own DragListener). Same
+        /// underlying call as SimulateDown - kept as a separate, distinctly-named method (not a
+        /// rename) so a reader can tell "test drives this artificially" from "a real production code
+        /// path re-enters this listener's state machine" without reading call sites. Does NOT capture
+        /// the pointer on Target - the caller is responsible for its own capture (see spec decision
+        /// 4's "Capture responsibility").</summary>
+        public void ExternalStart(Point point, VirtualKeyModifiers modifiers = VirtualKeyModifiers.None) => BeginAt(point, modifiers);
+
+        /// <summary>Production entry point - see ExternalStart.</summary>
+        public void ExternalMove(Point point, VirtualKeyModifiers modifiers = VirtualKeyModifiers.None) => MoveTo(point, modifiers);
+
+        /// <summary>Production entry point - see ExternalStart.</summary>
+        public void ExternalStop(Point point)
+        {
+            CurrentPoint = point;
+            EndAt();
+        }
+
         /// <summary>Test-only entry point: drives the same PointerCaptureLost path
         /// OnPointerCaptureLost does, without a real PointerRoutedEventArgs (which has no
         /// public constructor). See SimulateDown.</summary>

@@ -170,5 +170,43 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsTrue(canceledAtCompletion, "the gesture must be reported as canceled, not completed");
             });
         }
+
+        [Test]
+        public void ExternalStartMoveStopFireTheSameEventsAsSimulateDownMoveUp()
+        {
+            WinUITestHost.Run(() => {
+                var target = new Grid();
+                var drag = new DragListener(target);
+                int startedCount = 0, changedCount = 0, completedCount = 0;
+                drag.Started += d => startedCount++;
+                drag.Changed += d => changedCount++;
+                drag.Completed += d => completedCount++;
+
+                drag.ExternalStart(new Point(0, 0));
+                drag.ExternalMove(new Point(10, 0)); // past threshold
+                drag.ExternalMove(new Point(20, 0));
+                drag.ExternalStop(new Point(20, 0));
+
+                Assert.AreEqual(1, startedCount);
+                Assert.AreEqual(2, changedCount);
+                Assert.AreEqual(1, completedCount);
+                Assert.IsFalse(drag.IsCanceled);
+                Assert.IsFalse(drag.IsActive);
+                Assert.IsFalse(drag.IsDown);
+            });
+        }
+
+        [Test]
+        public void ExternalStartAcceptsKeyModifiers()
+        {
+            WinUITestHost.Run(() => {
+                var target = new Grid();
+                var drag = new DragListener(target);
+
+                drag.ExternalStart(new Point(0, 0), VirtualKeyModifiers.Shift);
+
+                Assert.AreEqual(VirtualKeyModifiers.Shift, drag.KeyModifiers);
+            });
+        }
     }
 }
