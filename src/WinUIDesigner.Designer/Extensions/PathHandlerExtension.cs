@@ -51,8 +51,21 @@ namespace WinUIDesigner.Designer.Extensions
         /// SaveGeometry's remarks for why cloning has to be deep here.</summary>
         PathGeometry _workingGeometry;
 
+        /// <summary>True only for the duration of this extension's own
+        /// ExtendedItem.Properties["Data"].SetValue call, so OnExtendedItemPropertyChanged can tell
+        /// "I just published this" from "something else changed Data" and skip a rebuild that would
+        /// destroy the thumb currently under the pointer.</summary>
+        bool _publishingGeometry;
+
         PathThumb _draggingThumb;
         Point _dragOriginalPoint;
+
+        /// <summary>DesignItem.PropertyChanged is a plain INotifyPropertyChanged event carrying the
+        /// model property's name (XamlDesignItem.NotifyPropertyChanged raises
+        /// new PropertyChangedEventArgs(property.Name), XamlDesignItem.cs:204-208, and
+        /// XamlModelProperty.Name is the XAML property name, XamlModelProperty.cs:84-86) - so it can
+        /// be filtered rather than reacted to indiscriminately.</summary>
+        const string DataPropertyName = "Data";
 
         protected override IEnumerable<DesignerThumb> Thumbs => PointThumbs;
 
@@ -60,11 +73,16 @@ namespace WinUIDesigner.Designer.Extensions
         {
             base.OnInitialized();
             Services.Selection.PrimarySelectionChanged += OnPrimarySelectionChanged;
+            // A second, additive subscription alongside the base's own (PointEditExtensionBase
+            // subscribes a private handler that only calls UpdateAdornerVisibility). Kept additive
+            // rather than making the base's handler virtual, so Tasks 7/9 are untouched.
+            ExtendedItem.PropertyChanged += OnExtendedItemPropertyChanged;
             RebuildThumbs();
         }
 
         protected override void OnRemove()
         {
+            ExtendedItem.PropertyChanged -= OnExtendedItemPropertyChanged;
             Services.Selection.PrimarySelectionChanged -= OnPrimarySelectionChanged;
             base.OnRemove();
         }
@@ -73,6 +91,40 @@ namespace WinUIDesigner.Designer.Extensions
         {
             // Reference guards an in-progress keyboard-driven move here (IKeyDown/IKeyUp - out of
             // scope this phase, spec's "Out of scope"). Nothing to guard without that feature.
+        }
+
+        /// <summary>Re-reads the geometry whenever Data changes for a reason other than this
+        /// extension's own publish - Undo/Redo above all, but equally a property-grid edit or
+        /// another extension writing Data.
+        ///
+        /// Without this, _workingGeometry and the PathPoints/thumbs built from it stay frozen at
+        /// whatever they were when the thumbs were last built, and an Undo silently resurrects the
+        /// edit it just removed: drag (50,10)->(55,5), Undo (Data correctly reverts to (50,10)),
+        /// drag the same thumb by dy=+6, and the result was (55,11) instead of (50,16). Covered by
+        /// DraggingAgainAfterAnUndoStartsFromTheRestoredPointNotTheUndoneOne.
+        ///
+        /// The reference mitigates the same staleness with
+        /// ExtendedItem.ReapplyExtension(typeof(PathHandlerExtension)) at the end of its
+        /// CommitOperation (reference PathHandlerExtension.cs:426). That call is deliberately NOT
+        /// ported: it fires when this extension's own drag commits, which is exactly the moment the
+        /// state is already in sync, and it does nothing for a later Undo - so it does not fix the
+        /// bug above. Reacting to the change itself is strictly stronger, and avoids tearing the
+        /// extension down from inside its own DragListener callback.
+        ///
+        /// The guard is _publishingGeometry rather than IsResizing on purpose, and that was checked
+        /// rather than assumed: PlacementOperation.Abort does revert Data, and it runs from inside
+        /// Drag_Completed while IsResizing is still true, so an IsResizing guard swallows the revert
+        /// and leaves exactly the same staleness behind after every Escape. Verified by temporarily
+        /// swapping this line to `if (IsResizing) return;`, which fails
+        /// CancellingADragRevertsTheGeometryAndLeavesTheNextDragStartingFromTheRevertedPoint with
+        /// the post-cancel drag landing on the resurrected 55 instead of 50. _publishingGeometry is
+        /// true only across this extension's own SetValue, so an aborted drag rebuilds like any
+        /// other external change.</summary>
+        void OnExtendedItemPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != DataPropertyName) return;
+            if (_publishingGeometry) return;
+            RebuildThumbs();
         }
 
         internal void RebuildThumbs()
@@ -233,7 +285,16 @@ namespace WinUIDesigner.Designer.Extensions
         /// taken before this drag tick's mutation, not the same object the mutation just changed.</summary>
         void SaveGeometry(PathGeometry geometry)
         {
-            ExtendedItem.Properties["Data"].SetValue(CloneGeometry(geometry));
+            // The flag brackets the SetValue synchronously: SetValue -> UndoService.Execute ->
+            // PropertyChangeAction.Do -> XamlModelProperty.SetValueInternal ->
+            // XamlDesignItem.NotifyPropertyChanged all run inline on this call
+            // (XamlModelProperty.cs:241-253, 310-320), so OnExtendedItemPropertyChanged sees it set.
+            _publishingGeometry = true;
+            try {
+                ExtendedItem.Properties["Data"].SetValue(CloneGeometry(geometry));
+            } finally {
+                _publishingGeometry = false;
+            }
         }
 
         static PathGeometry CloneGeometry(PathGeometry source)

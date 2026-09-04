@@ -113,5 +113,110 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(before + 1, undo.UndoActions.Count());
             });
         }
+
+        /// <summary>The first LineSegment's own Point, read back off the live Path.Data (which is a
+        /// brand-new deep clone after every save - see PathHandlerExtension.SaveGeometry).</summary>
+        static Windows.Foundation.Point FirstLinePoint(Microsoft.UI.Xaml.Shapes.Path path)
+        {
+            var geometry = (Microsoft.UI.Xaml.Media.PathGeometry)path.Data;
+            return ((Microsoft.UI.Xaml.Media.LineSegment)geometry.Figures[0].Segments[0]).Point;
+        }
+
+        static void Drag(PathHandlerExtension extension, int thumbIndex, params Windows.Foundation.Point[] moves)
+        {
+            var drag = extension.DragListeners[extension.PointThumbs[thumbIndex]];
+            drag.SimulateDown(new Windows.Foundation.Point(0, 0));
+            foreach (var move in moves) drag.SimulateMove(move);
+            drag.SimulateUp(moves[moves.Length - 1]);
+        }
+
+        [Test]
+        public void DraggingAgainAfterAnUndoStartsFromTheRestoredPointNotTheUndoneOne()
+        {
+            // Regression (fix round 1): _workingGeometry and the PathPoints/thumbs built from it
+            // were captured once in OnInitialized and never refreshed when Data changed for a
+            // reason other than this extension's own drag - so an Undo left them holding the
+            // pre-undo state, and the next drag resurrected the undone edit. Repro produced
+            // (55,11) instead of (50,16) before the fix.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, _, path, extension) = Load(window);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+
+                Drag(extension, 1, new Windows.Foundation.Point(5, -5));
+                surface.UpdateLayout();
+                Assert.AreEqual(55, FirstLinePoint(path).X, 0.5, "sanity: the first drag landed");
+                Assert.AreEqual(5, FirstLinePoint(path).Y, 0.5, "sanity: the first drag landed");
+
+                undo.Undo();
+                surface.UpdateLayout();
+                Assert.AreEqual(50, FirstLinePoint(path).X, 0.5, "sanity: undo restored the point");
+                Assert.AreEqual(10, FirstLinePoint(path).Y, 0.5, "sanity: undo restored the point");
+
+                // Same logical point again, straight down by 6. Deliberately re-reads PointThumbs/
+                // DragListeners rather than reusing the pre-undo thumb: the fix rebuilds both when
+                // Data changes externally, so the old thumb is no longer the live one.
+                Drag(extension, 1, new Windows.Foundation.Point(0, 6));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(50, FirstLinePoint(path).X, 0.5, "second drag must start from the restored (50,10), not the undone (55,5)");
+                Assert.AreEqual(16, FirstLinePoint(path).Y, 0.5, "second drag must start from the restored (50,10), not the undone (55,5)");
+            });
+        }
+
+        [Test]
+        public void CancellingADragRevertsTheGeometryAndLeavesTheNextDragStartingFromTheRevertedPoint()
+        {
+            // Guards the reason OnExtendedItemPropertyChanged filters on _publishingGeometry rather
+            // than IsResizing: PlacementOperation.Abort reverts Data from inside Drag_Completed,
+            // while IsResizing is still true, so an IsResizing-based guard would swallow that
+            // revert and leave the same post-Escape staleness this round is fixing.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, _, path, extension) = Load(window);
+                var drag = extension.DragListeners[extension.PointThumbs[1]];
+                drag.SimulateDown(new Windows.Foundation.Point(0, 0));
+                drag.SimulateMove(new Windows.Foundation.Point(5, -5));
+                Assert.AreEqual(55, FirstLinePoint(path).X, 0.5, "sanity: the in-flight drag moved the point");
+                drag.Cancel();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(50, FirstLinePoint(path).X, 0.5, "cancelling reverts the geometry");
+                Assert.AreEqual(10, FirstLinePoint(path).Y, 0.5, "cancelling reverts the geometry");
+
+                Drag(extension, 1, new Windows.Foundation.Point(0, 6));
+                surface.UpdateLayout();
+                Assert.AreEqual(50, FirstLinePoint(path).X, 0.5, "the drag after a cancel starts from the reverted point");
+                Assert.AreEqual(16, FirstLinePoint(path).Y, 0.5, "the drag after a cancel starts from the reverted point");
+            });
+        }
+
+        [Test]
+        public void AMultiTickDragFoldsIntoOneUndoEntryAndKeepsTheLastTicksPosition()
+        {
+            // The single-SimulateMove test above leaves the undo-merge path (several Data SetValues
+            // inside one PlacementOperation folding into a single undo entry) uncovered.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, _, path, extension) = Load(window);
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                int before = undo.UndoActions.Count();
+
+                Drag(extension, 1,
+                     new Windows.Foundation.Point(5, -5),
+                     new Windows.Foundation.Point(10, -8),
+                     new Windows.Foundation.Point(12, 20));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(62, FirstLinePoint(path).X, 0.5, "final position is the last tick's, not an accumulation of all three");
+                Assert.AreEqual(30, FirstLinePoint(path).Y, 0.5, "final position is the last tick's, not an accumulation of all three");
+                Assert.AreEqual(before + 1, undo.UndoActions.Count(), "three drag ticks must fold into exactly one undo entry");
+
+                // One Undo must take the point all the way back to its pre-drag value, not to an
+                // intermediate tick - i.e. the folded entry snapshots the state from before the
+                // gesture started.
+                undo.Undo();
+                surface.UpdateLayout();
+                Assert.AreEqual(50, FirstLinePoint(path).X, 0.5, "one undo reverts the whole gesture");
+                Assert.AreEqual(10, FirstLinePoint(path).Y, 0.5, "one undo reverts the whole gesture");
+            });
+        }
     }
 }
