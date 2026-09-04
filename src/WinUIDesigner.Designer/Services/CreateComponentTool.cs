@@ -78,21 +78,36 @@ namespace WinUIDesigner.Designer.Services
 			if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
 			var designPanel = (DesignPanel)sender;
 			var point = e.GetCurrentPoint(designPanel).Position;
-			e.Handled = true;
-			HandlePointerPressed(designPanel, point, e.KeyModifiers, e.Pointer);
+			// Final-review fix: e.Handled is set ONLY once HandlePointerPressed reports it actually
+			// acted on the click. It used to be set unconditionally, one line BEFORE the call - and
+			// HandlePointerPressed declines the click outright whenever _drawing is already true
+			// (a Polyline/Path multi-click draw is in progress). WinUI's routed-event dispatch skips
+			// every handler registered without handledEventsToo once e.Handled is true, INCLUDING
+			// handlers on the same element registered after this one (Controls/DragListener.cs's own
+			// constructor works around exactly this with AddHandler(..., handledEventsToo: true)),
+			// so DrawPolylineMouseGesture/DrawPathMouseGesture - which subscribe their own
+			// OnPointerPressed to this same IDesignPanel.PointerPressed with a plain += - never saw
+			// clicks 2, 3, 4... of their own gesture at all. A declined click must leave e.Handled
+			// untouched.
+			if (HandlePointerPressed(designPanel, point, e.KeyModifiers, e.Pointer)) e.Handled = true;
 		}
 
 		/// <summary>The real click-handling logic, extracted so a test can drive it directly -
 		/// same Handle*-extraction pattern as DesignPanel.HandlePointerPressed. `pointer` is
 		/// optional: production always supplies it (for CapturePointer); a test omits it and
 		/// exercises everything except the actual capture call (spec decision 9 / "Known gaps"
-		/// #6 - PointerRoutedEventArgs.Pointer can't be fabricated in a test).</summary>
-		internal void HandlePointerPressed(IDesignPanel designPanel, Point point, VirtualKeyModifiers modifiers, Pointer pointer = null)
+		/// #6 - PointerRoutedEventArgs.Pointer can't be fabricated in a test).
+		///
+		/// Returns true when this tool actually consumed the click (started a draw gesture, or
+		/// created a component), false when it declined it (a draw gesture is already running, or
+		/// the hit test found nothing to add to). OnPointerPressed above marks the routed event
+		/// Handled on true only - see its own comment.</summary>
+		internal bool HandlePointerPressed(IDesignPanel designPanel, Point point, VirtualKeyModifiers modifiers, Pointer pointer = null)
 		{
-			if (_drawing) return; // see _drawing's own doc comment - a multi-click draw gesture is already running
+			if (_drawing) return false; // see _drawing's own doc comment - a multi-click draw gesture is already running
 
 			var result = designPanel.HitTest(point, false, true, HitTestType.Default);
-			if (result.ModelHit == null) return;
+			if (result.ModelHit == null) return false;
 
 			// Capture + focus happen exactly once, here, before branching into either
 			// IDrawItemExtension.StartDrawItem or CreateComponentMouseGesture - spec decision 2.
@@ -103,7 +118,7 @@ namespace WinUIDesigner.Designer.Services
 			if (drawItemBehavior != null) {
 				_drawing = true;
 				drawItemBehavior.StartDrawItem(result.ModelHit, _componentType, designPanel, point, modifiers, null);
-				return;
+				return true;
 			}
 
 			var context = result.ModelHit.Context;
@@ -114,6 +129,7 @@ namespace WinUIDesigner.Designer.Services
 			_drawing = true;
 			_gesture = new CreateComponentMouseGesture(result.ModelHit, createdItem, changeGroup);
 			_gesture.Start(designPanel, point);
+			return true;
 		}
 
 		void OnDragOver(object sender, DragEventArgs e)

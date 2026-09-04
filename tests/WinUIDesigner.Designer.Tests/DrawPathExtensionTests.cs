@@ -164,8 +164,8 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(new Windows.Foundation.Point(90, 5), segs3[1].Point);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 5), segs3[2].Point, "trailing preview duplicates the just-committed point");
 
-                // Fourth click: finalizes the third committed segment (index 2, to (90,100)) and
-                // starts a fourth (trailing) preview that DoubleTapped below must drop.
+                // Fourth click - the FIRST tap of the terminating double-tap: finalizes the third
+                // committed segment (index 2, to (90,100)) and starts a fourth (trailing) preview.
                 gesture.HandlePointerPressed(ToPanel(140, 150));
                 var segs4 = Segments(path);
                 Assert.AreEqual(4, segs4.Count);
@@ -174,13 +174,25 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(new Windows.Foundation.Point(90, 100), segs4[2].Point);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 100), segs4[3].Point, "trailing preview duplicates the just-committed point");
 
-                // DoubleTapped ends the gesture: drops the trailing preview segment (index 3),
-                // commits the ChangeGroup as a single undo entry, and reapplies extensions.
+                // Final-review fix: the SECOND tap of the double-tap, which this test used to omit -
+                // see DrawPolyLineExtensionTests' equivalent comment. WinUI raises a full
+                // PointerPressed/PointerReleased pair for BOTH taps of a double-tap before
+                // DoubleTapped fires, so production always runs OnPointerPressed twice here, and the
+                // extra press commits a redundant duplicate LineSegment that HandleDoubleTapped's
+                // old drop-one left behind as a zero-length final segment.
+                gesture.HandlePointerPressed(ToPanel(140, 150));
+                var segs5 = Segments(path);
+                Assert.AreEqual(5, segs5.Count, "the double-tap's second press commits a redundant duplicate segment - HandleDoubleTapped is what must undo it");
+
+                // DoubleTapped ends the gesture: drops the trailing preview segment AND the
+                // duplicate the double-tap's second press committed, commits the ChangeGroup as a
+                // single undo entry, and reapplies extensions.
                 gesture.HandleDoubleTapped();
                 surface.UpdateLayout();
 
                 var finalSegs = Segments(path);
-                Assert.AreEqual(3, finalSegs.Count, "the trailing preview segment must be dropped on DoubleTapped");
+                Assert.AreEqual(3, finalSegs.Count, "the trailing preview segment AND the double-tap's second press's duplicate must both be dropped on DoubleTapped - the figure must not end in a zero-length segment");
+                Assert.AreNotEqual(finalSegs[finalSegs.Count - 2].Point, finalSegs[finalSegs.Count - 1].Point, "no duplicate trailing segment");
                 Assert.AreEqual(new Windows.Foundation.Point(40, 0), finalSegs[0].Point);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 5), finalSegs[1].Point);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 100), finalSegs[2].Point);
@@ -196,6 +208,49 @@ namespace WinUIDesigner.Designer.Tests
 
                 var toolService = surface.DesignContext.Services.GetService<IToolService>();
                 Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "the gesture must switch the tool back to PointerTool once it ends");
+            });
+        }
+
+        [Test]
+        public void CancellingAnInProgressPathDrawLeavesNothingBehindAndResetsTheTool()
+        {
+            // Final-review coverage gap (Fix 3) - see DrawLineExtensionTests' equivalent test for
+            // why Cancel() is the seam driven here rather than a real Escape KeyDown /
+            // PointerCaptureLost. Both of those production paths funnel into exactly this method
+            // (DrawPathMouseGesture.OnKeyDown / OnPointerCaptureLost).
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+                var toolService = surface.DesignContext.Services.GetService<IToolService>();
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var canvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+
+                int childrenBefore = canvas.Children.Count;
+                bool canUndoBefore = undo.CanUndo;
+                int undoCountBefore = undo.UndoActions.Count();
+
+                var tool = new CreateComponentTool(typeof(Microsoft.UI.Xaml.Shapes.Path));
+                toolService.CurrentTool = tool;
+                Windows.Foundation.Point ToPanel(double x, double y) =>
+                    canvas.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(x, y));
+
+                tool.HandlePointerPressed(surface.DesignPanel, ToPanel(50, 50), Windows.System.VirtualKeyModifiers.None);
+                surface.UpdateLayout();
+                Assert.AreEqual(childrenBefore + 1, canvas.Children.Count, "sanity check: the gesture really did create something for the cancel below to have to take back");
+
+                var gesture = surface.DesignContext.RootItem.Extensions.OfType<DrawPathExtension>().Single().Gesture;
+                // Commit a couple of real LineSegments first, so the cancel is aborting a gesture
+                // that carries genuine state rather than the trivial just-created case.
+                gesture.HandlePointerMoved(ToPanel(90, 50));
+                gesture.HandlePointerPressed(ToPanel(90, 50));
+                gesture.HandlePointerMoved(ToPanel(90, 120));
+
+                gesture.Cancel();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(childrenBefore, canvas.Children.Count, "a cancelled draw must leave nothing behind in the container");
+                Assert.AreEqual(canUndoBefore, undo.CanUndo, "a cancelled draw must not change whether there is anything to undo");
+                Assert.AreEqual(undoCountBefore, undo.UndoActions.Count(), "a cancelled draw must add no undo entry - neither a phantom commit nor a dangling one");
+                Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "a cancelled draw must reset the active tool back to PointerTool");
             });
         }
     }

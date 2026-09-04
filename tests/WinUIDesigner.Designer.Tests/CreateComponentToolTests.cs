@@ -42,6 +42,53 @@ namespace WinUIDesigner.Designer.Tests
         }
 
         [Test]
+        public void ADeclinedClickReportsItWasNotHandledSoOtherPanelSubscribersStillSeeIt()
+        {
+            // Final-review regression test (Fix 1). OnPointerPressed used to set e.Handled = true
+            // unconditionally, one line BEFORE calling HandlePointerPressed - which declines the
+            // click outright whenever a multi-click draw gesture is already running (_drawing) or
+            // the hit test found nothing. WinUI's routed-event dispatch skips every handler
+            // registered without handledEventsToo once e.Handled is true, including handlers on the
+            // SAME element registered after this one (Controls/DragListener.cs's constructor works
+            // around exactly this with AddHandler(..., handledEventsToo: true)) - so
+            // DrawPolylineMouseGesture/DrawPathMouseGesture, which subscribe their own
+            // OnPointerPressed to this same IDesignPanel.PointerPressed with a plain +=, never
+            // received clicks 2, 3, 4... of their own gesture at all: multi-click drawing could not
+            // work against a real routed event.
+            //
+            // The real routed path is not directly reachable from a test (PointerRoutedEventArgs has
+            // no public constructor and WinUI has no UIElement.RaiseEvent - Global Constraints), so
+            // what is pinned here is the decision HandlePointerPressed now reports back and
+            // OnPointerPressed now gates e.Handled on: declined => false, acted => true.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+                var tool = new CreateComponentTool(typeof(Microsoft.UI.Xaml.Shapes.Polyline));
+                surface.DesignContext.Services.GetService<IToolService>().CurrentTool = tool;
+
+                var canvasForPoint = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+                var point = canvasForPoint.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(50, 60));
+
+                // Click 1 starts DrawPolyLineExtension's own multi-click gesture: the tool DID act,
+                // so the real click is legitimately marked Handled.
+                Assert.IsTrue(tool.HandlePointerPressed(surface.DesignPanel, point, Windows.System.VirtualKeyModifiers.None),
+                    "the click that starts a draw gesture is genuinely consumed by this tool");
+
+                // Click 2 (and 3, 4, ...) belong to the draw gesture's OWN PointerPressed handler.
+                // This tool must decline them AND report that, so the routed event stays unhandled
+                // and reaches that later-registered handler.
+                Assert.IsFalse(tool.HandlePointerPressed(surface.DesignPanel, point, Windows.System.VirtualKeyModifiers.None),
+                    "a click declined because a draw gesture is already running must NOT be reported as handled");
+
+                // A click that hits nothing is declined for a different reason, and must report the
+                // same thing - nothing was consumed, so nothing should be marked Handled.
+                var freshTool = new CreateComponentTool(typeof(Microsoft.UI.Xaml.Controls.Button));
+                surface.DesignContext.Services.GetService<IToolService>().CurrentTool = freshTool;
+                Assert.IsFalse(freshTool.HandlePointerPressed(surface.DesignPanel, new Windows.Foundation.Point(-50, -50), Windows.System.VirtualKeyModifiers.None),
+                    "a click that hit-tests to nothing must NOT be reported as handled");
+            });
+        }
+
+        [Test]
         public void ClickWithoutDragAddsADefaultSizedButtonAtTheClickPoint()
         {
             WinUITestHost.RunWithWindow(window => {

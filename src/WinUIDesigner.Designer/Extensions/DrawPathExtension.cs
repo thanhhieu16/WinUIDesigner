@@ -163,6 +163,14 @@ namespace WinUIDesigner.Designer.Extensions
             });
         }
 
+        // Final-review note on `e.Handled = true` here (investigated, deliberately KEPT) - see
+        // DrawPolyLineExtension.OnPointerPressed's own note for the full reasoning: marking the
+        // press Handled does NOT suppress this panel's DoubleTapped (both the UWP and the WinUI 3
+        // UIElement.DoubleTapped docs state that handling pointer events "doesn't prevent
+        // DoubleTapped from firing" - gesture events are synthesised alongside, not gated on, the
+        // pointer events' Handled flag), and it is not what guards against CreateComponentTool
+        // re-processing the click either (that handler runs first and returns early on _drawing).
+        // It only stops the press bubbling past the DesignPanel, which is the intent.
         void OnPointerPressed(object sender, PointerRoutedEventArgs e)
         {
             if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
@@ -198,11 +206,20 @@ namespace WinUIDesigner.Designer.Extensions
 
         /// <summary>The real gesture-ending handling, extracted for the same reason as
         /// HandlePointerMoved/HandlePointerPressed above - a real DoubleTappedRoutedEventArgs has
-        /// no public constructor either, so a test drives this directly.</summary>
+        /// no public constructor either, so a test drives this directly.
+        ///
+        /// Final-review fix: TWO trailing segments come off, not one - identical reasoning to
+        /// DrawPolylineMouseGesture.HandleDoubleTapped (see its remarks). A DoubleTap is two Tap
+        /// interactions, each raising its own PointerPressed, and HandlePointerPressed appends
+        /// exactly one segment per press - so the segment list arrives here carrying the trailing
+        /// preview AND the redundant duplicate the double-tap's second press committed on top of
+        /// the first's. Dropping only one left the committed figure ending in two coincident
+        /// LineSegments (a zero-length final segment).</summary>
         internal void HandleDoubleTapped()
         {
             ReplaceSegments(segs => {
-                if (segs.Count > 1) segs.RemoveAt(segs.Count - 1); // drop the trailing preview segment
+                int drop = System.Math.Min(2, segs.Count);
+                for (int i = 0; i < drop; i++) segs.RemoveAt(segs.Count - 1);
                 return segs;
             });
             Commit();
@@ -222,7 +239,12 @@ namespace WinUIDesigner.Designer.Extensions
             Stop(reapply: true);
         }
 
-        void Cancel()
+        /// <summary>The gesture's abort path - what Escape (OnKeyDown) and PointerCaptureLost both
+        /// drive. Internal rather than private so a test can exercise the cancellation path
+        /// directly, the same seam CreateComponentMouseGesture.Cancel() already provides (neither
+        /// KeyRoutedEventArgs nor PointerRoutedEventArgs has a public constructor - Global
+        /// Constraints - so the real events can't be raised from a test).</summary>
+        internal void Cancel()
         {
             _changeGroup?.Abort();
             _changeGroup = null;

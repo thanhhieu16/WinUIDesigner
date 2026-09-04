@@ -102,18 +102,34 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[2], "Alt-snap: horizontal axis picked, Y snapped to the previous point's Y");
                 Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[3], "trailing preview duplicates the just-committed point");
 
-                // Fourth click, no Alt: finalizes the third committed vertex and starts a fourth
-                // (trailing) preview point that DoubleTapped below must drop.
+                // Fourth click, no Alt - this is the FIRST tap of the terminating double-tap:
+                // finalizes the third committed vertex at (90,100) and starts a fourth (trailing)
+                // preview point.
                 gesture.HandlePointerPressed(ToPanel(140, 150), Windows.System.VirtualKeyModifiers.None);
                 Assert.AreEqual(5, polyline.Points.Count);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[3]);
 
-                // DoubleTapped ends the gesture: drops the trailing preview point, commits the
-                // ChangeGroup as a single undo entry, and reapplies extensions.
+                // Final-review fix: the SECOND tap of the double-tap, which this test used to omit.
+                // WinUI raises a full PointerPressed/PointerReleased pair for BOTH taps of a
+                // double-tap before DoubleTapped fires (a DoubleTap is "simply two Tap interactions
+                // that occur in quick succession" - UIElement.DoubleTapped docs), so production
+                // ALWAYS runs OnPointerPressed twice here. Driving only one press meant the test
+                // silently exercised a click sequence production can never produce, and hid the
+                // fact that the extra press commits a redundant duplicate vertex on top of the
+                // first tap's - which HandleDoubleTapped's old drop-one left behind as a trailing
+                // (90,100),(90,100) pair.
+                gesture.HandlePointerPressed(ToPanel(140, 150), Windows.System.VirtualKeyModifiers.None);
+                Assert.AreEqual(6, polyline.Points.Count, "the double-tap's second press commits a redundant duplicate vertex - HandleDoubleTapped is what must undo it");
+                Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[4]);
+
+                // DoubleTapped ends the gesture: drops the trailing preview point AND the duplicate
+                // vertex the double-tap's second press committed, commits the ChangeGroup as a
+                // single undo entry, and reapplies extensions.
                 gesture.HandleDoubleTapped();
                 surface.UpdateLayout();
 
-                Assert.AreEqual(4, polyline.Points.Count, "the trailing preview point must be dropped on DoubleTapped");
+                Assert.AreEqual(4, polyline.Points.Count, "the trailing preview point AND the double-tap's second press's duplicate vertex must both be dropped on DoubleTapped - the committed list must not end (..., B, B)");
+                Assert.AreNotEqual(polyline.Points[polyline.Points.Count - 2], polyline.Points[polyline.Points.Count - 1], "no duplicate trailing vertex");
                 Assert.AreEqual(new Windows.Foundation.Point(0, 0), polyline.Points[0], "the TRUE first-click location must survive, unchanged, all the way into the final committed Points - this is exactly the invariant Fix round 1 restored");
                 Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[1]);
                 Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[2]);
@@ -128,6 +144,49 @@ namespace WinUIDesigner.Designer.Tests
 
                 var toolService = surface.DesignContext.Services.GetService<IToolService>();
                 Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "the gesture must switch the tool back to PointerTool once it ends");
+            });
+        }
+
+        [Test]
+        public void CancellingAnInProgressPolylineDrawLeavesNothingBehindAndResetsTheTool()
+        {
+            // Final-review coverage gap (Fix 3) - see DrawLineExtensionTests' equivalent test for
+            // why Cancel() is the seam driven here rather than a real Escape KeyDown /
+            // PointerCaptureLost. Both of those production paths funnel into exactly this method
+            // (DrawPolylineMouseGesture.OnKeyDown / OnPointerCaptureLost).
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+                var toolService = surface.DesignContext.Services.GetService<IToolService>();
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var canvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+
+                int childrenBefore = canvas.Children.Count;
+                bool canUndoBefore = undo.CanUndo;
+                int undoCountBefore = undo.UndoActions.Count();
+
+                var tool = new CreateComponentTool(typeof(Microsoft.UI.Xaml.Shapes.Polyline));
+                toolService.CurrentTool = tool;
+                Windows.Foundation.Point ToPanel(double x, double y) =>
+                    canvas.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(x, y));
+
+                tool.HandlePointerPressed(surface.DesignPanel, ToPanel(50, 50), Windows.System.VirtualKeyModifiers.None);
+                surface.UpdateLayout();
+                Assert.AreEqual(childrenBefore + 1, canvas.Children.Count, "sanity check: the gesture really did create something for the cancel below to have to take back");
+
+                var gesture = surface.DesignContext.RootItem.Extensions.OfType<DrawPolyLineExtension>().Single().Gesture;
+                // Commit a couple of real vertices first, so the cancel is aborting a gesture that
+                // carries genuine state rather than the trivial just-created case.
+                gesture.HandlePointerMoved(ToPanel(90, 50), Windows.System.VirtualKeyModifiers.None);
+                gesture.HandlePointerPressed(ToPanel(90, 50), Windows.System.VirtualKeyModifiers.None);
+                gesture.HandlePointerMoved(ToPanel(90, 120), Windows.System.VirtualKeyModifiers.None);
+
+                gesture.Cancel();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(childrenBefore, canvas.Children.Count, "a cancelled draw must leave nothing behind in the container");
+                Assert.AreEqual(canUndoBefore, undo.CanUndo, "a cancelled draw must not change whether there is anything to undo");
+                Assert.AreEqual(undoCountBefore, undo.UndoActions.Count(), "a cancelled draw must add no undo entry - neither a phantom commit nor a dangling one");
+                Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "a cancelled draw must reset the active tool back to PointerTool");
             });
         }
     }

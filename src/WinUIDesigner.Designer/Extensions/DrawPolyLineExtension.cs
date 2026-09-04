@@ -59,6 +59,9 @@ namespace WinUIDesigner.Designer.Extensions
             // correct and lower-deviation, and it leaves Width/Height unset (Task 8's Size(0,0)
             // would instead explicitly set Width=0/Height=0 on the created item, an unnecessary
             // side effect once the NaN path is confirmed safe).
+            // Final review closed this out: DrawLineExtension.StartDrawItem was back-ported to the
+            // NaN form too, so all three Draw*Extensions now agree and no Size(0,0) insert Rect
+            // remains anywhere in this phase.
             var operation = PlacementOperation.TryStartInsertNewComponents(clickedOn, new[] { createdItem }, new[] { new Rect(point.X, point.Y, double.NaN, double.NaN) }, PlacementType.AddItem);
             if (operation == null) {
                 changeGroup.Abort();
@@ -143,6 +146,20 @@ namespace WinUIDesigner.Designer.Extensions
             _item.Properties["Points"].SetValue(next);
         }
 
+        // Final-review note on `e.Handled = true` here (investigated, deliberately KEPT): it does
+        // NOT suppress this panel's own DoubleTapped, which is what ends the gesture. Both the UWP
+        // and the WinUI 3 (Microsoft.UI.Xaml) UIElement.DoubleTapped/Tapped reference docs state it
+        // outright - "Even if a control is already handling pointer events in the control logic, or
+        // is handling manipulations, that doesn't prevent DoubleTapped from firing" - because
+        // Tapped/DoubleTapped are higher-level gesture events synthesised alongside, not gated on,
+        // the low-level pointer events' Handled flag ("otherwise unhandled" in their summary lines
+        // refers to the gesture event's OWN route). What Handled does do here is stop the press
+        // bubbling past the DesignPanel, which is the intent. It is NOT a defence against
+        // CreateComponentTool's own still-subscribed OnPointerPressed re-processing the click: that
+        // handler is registered first (ITool.Activate runs before any gesture starts) and therefore
+        // always runs BEFORE this one; its own _drawing early-return is what actually guards that
+        // case, and its matching "only mark Handled once we actually acted" fix is what lets this
+        // handler get the click at all.
         void OnPointerPressed(object sender, PointerRoutedEventArgs e)
         {
             if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
@@ -191,11 +208,25 @@ namespace WinUIDesigner.Designer.Extensions
 
         /// <summary>The real gesture-ending handling, extracted for the same reason as
         /// HandlePointerMoved/HandlePointerPressed above - a real DoubleTappedRoutedEventArgs has
-        /// no public constructor either, so a test drives this directly.</summary>
+        /// no public constructor either, so a test drives this directly.
+        ///
+        /// Final-review fix: TWO trailing points come off, not one. A DoubleTap is "simply two Tap
+        /// interactions that occur in quick succession" (UIElement.DoubleTapped docs), and each of
+        /// those taps raises its own full PointerPressed/PointerReleased pair before DoubleTapped
+        /// fires on the second release - so by the time this runs, OnPointerPressed has already run
+        /// twice more, and HandlePointerPressed adds exactly one entry per press (it finalises the
+        /// trailing preview in place, then appends a fresh preview). Dropping only the preview
+        /// therefore left the committed list ending in a duplicated final vertex (..., B, B): the
+        /// vertex the double-tap's FIRST press committed, plus the redundant copy its SECOND press
+        /// committed on top. Dropping both restores the intended (..., B).</summary>
         internal void HandleDoubleTapped()
         {
             var next = Clone(GetPoints());
-            if (next.Count > 1) next.RemoveAt(next.Count - 1); // drop the trailing preview point
+            // Never drop the shape's own first vertex - a double-tap with no intervening single
+            // click (i.e. the user double-tapped immediately after the very first click that
+            // created the Polyline) has fewer than 3 points to give back.
+            int drop = System.Math.Min(2, next.Count - 1);
+            for (int i = 0; i < drop; i++) next.RemoveAt(next.Count - 1);
             _item.Properties["Points"].SetValue(next);
             Commit();
         }
@@ -214,7 +245,12 @@ namespace WinUIDesigner.Designer.Extensions
             Stop(reapply: true);
         }
 
-        void Cancel()
+        /// <summary>The gesture's abort path - what Escape (OnKeyDown) and PointerCaptureLost both
+        /// drive. Internal rather than private so a test can exercise the cancellation path
+        /// directly, the same seam CreateComponentMouseGesture.Cancel() already provides (neither
+        /// KeyRoutedEventArgs nor PointerRoutedEventArgs has a public constructor - Global
+        /// Constraints - so the real events can't be raised from a test).</summary>
+        internal void Cancel()
         {
             _changeGroup?.Abort();
             _changeGroup = null;
