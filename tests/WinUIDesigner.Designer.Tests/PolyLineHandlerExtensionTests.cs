@@ -112,5 +112,25 @@ namespace WinUIDesigner.Designer.Tests
                 CollectionAssert.AreEqual(new[] { 0, 1 }, extension.PointThumbs.Select(t => t.Index), "remaining thumbs re-indexed with no gap");
             });
         }
+
+        [Test]
+        public void ShiftCtrlClickDeletionRemovesTheThumbFromDragListenersToo()
+        {
+            // Regression test (fix round 1): DeletePoint used to remove the thumb from
+            // adornerPanel.Children and PointThumbs but not from DragListeners, leaking a second
+            // live reference to the deleted thumb (and its DragListener's pointer-event
+            // subscriptions on it) for as long as the extension persists - breaking spec decision
+            // 12's "adornerPanel.Children is the only place a thumb is referenced from" invariant.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, _, _, extension) = Load(window);
+                var deletedThumb = extension.PointThumbs[1];
+                Assert.IsTrue(extension.DragListeners.ContainsKey(deletedThumb), "sanity check: the thumb is registered before deletion");
+
+                extension.HandleThumbClick(deletedThumb, Windows.System.VirtualKeyModifiers.Shift | Windows.System.VirtualKeyModifiers.Control);
+                surface.UpdateLayout();
+
+                Assert.IsFalse(extension.DragListeners.ContainsKey(deletedThumb), "the deleted thumb must not remain referenced from DragListeners");
+            });
+        }
     }
 }

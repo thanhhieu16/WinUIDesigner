@@ -109,6 +109,7 @@ namespace WinUIDesigner.Designer.Extensions
 
             adornerPanel.Children.Remove(thumb);
             PointThumbs.RemoveAt(index);
+            DragListeners.Remove(thumb);
             for (int i = index; i < PointThumbs.Count; i++) PointThumbs[i].Index = i;
             Invalidate();
         }
