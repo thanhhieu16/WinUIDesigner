@@ -40,7 +40,7 @@ namespace WinUIDesigner.Designer.Extensions
             // Only a real anchor point (not a Bezier/Arc control point, TargetPathPoint == null)
             // gets anything - mirrors the reference's own BuildMenu gate (reference:172).
             if (point.TargetPathPoint == null) {
-                if (point.SegmentOrFigure is PathSegment segment) {
+                if (point.SegmentOrFigure is PathSegment segment && IsConvertible(segment)) {
                     AddConvertItem(flyout, "Insert Point", point, segment, PathPartConvertType.InsertPoint);
                     AddConvertItem(flyout, "Convert to Line", point, segment, PathPartConvertType.ToLineSegment);
                     AddConvertItem(flyout, "Convert to Bezier", point, segment, PathPartConvertType.ToBezierSegment);
@@ -54,7 +54,17 @@ namespace WinUIDesigner.Designer.Extensions
                 // the start-point thumb (whose SegmentOrFigure IS its ParentFigure, see
                 // AddFigurePoints, PathHandlerExtension.cs:182) keeps the reference's item instead
                 // of being left with a null/empty menu, and segment anchors keep the brief's.
-                var closedItem = new ToggleMenuFlyoutItem { Text = "Is Closed", IsChecked = point.ParentFigure.IsClosed };
+                //
+                // Deliberately OUTSIDE the IsConvertible gate above: a PolyBezier/PolyQuadratic
+                // anchor has nothing convertible to offer but its figure is still closeable, so it
+                // keeps this one item (and therefore a non-null flyout).
+                var closedItem = new ToggleMenuFlyoutItem {
+                    Text = IsClosedItemText,
+                    IsChecked = point.ParentFigure.IsClosed,
+                    // Tagged with its own figure so ChangeIsClosed can find every sibling anchor's
+                    // copy of this item and re-check it, without matching on the display string.
+                    Tag = point.ParentFigure
+                };
                 closedItem.Click += (s, e) => ChangeIsClosed(point.ParentFigure);
                 flyout.Items.Add(closedItem);
             }
@@ -77,6 +87,25 @@ namespace WinUIDesigner.Designer.Extensions
             // than shipping three display-only items that do nothing.
             return flyout.Items.Count == 0 ? null : flyout;
         }
+
+        const string IsClosedItemText = "Is Closed";
+
+        /// <summary>The exact five segment types the reference's own BuildMenu gate lists
+        /// (reference:172: `pathpoint.Object is LineSegment || ... is PolyLineSegment ||
+        /// ... is BezierSegment || ... is QuadraticBezierSegment || ... is ArcSegment`).
+        ///
+        /// PolyBezierSegment and PolyQuadraticBezierSegment are excluded, and that exclusion is the
+        /// reference's own and is deliberate: they are exactly the two types ConvertPart cannot
+        /// handle (its //TODO no-op, spec decision 5). Offering the five convert items on an anchor
+        /// where every one of them silently does nothing is the same "display-only item that does
+        /// nothing" this file's own BuildMenu remarks reject for the reference's "is large Arc" /
+        /// "Rotation Angle" / "Clockwise SweepDirection" items.</summary>
+        static bool IsConvertible(PathSegment segment) =>
+            segment is LineSegment
+            || segment is PolyLineSegment
+            || segment is BezierSegment
+            || segment is QuadraticBezierSegment
+            || segment is ArcSegment;
 
         void AddConvertItem(MenuFlyout flyout, string text, PathPoint point, PathSegment segment, PathPartConvertType type)
         {
@@ -111,10 +140,21 @@ namespace WinUIDesigner.Designer.Extensions
             // this point (reference:281, via PathPoint.ParentPathPoint). Task 11's PathPoint has no
             // ParentPathPoint - only TargetPathPoint, which is the control-point -> anchor link -
             // so for every point BuildMenu actually offers a menu on (TargetPathPoint == null, by
-            // the gate above) midPoint collapses to anchorPoint. "Insert Point" therefore inserts a
-            // coincident, immediately draggable point rather than one halfway back along the
-            // segment. Fixing it properly means adding a ParentPathPoint/previous-anchor link to
-            // Task 11's PathPoint, which is outside this task's one-line change to that file.
+            // the gate above) midPoint collapses to anchorPoint, and what "Insert Point" then
+            // produces depends on what the anchor's segment is:
+            //   - LineSegment anchor: [LineSegment(anchor), LineSegment(anchor)] - a coincident,
+            //     immediately draggable extra point. Harmless, just not the halfway point the
+            //     reference would have given.
+            //   - Bezier/Quadratic/Arc anchor: [LineSegment(anchor), originalCurve] - a straight
+            //     line jumping to the curve's own end point, after which the curve runs from that
+            //     end point back to the same end point, i.e. a visible loop. NOT a coincident
+            //     point, and a visible shape change.
+            // The [inserted line, original segment] STRUCTURE is the reference's own
+            // (reference:296/:304) and is not a port regression; the degenerate results above are
+            // purely the midPoint collapse, because the reference's midPoint is a real halfway
+            // point that leaves the curve starting somewhere new instead of at its own end.
+            // Fixing it properly means adding a ParentPathPoint/previous-anchor link to Task 11's
+            // PathPoint, which is outside this task's one-line change to that file.
             var midPoint = point.TargetPathPoint != null
                 ? new Point((point.TargetPathPoint.Point.X + anchorPoint.X) / 2, (point.TargetPathPoint.Point.Y + anchorPoint.Y) / 2)
                 : anchorPoint;
@@ -210,14 +250,49 @@ namespace WinUIDesigner.Designer.Extensions
         /// SaveGeometry(_workingGeometry) is what publishes it. Publishing
         /// ((Path)ExtendedItem.View).Data instead - as the brief did - would have re-published the
         /// live, untouched geometry and silently thrown the toggle away with no exception to show
-        /// for it. No ReapplyExtension: IsClosed changes no point, so the thumbs stay valid.</summary>
+        /// for it. No ReapplyExtension: IsClosed changes no point, so the thumbs stay valid.
+        ///
+        /// RefreshIsClosedItems runs unconditionally, including when the guard above skipped the
+        /// change: ToggleMenuFlyoutItem flips its own IsChecked before Click fires, so the refresh
+        /// is what un-flips the clicked item back to the truth in that case, as well as what
+        /// propagates a real change to the figure's other anchors' items.</summary>
         internal void ChangeIsClosed(PathFigure figure)
         {
-            if (_workingGeometry == null || figure == null) return;
-            var operation = PlacementOperation.Start(extendedItemArray, PlacementType.MovePoint);
-            figure.IsClosed = !figure.IsClosed;
-            SaveGeometry(_workingGeometry);
-            operation.Commit();
+            if (figure == null) return;
+            if (_workingGeometry != null) {
+                var operation = PlacementOperation.Start(extendedItemArray, PlacementType.MovePoint);
+                figure.IsClosed = !figure.IsClosed;
+                SaveGeometry(_workingGeometry);
+                operation.Commit();
+            }
+            RefreshIsClosedItems(figure);
+        }
+
+        /// <summary>Re-checks every "Is Closed" item belonging to <paramref name="figure"/> against
+        /// the figure's current state. The reference does the same thing with a single
+        /// `menuItem.IsChecked = figure.IsClosed` (reference:316) because it has one menu per
+        /// figure; here every anchor thumb on the figure builds its own item, so a toggle from one
+        /// anchor would otherwise leave every OTHER anchor's item showing a stale checkmark until
+        /// some unrelated Data change happened to trigger RebuildThumbs.
+        ///
+        /// Deliberately NOT done by rebuilding the thumbs: ChangeIsClosed changes no point, and
+        /// tearing the thumbs down (ReapplyExtension/RebuildThumbs) would invalidate the very thumb
+        /// whose menu is open and the PathPoint identities the other menu closures hold - the same
+        /// reason Task 11 guards RebuildThumbs behind _publishingGeometry during a drag.
+        ///
+        /// Reading the live PointThumbs rather than caching the items in a field keeps this
+        /// self-maintaining: RebuildThumbs replaces thumbs and menus together, so there is no
+        /// separate list to invalidate, and an item built for a superseded _workingGeometry can
+        /// never be reached (its figure is not this figure).</summary>
+        void RefreshIsClosedItems(PathFigure figure)
+        {
+            foreach (var thumb in PointThumbs) {
+                if (!(thumb.ContextFlyout is MenuFlyout flyout)) continue;
+                foreach (var item in flyout.Items) {
+                    if (item is ToggleMenuFlyoutItem toggle && ReferenceEquals(toggle.Tag, figure))
+                        toggle.IsChecked = figure.IsClosed;
+                }
+            }
         }
     }
 }

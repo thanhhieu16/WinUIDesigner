@@ -281,6 +281,70 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
+        static System.Collections.Generic.List<string> MenuTexts(WinUIDesigner.Designer.Controls.Thumbs.PathThumb thumb)
+        {
+            var flyout = (Microsoft.UI.Xaml.Controls.MenuFlyout)thumb.ContextFlyout;
+            return flyout.Items.Select(i => i is Microsoft.UI.Xaml.Controls.MenuFlyoutItem m ? m.Text
+                                          : ((Microsoft.UI.Xaml.Controls.ToggleMenuFlyoutItem)i).Text).ToList();
+        }
+
+        static Microsoft.UI.Xaml.Controls.ToggleMenuFlyoutItem ClosedItem(WinUIDesigner.Designer.Controls.Thumbs.PathThumb thumb)
+        {
+            var flyout = (Microsoft.UI.Xaml.Controls.MenuFlyout)thumb.ContextFlyout;
+            return flyout.Items.OfType<Microsoft.UI.Xaml.Controls.ToggleMenuFlyoutItem>().Single();
+        }
+
+        [Test]
+        public void APolyBezierAnchorIsOfferedNoConvertItemsAtAllButKeepsItsIsClosedToggle()
+        {
+            // ConvertPart always no-ops on PolyBezierSegment/PolyQuadraticBezierSegment (spec
+            // decision 5), so offering the five convert items there would ship exactly the
+            // "display-only item that does nothing" BuildMenu's own remarks reject. The reference's
+            // gate (reference:172) lists five convertible types and deliberately excludes these two.
+            // "Is Closed" still applies - the figure is closeable whatever its segments are.
+            WinUITestHost.RunWithWindow(window => {
+                var points = new PointCollection();
+                points.Add(new Point(20, 20));
+                points.Add(new Point(30, 20));
+                points.Add(new Point(40, 10));
+                var (_, _, extension) = Load(window, Geometry(new PolyBezierSegment { Points = points }));
+
+                var anchorThumb = extension.PointThumbs[3];
+                Assert.IsInstanceOf<PolyBezierSegment>(anchorThumb.AssociatedPoint.SegmentOrFigure, "sanity: thumb 3 is the poly-bezier anchor");
+                Assert.AreEqual(new[] { "Is Closed" }, MenuTexts(anchorThumb).ToArray());
+
+                // A LineSegment anchor in the same fixture family still gets the full set, so this
+                // is a narrowed gate and not a blanket removal.
+                var (_, _, lineExtension) = Load(window, OneLineSegment());
+                Assert.Contains("Convert to Arc", MenuTexts(lineExtension.PointThumbs[1]));
+            });
+        }
+
+        [Test]
+        public void TogglingIsClosedFromOneAnchorUpdatesTheOtherAnchorsIsClosedCheckmarks()
+        {
+            // Every anchor thumb on a figure builds its own "Is Closed" ToggleMenuFlyoutItem, so a
+            // toggle driven from one of them has to re-check the others in place - without a thumb
+            // rebuild, which would invalidate the very thumbs those menus hang off.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, path, extension) = Load(window, OneLineSegment());
+                var startItem = ClosedItem(extension.PointThumbs[0]);
+                var anchorItem = ClosedItem(extension.PointThumbs[1]);
+                Assert.IsFalse(startItem.IsChecked);
+                Assert.IsFalse(anchorItem.IsChecked);
+
+                // Drive it from the segment anchor's own figure reference, as its Click handler does.
+                extension.ChangeIsClosed(extension.PointThumbs[1].AssociatedPoint.ParentFigure);
+                surface.UpdateLayout();
+
+                Assert.IsTrue(LiveFigure(path).IsClosed, "sanity: the change really landed");
+                Assert.IsTrue(anchorItem.IsChecked, "the toggled anchor's own item");
+                Assert.IsTrue(startItem.IsChecked, "the OTHER anchor's item must not be left stale");
+                Assert.AreSame(startItem, ClosedItem(extension.PointThumbs[0]),
+                               "refreshed in place - no thumb/menu rebuild, which would invalidate the open menu's own thumb");
+            });
+        }
+
         [Test]
         public void EveryAnchorThumbGetsAConvertMenuAndControlPointThumbsGetNone()
         {
@@ -298,8 +362,7 @@ namespace WinUIDesigner.Designer.Tests
                         continue;
                     }
                     Assert.IsNotNull(flyout, "every anchor point gets a menu");
-                    var texts = flyout.Items.Select(i => i is Microsoft.UI.Xaml.Controls.MenuFlyoutItem m ? m.Text
-                                                       : ((Microsoft.UI.Xaml.Controls.ToggleMenuFlyoutItem)i).Text).ToList();
+                    var texts = MenuTexts(thumb);
                     Assert.Contains("Is Closed", texts);
                     if (thumb.AssociatedPoint.SegmentOrFigure is PathFigure) {
                         // The figure's own start point: no segment to convert, so only "Is Closed" -
