@@ -39,14 +39,91 @@ namespace WinUIDesigner.Designer.Extensions
         Point _dragOriginalPoint;
         bool _insertedDuringThisDrag;
 
+        /// <summary>True only for the duration of this extension's own
+        /// ExtendedItem.Properties["Points"].SetValue call, so OnExtendedItemPropertyChanged can
+        /// tell "I just published this" from "something else changed Points" and skip a rebuild
+        /// that would destroy the thumb currently under the pointer. Mirrors
+        /// PathHandlerExtension._publishingGeometry exactly.</summary>
+        bool _publishingPoints;
+
+        /// <summary>DesignItem.PropertyChanged is a plain INotifyPropertyChanged event carrying the
+        /// model property's name - see PathHandlerExtension.DataPropertyName's own remarks for the
+        /// trace - so it can be filtered rather than reacted to indiscriminately.</summary>
+        const string PointsPropertyName = "Points";
+
         protected override IEnumerable<DesignerThumb> Thumbs => PointThumbs;
 
         protected override void OnInitialized()
         {
             base.OnInitialized();
+            // A second, additive subscription alongside the base's own (PointEditExtensionBase
+            // subscribes a private handler that only calls UpdateAdornerVisibility, never rebuilds
+            // thumbs). Same shape as PathHandlerExtension.OnInitialized, which already carries this
+            // fix for Path/Data - this is the missing Polygon/Polyline/Points half of it.
+            ExtendedItem.PropertyChanged += OnExtendedItemPropertyChanged;
+            RebuildThumbs();
+        }
+
+        protected override void OnRemove()
+        {
+            ExtendedItem.PropertyChanged -= OnExtendedItemPropertyChanged;
+            base.OnRemove();
+        }
+
+        /// <summary>Re-reads Points and rebuilds the thumbs whenever Points changes for a reason
+        /// other than this extension's own publish - Undo/Redo above all, but equally a
+        /// property-grid edit or another extension writing Points.
+        ///
+        /// Without this, the thumb list stayed frozen at whatever OnInitialized (or the last
+        /// insert/delete) left behind while Points changed underneath it: ghost thumbs outliving the
+        /// points they track, and Index values pointing past the end of the collection.
+        /// AdornerPanel.ArrangeOverride calls GetPlacement(element).Arrange(...) for EVERY child
+        /// unconditionally, and PointTrackerPlacementSupport.Arrange reads polyline.Points[Index],
+        /// so every such thumb reached that read on the next layout pass. Undoing a Shift+Alt
+        /// point-insert is the shortest way to reach it.
+        ///
+        /// The final review predicted an ArgumentOutOfRangeException crash there; that turned out
+        /// NOT to be what this SDK does - see PointTrackerPlacementSupport.Arrange's own remarks for
+        /// the probe. The real symptom was a silently misplaced 7x7 handle sitting on the shape's
+        /// local origin. Still a defect, just a visual one rather than a crash.
+        ///
+        /// The guard is _publishingPoints rather than IsResizing on purpose, for exactly the reason
+        /// PathHandlerExtension.OnExtendedItemPropertyChanged documents: PlacementOperation.Abort
+        /// reverts Points from inside Drag_Completed while IsResizing is still true, so an
+        /// IsResizing guard would swallow the revert and leave the same staleness behind after every
+        /// Escape.</summary>
+        void OnExtendedItemPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != PointsPropertyName) return;
+            if (_publishingPoints) return;
+            RebuildThumbs();
+        }
+
+        internal void RebuildThumbs()
+        {
+            foreach (var thumb in PointThumbs) adornerPanel.Children.Remove(thumb);
+            PointThumbs.Clear();
+            // Kept in lockstep with PointThumbs so a discarded thumb (and its DragListener's
+            // pointer-event subscriptions on it) isn't left referenced from here - the same leak
+            // ShiftCtrlClickDeletionRemovesTheThumbFromDragListenersToo covers for DeletePoint.
+            DragListeners.Clear();
             var points = GetPointCollection();
             for (int i = 0; i < points.Count; i++) PointThumbs.Add(CreateThumb(i));
             UpdateAdornerVisibility();
+        }
+
+        /// <summary>Every Points write this extension makes goes through here, so
+        /// OnExtendedItemPropertyChanged can tell this extension's own publishes (which already do
+        /// their own precise thumb bookkeeping, and must not tear down the thumb under the pointer
+        /// mid-drag) from external ones (which must rebuild).</summary>
+        void SetPoints(PointCollection next)
+        {
+            _publishingPoints = true;
+            try {
+                ExtendedItem.Properties["Points"].SetValue(next);
+            } finally {
+                _publishingPoints = false;
+            }
         }
 
         PointCollection GetPointCollection()
@@ -105,7 +182,7 @@ namespace WinUIDesigner.Designer.Extensions
             int index = thumb.Index;
             var next = Clone(current);
             next.RemoveAt(index);
-            ExtendedItem.Properties["Points"].SetValue(next);
+            SetPoints(next);
 
             adornerPanel.Children.Remove(thumb);
             PointThumbs.RemoveAt(index);
@@ -149,7 +226,7 @@ namespace WinUIDesigner.Designer.Extensions
 
             var next = Clone(GetPointCollection());
             next[thumb.Index] = new Point(System.Math.Round(newX), System.Math.Round(newY));
-            ExtendedItem.Properties["Points"].SetValue(next);
+            SetPoints(next);
             Invalidate();
         }
 
@@ -164,7 +241,7 @@ namespace WinUIDesigner.Designer.Extensions
             var duplicated = current[insertIndex];
             var next = Clone(current);
             next.Insert(insertIndex, duplicated);
-            ExtendedItem.Properties["Points"].SetValue(next);
+            SetPoints(next);
 
             for (int i = insertIndex; i < PointThumbs.Count; i++) PointThumbs[i].Index = i + 1;
 

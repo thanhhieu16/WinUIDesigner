@@ -4,6 +4,7 @@ using System.Xml;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Services;
+using WinUIDesigner.DesignModel.Adorners;
 using WinUIDesigner.DesignModel.Xaml;
 using WinUIDesigner.Designer.Controls;
 using WinUIDesigner.Designer.Extensions;
@@ -130,6 +131,81 @@ namespace WinUIDesigner.Designer.Tests
                 surface.UpdateLayout();
 
                 Assert.IsFalse(extension.DragListeners.ContainsKey(deletedThumb), "the deleted thumb must not remain referenced from DragListeners");
+            });
+        }
+
+        [Test]
+        public void AnExternalPointsShrinkRebuildsTheThumbsInsteadOfLeavingStaleOnesBehind()
+        {
+            // Final-review regression test (Fix 2). PolyLineHandlerExtension had no
+            // ExtendedItem.PropertyChanged -> rebuild path of its own (the only PropertyChanged
+            // handling it inherited from PointEditExtensionBase just calls UpdateAdornerVisibility),
+            // so any EXTERNAL Points change - an Undo of the Shift+Alt point-insert below above all,
+            // but equally a property-grid edit - left the thumb list frozen at its old length. Each
+            // surviving stale thumb kept a PointTrackerPlacementSupport whose Index now pointed past
+            // the end of the collection, and AdornerPanel.ArrangeOverride calls
+            // GetPlacement(child).Arrange(...) for EVERY child unconditionally, so the next layout
+            // pass fed that out-of-range Index straight into polyline.Points[Index].
+            // PathHandlerExtension already carried this exact fix for Path/Data; this is the
+            // Polygon/Polyline/Points half.
+            //
+            // NB the final review expected an ArgumentOutOfRangeException crash there. This SDK's
+            // Microsoft.UI.Xaml.Media.PointCollection does not throw for an out-of-range index - it
+            // returns Point(0,0) (probed directly; see PointTrackerPlacementSupport.Arrange's
+            // remarks) - so the real symptom was a silently wrong 7x7 handle parked on the shape's
+            // local origin rather than a crash. The assertions below pin both halves of the fix.
+            WinUITestHost.RunWithWindow(window => {
+                var (surface, polylineItem, polyline, extension) = Load(window);
+                Assert.AreEqual(3, extension.PointThumbs.Count, "sanity: the fixture's 3 points produced 3 thumbs");
+
+                // Grow Points via the real Shift+Alt insert-during-drag path (Drag_Changed ->
+                // InsertPointDuringDrag). Driven through the extension's OWN DragListener for the
+                // thumb, for the reason DraggingTheMiddlePointMovesOnlyThatPointAndCommitsOneUndoEntry
+                // documents.
+                var drag = extension.DragListeners[extension.PointThumbs[1]];
+                var shiftAlt = Windows.System.VirtualKeyModifiers.Shift | Windows.System.VirtualKeyModifiers.Menu;
+                drag.SimulateDown(new Windows.Foundation.Point(0, 0), shiftAlt);
+                drag.SimulateMove(new Windows.Foundation.Point(10, 5), shiftAlt);
+                drag.SimulateUp(new Windows.Foundation.Point(10, 5));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(4, polyline.Points.Count, "Shift+Alt during the drag inserts a duplicate of the dragged point");
+                Assert.AreEqual(4, extension.PointThumbs.Count, "the insert keeps its own thumb bookkeeping in sync");
+
+                // Now shrink Points back externally, exactly as an Undo of that insert would - a
+                // plain SetValue from outside this extension, with none of its own bookkeeping.
+                var restored = new Microsoft.UI.Xaml.Media.PointCollection();
+                restored.Add(new Windows.Foundation.Point(10, 10));
+                restored.Add(new Windows.Foundation.Point(50, 10));
+                restored.Add(new Windows.Foundation.Point(50, 50));
+                polylineItem.Properties["Points"].SetValue(restored);
+
+                Assert.AreEqual(3, extension.PointThumbs.Count, "an external Points change must rebuild the thumbs - a stale 4th thumb indexes past the end of the 3-point collection");
+                CollectionAssert.AreEqual(new[] { 0, 1, 2 }, extension.PointThumbs.Select(t => t.Index), "rebuilt thumbs are re-indexed with no gap");
+                Assert.AreEqual(3, extension.DragListeners.Count, "DragListeners is rebuilt in lockstep, leaving no reference to a discarded thumb");
+                Assert.DoesNotThrow(() => surface.UpdateLayout(), "the layout pass after an external Points shrink must not throw");
+
+                // Defense in depth (same fix round): even if some transient staleness ever survived
+                // the rebuild above, PointTrackerPlacementSupport.Arrange must bounds-check the
+                // Index. Forced here by publishing a deliberately out-of-range placement for a live
+                // thumb - AdornerPanel.SetPlacement invalidates the owning panel's measure, so the
+                // UpdateLayout below really does re-run ArrangeOverride, which calls
+                // GetPlacement(child).Arrange(...) for every child unconditionally. Asserted on the
+                // arranged size rather than on "doesn't throw", because an out-of-range index never
+                // throws on this SDK in the first place (see the note at the top of this test): the
+                // observable difference is a 7x7 handle parked on the shape's local origin (before)
+                // versus nothing at all (after).
+                var staleThumb = extension.PointThumbs[2];
+                Assert.AreEqual(47f, staleThumb.ActualOffset.X, 0.5, "sanity: while its Index is valid the thumb really is arranged on its own point (50,50) less the 3.5 half-thumb");
+                AdornerPanel.SetPlacement(staleThumb, new PointTrackerPlacementSupport(polyline, PlacementAlignment.BottomRight, 99));
+                Assert.DoesNotThrow(() => surface.UpdateLayout(), "an out-of-range point index must never throw out of a layout pass");
+                // Asserted on the arranged OFFSET, not the arranged size: a MultiPointThumb has a
+                // fixed 7x7 DesiredSize, and WinUI clamps an element's rendered size up to its
+                // DesiredSize, so ActualSize reads 7x7 either way. The offset does distinguish -
+                // Rect(0,0,0,0) arranges at (0,0), whereas reading the out-of-range Points[99]
+                // yields Point(0,0) and therefore an arrange at (-3.5,-3.5).
+                Assert.AreEqual(0f, staleThumb.ActualOffset.X, 0.5, "an out-of-range point index must arrange to an empty rect at the origin, not to a misleading handle offset by the half-thumb margin");
+                Assert.AreEqual(0f, staleThumb.ActualOffset.Y, 0.5);
             });
         }
     }
