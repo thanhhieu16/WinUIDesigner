@@ -39,7 +39,16 @@ namespace WinUIDesigner.Designer.Extensions
             var changeGroup = clickedOn.OpenGroup("Draw Line");
             var createdItem = CreateComponentTool.CreateItem(clickedOn.Context, typeof(Line), null);
 
-            var operation = PlacementOperation.TryStartInsertNewComponents(clickedOn, new[] { createdItem }, new[] { new Rect(point, new Size(0, 0)) }, PlacementType.AddItem);
+            // Final-review fix (NaN-Rect consistency): was new Rect(point, new Size(0, 0)). The two
+            // sibling draw tools (DrawPolyLineExtension/DrawPathExtension) both use the NaN form,
+            // and DrawPolyLineExtension.StartDrawItem's own doc comment records that this exact
+            // question was independently re-verified twice - including by temporarily reverting THIS
+            // line back to the NaN form and re-running DrawLineExtensionTests, which passed. The NaN
+            // form is also strictly better: DefaultPlacementBehavior.SetPosition's
+            // ModelTools.Resize(item, NaN, NaN) special-cases double.IsNaN by Reset()-ing the
+            // Width/Height property, whereas Size(0, 0) explicitly writes Width=0/Height=0 onto the
+            // freshly created Line.
+            var operation = PlacementOperation.TryStartInsertNewComponents(clickedOn, new[] { createdItem }, new[] { new Rect(point.X, point.Y, double.NaN, double.NaN) }, PlacementType.AddItem);
             if (operation == null) {
                 changeGroup.Abort();
                 return;
@@ -53,7 +62,17 @@ namespace WinUIDesigner.Designer.Extensions
 
             drawItemCallback?.Invoke(createdItem);
 
-            var lineHandler = createdItem.Extensions.OfType<LineHandlerExtension>().First();
+            // Final-review fix: FirstOrDefault + abort, not First(). LineHandlerExtension is
+            // attached by OnlyOneItemSelectedExtensionServer against the selection set above, so it
+            // is expected to be there - but if it somehow isn't, First() would throw out of
+            // StartDrawItem leaving the "Draw Line" ChangeGroup open on UndoService's transaction
+            // stack, which blocks every later Undo. Failing by aborting the transaction first is the
+            // same unwind the `operation == null` arm above already performs.
+            var lineHandler = createdItem.Extensions.OfType<LineHandlerExtension>().FirstOrDefault();
+            if (lineHandler == null) {
+                changeGroup.Abort();
+                return;
+            }
             Gesture = new DrawLineMouseGesture(lineHandler, changeGroup);
             Gesture.Start(panel, point);
         }
@@ -66,7 +85,12 @@ namespace WinUIDesigner.Designer.Extensions
     sealed class DrawLineMouseGesture
     {
         readonly LineHandlerExtension _lineHandler;
-        readonly ChangeGroup _changeGroup;
+        // Final-review fix: not readonly, and nulled the moment it is committed or aborted -
+        // matching DrawPolylineMouseGesture/DrawPathMouseGesture, whose otherwise-parallel
+        // Commit()/Cancel() already do exactly that. Benign today only because Stop() unsubscribes
+        // every event this gesture listens to, so neither path can currently run twice; nulling
+        // makes the ?. guards below genuinely single-shot instead of merely unreachable-twice.
+        ChangeGroup _changeGroup;
         IDesignPanel _designPanel;
 
         public DrawLineMouseGesture(LineHandlerExtension lineHandler, ChangeGroup changeGroup)
@@ -111,10 +135,16 @@ namespace WinUIDesigner.Designer.Extensions
         void Commit()
         {
             _changeGroup?.Commit();
+            _changeGroup = null;
             Stop();
         }
 
-        void Cancel()
+        /// <summary>The gesture's abort path - what Escape (OnKeyDown) and PointerCaptureLost both
+        /// drive. Internal rather than private so a test can exercise the cancellation path
+        /// directly, the same seam CreateComponentMouseGesture.Cancel() already provides (neither
+        /// KeyRoutedEventArgs nor PointerRoutedEventArgs has a public constructor - Global
+        /// Constraints - so the real events can't be raised from a test).</summary>
+        internal void Cancel()
         {
             // Close the inner Resize transaction (LineHandlerExtension.SetOperation, opened when
             // ExternalStart's drag crossed the threshold) SYNCHRONOUSLY, before aborting the
@@ -124,6 +154,7 @@ namespace WinUIDesigner.Designer.Extensions
             // leave the inner transaction dangling on the UndoService's stack.
             _lineHandler.DragListener.Cancel();
             _changeGroup?.Abort();
+            _changeGroup = null;
             Stop();
         }
 

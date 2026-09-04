@@ -91,5 +91,54 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(undoCountBefore + 1, undo.UndoActions.Count(), "create + drag-to-size is ONE undo entry, not two");
             });
         }
+
+        [Test]
+        public void CancellingAnInProgressLineDrawLeavesNothingBehindAndResetsTheTool()
+        {
+            // Final-review coverage gap (Fix 3): none of the three Draw*Extension gestures had an
+            // automated test proving the Escape / PointerCaptureLost abort path actually unwinds
+            // cleanly. Both of those production paths funnel into DrawLineMouseGesture.Cancel()
+            // (OnKeyDown checks VirtualKey.Escape, OnPointerCaptureLost calls it directly), which is
+            // the seam driven here - neither KeyRoutedEventArgs nor PointerRoutedEventArgs has a
+            // public constructor, so the real events cannot be raised from a test (Global
+            // Constraints). Same seam-through-Cancel() shape CreateComponentToolTests'
+            // EscapeDuringPointerPressAbortsWithoutAddingAnything already uses.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+                var toolService = surface.DesignContext.Services.GetService<IToolService>();
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                var canvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
+
+                int childrenBefore = canvas.Children.Count;
+                bool canUndoBefore = undo.CanUndo;
+                int undoCountBefore = undo.UndoActions.Count();
+
+                var tool = new CreateComponentTool(typeof(Microsoft.UI.Xaml.Shapes.Line));
+                toolService.CurrentTool = tool;
+                var point = canvas.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(50, 60));
+
+                tool.HandlePointerPressed(surface.DesignPanel, point, Windows.System.VirtualKeyModifiers.None);
+                surface.UpdateLayout();
+                Assert.AreEqual(childrenBefore + 1, canvas.Children.Count, "sanity check: the gesture really did create something for the cancel below to have to take back");
+
+                var drawLineExtension = surface.DesignContext.RootItem.Extensions.OfType<DrawLineExtension>().Single();
+                var lineItem = surface.DesignContext.Services.Component.GetDesignItem(canvas.Children[childrenBefore]);
+                var lineHandler = lineItem.Extensions.OfType<LineHandlerExtension>().Single();
+
+                // Drag past DragListener's threshold first, so the INNER Resize transaction
+                // (LineHandlerExtension.SetOperation) is genuinely open at the moment of the cancel -
+                // otherwise this would only exercise the trivial "nothing was ever opened" path, and
+                // Cancel()'s whole reason for closing inner-before-outer would go untested.
+                lineHandler.DragListener.ExternalMove(new Windows.Foundation.Point(point.X + 30, point.Y + 20), Windows.System.VirtualKeyModifiers.None);
+
+                drawLineExtension.Gesture.Cancel();
+                surface.UpdateLayout();
+
+                Assert.AreEqual(childrenBefore, canvas.Children.Count, "a cancelled draw must leave nothing behind in the container");
+                Assert.AreEqual(canUndoBefore, undo.CanUndo, "a cancelled draw must not change whether there is anything to undo");
+                Assert.AreEqual(undoCountBefore, undo.UndoActions.Count(), "a cancelled draw must add no undo entry - neither a phantom commit nor a dangling one");
+                Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "a cancelled draw must reset the active tool back to PointerTool");
+            });
+        }
     }
 }

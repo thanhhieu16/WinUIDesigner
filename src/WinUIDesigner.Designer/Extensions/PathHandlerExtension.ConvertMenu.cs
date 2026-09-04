@@ -206,6 +206,13 @@ namespace WinUIDesigner.Designer.Extensions
             }
             replacements.AddRange(suffix);
 
+            // Final-review fix: the try/catch-and-Abort guard this operation needs lives inside
+            // CommitFiguresChange, NOT here. Nothing can throw between Start() and the call below,
+            // and CommitFiguresChange is what commits - so a second, outer guard here would call
+            // Abort() on an already-committed operation whenever the post-commit ReapplyExtension
+            // threw, and PlacementOperation.Abort throws PlacementOperationException("PlacementOperation
+            // is committed.") in that state (PlacementOperation.cs:246-253), masking the real
+            // exception. One guard, at the commit site.
             var operation = PlacementOperation.Start(extendedItemArray, PlacementType.MovePoint);
             CommitFiguresChange(figure, idx, replacements, operation);
         }
@@ -235,12 +242,31 @@ namespace WinUIDesigner.Designer.Extensions
         /// guard exists so a drag isn't torn down mid-gesture), so nothing else would.</summary>
         void CommitFiguresChange(PathFigure targetFigure, int segmentIndex, IEnumerable<PathSegment> replacements, PlacementOperation operation)
         {
-            var segments = targetFigure.Segments;
-            segments.RemoveAt(segmentIndex);
-            int at = segmentIndex;
-            foreach (var replacement in replacements) segments.Insert(at++, replacement);
+            // Final-review fix: unwind the operation on any unexpected throw, matching every other
+            // PlacementOperation consumer in this codebase (ModelTools.cs's own methods are the
+            // established `try { ... } catch { operation.Abort(); throw; }` shape). CloneSegment's
+            // NotSupportedException for an unrecognised segment type - reachable from SaveGeometry
+            // below - is the concrete way this can fire; without the guard it left a half-open
+            // operation on UndoService's transaction stack, blocking every later Undo.
+            //
+            // One deliberate deviation from ModelTools' shape: Commit() (and the ReapplyExtension
+            // after it) sit OUTSIDE the try rather than inside it. PlacementOperation.Commit sets
+            // isCommitted BEFORE doing any work that can throw, and PlacementOperation.Abort throws
+            // PlacementOperationException("PlacementOperation is committed.") once isCommitted is
+            // set (PlacementOperation.cs:246-261) - so an inside-the-try Commit would, on failure,
+            // throw a second exception out of the catch block and mask the real one. The guard
+            // covers exactly the work that can throw while the operation is still abortable.
+            try {
+                var segments = targetFigure.Segments;
+                segments.RemoveAt(segmentIndex);
+                int at = segmentIndex;
+                foreach (var replacement in replacements) segments.Insert(at++, replacement);
 
-            SaveGeometry(_workingGeometry);
+                SaveGeometry(_workingGeometry);
+            } catch {
+                operation.Abort();
+                throw;
+            }
             operation.Commit();
             ExtendedItem.ReapplyExtension(typeof(PathHandlerExtension));
         }
@@ -260,9 +286,16 @@ namespace WinUIDesigner.Designer.Extensions
         {
             if (figure == null) return;
             if (_workingGeometry != null) {
+                // Final-review fix: same guard, and same Commit-outside-the-try placement, as
+                // CommitFiguresChange above - see its remarks for both.
                 var operation = PlacementOperation.Start(extendedItemArray, PlacementType.MovePoint);
-                figure.IsClosed = !figure.IsClosed;
-                SaveGeometry(_workingGeometry);
+                try {
+                    figure.IsClosed = !figure.IsClosed;
+                    SaveGeometry(_workingGeometry);
+                } catch {
+                    operation.Abort();
+                    throw;
+                }
                 operation.Commit();
             }
             RefreshIsClosedItems(figure);
