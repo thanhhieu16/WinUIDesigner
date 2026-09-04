@@ -131,7 +131,15 @@ namespace WinUIDesigner.Designer.Extensions
         {
             var local = ApplyAltSnap(panelPoint, modifiers);
             var next = Clone(GetPoints());
-            next[next.Count - 1] = local; // "preview" trailing point - never left committed between clicks
+            // Fix round 1 (reviewer finding): right after StartDrawItem, Count == 1 means that
+            // sole point is the ALREADY-COMMITTED first vertex (placed at the click location via
+            // Canvas.Left/Top in StartDrawItem), not an uncommitted preview - overwriting it here
+            // would silently lose the true first-click location the moment the mouse first moves.
+            // Matches the spec's own prose ("preview... added then replaced on the next move") and
+            // the reference (DrawPolyLineExtension.cs:138: `if (Points.Count <= 1) Points.Add(point)`).
+            // Every subsequent move (Count > 1) still overwrites the existing trailing preview in
+            // place, same as before.
+            if (next.Count == 1) next.Add(local); else next[next.Count - 1] = local;
             _item.Properties["Points"].SetValue(next);
         }
 
@@ -148,7 +156,11 @@ namespace WinUIDesigner.Designer.Extensions
         {
             var local = ApplyAltSnap(panelPoint, modifiers);
             var next = Clone(GetPoints());
-            next[next.Count - 1] = local; // finalize the point the preview was tracking
+            // Same Count == 1 case as HandlePointerMoved above: if only the committed first vertex
+            // exists (the user clicked a second time before ever moving the mouse, so no preview
+            // point was ever added), there is nothing to finalize yet - skip straight to adding the
+            // new preview instead of clobbering the first vertex.
+            if (next.Count > 1) next[next.Count - 1] = local; // finalize the point the preview was tracking
             next.Add(local); // start a new preview point at the same spot
             _item.Properties["Points"].SetValue(next);
         }

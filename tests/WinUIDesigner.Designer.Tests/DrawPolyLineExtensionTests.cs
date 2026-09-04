@@ -75,50 +75,56 @@ namespace WinUIDesigner.Designer.Tests
                 var undo = surface.DesignContext.Services.GetService<UndoService>();
                 int undoCountBefore = undo.UndoActions.Count();
 
-                // Move BEFORE the second click - proves the trailing preview-point bookkeeping:
-                // a move must overwrite the last point in place, never grow the collection.
+                // Move BEFORE the second click - proves the trailing preview-point bookkeeping.
+                // Fix round 1 (reviewer finding): right after the initial click, Count == 1 means
+                // that sole point is the ALREADY-COMMITTED first vertex (placed at the click
+                // location), not an uncommitted preview - so this first move must ADD a new preview
+                // point rather than overwrite (and silently lose) the first vertex.
                 gesture.HandlePointerMoved(ToPanel(90, 50), Windows.System.VirtualKeyModifiers.None);
-                Assert.AreEqual(1, polyline.Points.Count, "a move only updates the trailing preview point, it must not add one");
-                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[0]);
+                Assert.AreEqual(2, polyline.Points.Count, "a move right after only the origin vertex exists must ADD a preview point, not overwrite the origin vertex");
+                Assert.AreEqual(new Windows.Foundation.Point(0, 0), polyline.Points[0], "the first click's own vertex must survive the subsequent move unchanged");
+                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[1]);
 
                 // Second click: finalizes the point the preview was tracking (local (40,0)) and
                 // starts a new preview point at the same spot.
                 gesture.HandlePointerPressed(ToPanel(90, 50), Windows.System.VirtualKeyModifiers.None);
-                Assert.AreEqual(2, polyline.Points.Count);
-                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[0]);
+                Assert.AreEqual(3, polyline.Points.Count);
+                Assert.AreEqual(new Windows.Foundation.Point(0, 0), polyline.Points[0], "the first click's own vertex must still be untouched");
                 Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[1]);
+                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[2]);
 
                 // Third click WITH Alt held - proves ApplyAltSnap's axis selection. Current local
                 // point (90,5) relative to the last committed point (40,0): dx=50 dominates
                 // dy=5, so the horizontal axis is picked and Y snaps to the last committed point's
                 // Y (0) - the committed vertex ends up perfectly horizontal from its predecessor.
                 gesture.HandlePointerPressed(ToPanel(140, 55), Windows.System.VirtualKeyModifiers.Menu);
-                Assert.AreEqual(3, polyline.Points.Count);
-                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[1], "Alt-snap: horizontal axis picked, Y snapped to the previous point's Y");
-                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[2], "trailing preview duplicates the just-committed point");
+                Assert.AreEqual(4, polyline.Points.Count);
+                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[2], "Alt-snap: horizontal axis picked, Y snapped to the previous point's Y");
+                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[3], "trailing preview duplicates the just-committed point");
 
                 // Fourth click, no Alt: finalizes the third committed vertex and starts a fourth
                 // (trailing) preview point that DoubleTapped below must drop.
                 gesture.HandlePointerPressed(ToPanel(140, 150), Windows.System.VirtualKeyModifiers.None);
-                Assert.AreEqual(4, polyline.Points.Count);
-                Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[2]);
+                Assert.AreEqual(5, polyline.Points.Count);
+                Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[3]);
 
                 // DoubleTapped ends the gesture: drops the trailing preview point, commits the
                 // ChangeGroup as a single undo entry, and reapplies extensions.
                 gesture.HandleDoubleTapped();
                 surface.UpdateLayout();
 
-                Assert.AreEqual(3, polyline.Points.Count, "the trailing preview point must be dropped on DoubleTapped");
-                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[0]);
-                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[1]);
-                Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[2]);
+                Assert.AreEqual(4, polyline.Points.Count, "the trailing preview point must be dropped on DoubleTapped");
+                Assert.AreEqual(new Windows.Foundation.Point(0, 0), polyline.Points[0], "the TRUE first-click location must survive, unchanged, all the way into the final committed Points - this is exactly the invariant Fix round 1 restored");
+                Assert.AreEqual(new Windows.Foundation.Point(40, 0), polyline.Points[1]);
+                Assert.AreEqual(new Windows.Foundation.Point(90, 0), polyline.Points[2]);
+                Assert.AreEqual(new Windows.Foundation.Point(90, 100), polyline.Points[3]);
 
                 Assert.AreEqual(undoCountBefore + 1, undo.UndoActions.Count(), "the whole multi-click draw gesture is ONE undo entry, not one per click");
 
                 var polylineItem = surface.DesignContext.Services.Component.GetDesignItem(polyline);
                 var handlerExtension = polylineItem.Extensions.OfType<PolyLineHandlerExtension>().Single();
-                Assert.AreEqual(3, handlerExtension.PointThumbs.Count, "ReapplyAllExtensions must have rebuilt PolyLineHandlerExtension against the FINAL 3-point collection, not the stale 1-point one from StartDrawItem");
-                CollectionAssert.AreEqual(new[] { 0, 1, 2 }, handlerExtension.PointThumbs.Select(t => t.Index));
+                Assert.AreEqual(4, handlerExtension.PointThumbs.Count, "ReapplyAllExtensions must have rebuilt PolyLineHandlerExtension against the FINAL 4-point collection, not the stale 1-point one from StartDrawItem");
+                CollectionAssert.AreEqual(new[] { 0, 1, 2, 3 }, handlerExtension.PointThumbs.Select(t => t.Index));
 
                 var toolService = surface.DesignContext.Services.GetService<IToolService>();
                 Assert.AreSame(toolService.PointerTool, toolService.CurrentTool, "the gesture must switch the tool back to PointerTool once it ends");
