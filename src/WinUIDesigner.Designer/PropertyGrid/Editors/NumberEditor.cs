@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WinUIDesigner.DesignModel;
@@ -26,7 +27,8 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
 {
     /// <summary>
     /// Numeric editor (spec Decision 9): a NumberBox consuming Metadata.GetValueRange for
-    /// Minimum/Maximum when registered (else NumberBox's own double.MinValue/MaxValue defaults).
+    /// Minimum/Maximum when registered, else falling back to the CLR type's own min/max (ClrRanges)
+    /// so out-of-range input can't overflow Convert.ChangeType for an unregistered numeric property.
     /// Registered against every numeric CLR type and its nullable variant as separate exact
     /// entries (no base-type walking - spec Decision 4) since NumberBox.Value is always double.
     /// </summary>
@@ -39,6 +41,20 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
             typeof(long), typeof(long?), typeof(ulong), typeof(ulong?),
             typeof(float), typeof(float?), typeof(double), typeof(double?),
             typeof(decimal), typeof(decimal?),
+        };
+
+        static readonly Dictionary<Type, (double Min, double Max)> ClrRanges = new Dictionary<Type, (double, double)> {
+            { typeof(byte), (byte.MinValue, byte.MaxValue) },
+            { typeof(sbyte), (sbyte.MinValue, sbyte.MaxValue) },
+            { typeof(short), (short.MinValue, short.MaxValue) },
+            { typeof(ushort), (ushort.MinValue, ushort.MaxValue) },
+            { typeof(int), (int.MinValue, int.MaxValue) },
+            { typeof(uint), (uint.MinValue, uint.MaxValue) },
+            { typeof(long), (long.MinValue, long.MaxValue) },
+            { typeof(ulong), (ulong.MinValue, ulong.MaxValue) },
+            { typeof(float), (float.MinValue, float.MaxValue) },
+            { typeof(double), (double.MinValue, double.MaxValue) },
+            { typeof(decimal), ((double)decimal.MinValue, (double)decimal.MaxValue) },
         };
 
         public static void Register()
@@ -64,15 +80,27 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                     if (nodeRange != null) {
                         numberBox.Minimum = nodeRange.Min;
                         numberBox.Maximum = nodeRange.Max;
+                    } else {
+                        var underlying = Nullable.GetUnderlyingType(node.FirstProperty.ReturnType) ?? node.FirstProperty.ReturnType;
+                        if (ClrRanges.TryGetValue(underlying, out var bounds)) {
+                            numberBox.Minimum = bounds.Min;
+                            numberBox.Maximum = bounds.Max;
+                        }
                     }
                     syncingFromModel = true;
-                    numberBox.Value = ToDouble(node.DesignerValue);
-                    syncingFromModel = false;
+                    try {
+                        numberBox.Value = ToDouble(node.DesignerValue);
+                    } finally {
+                        syncingFromModel = false;
+                    }
                     node.PropertyChanged += (ps, pe) => {
                         if (pe.PropertyName == "DesignerValue") {
                             syncingFromModel = true;
-                            numberBox.Value = ToDouble(node.DesignerValue);
-                            syncingFromModel = false;
+                            try {
+                                numberBox.Value = ToDouble(node.DesignerValue);
+                            } finally {
+                                syncingFromModel = false;
+                            }
                         }
                     };
                 }

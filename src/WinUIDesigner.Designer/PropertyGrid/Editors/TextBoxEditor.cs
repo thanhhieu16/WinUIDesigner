@@ -16,6 +16,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
+using System;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WinUIDesigner.DesignModel;
@@ -36,18 +37,6 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
         public static void Register()
         {
             EditorManager.SetDefaultTextBoxEditorFactory(Create);
-            // Temporary bridge until Task 5 registers the real ComboBoxEditor: every FrameworkElement
-            // has enum-typed properties (Visibility, HorizontalAlignment, ...), and Metadata.GetStandardValues
-            // already treats any enum type as having standard values, so EditorManager.CreateEditor
-            // unconditionally routes those to the combo-box default - which Task 4 never registers
-            // otherwise, causing a NullReferenceException on the very first Reload() of any real
-            // component. Registering the same Create function as both defaults is not just a
-            // crash-avoidance hack: System.ComponentModel.EnumConverter (the BCL's default TypeConverter
-            // for any enum type) already round-trips by member name via ConvertFromInvariantString/
-            // ConvertToInvariantString, so an enum property edited through this plain textbox works
-            // correctly (e.g. typing "Collapsed"), just without a dropdown, until Task 5's
-            // ComboBoxEditor.Register() overwrites this registration with the real one.
-            EditorManager.SetDefaultComboBoxEditorFactory(Create);
         }
 
         public static FrameworkElement Create(DesignItemProperty property)
@@ -69,7 +58,15 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
         static void Commit(TextBox textBox)
         {
             var node = textBox.DataContext as PropertyNode;
-            if (node != null) node.ValueString = textBox.Text;
+            if (node == null) return;
+            try {
+                node.ValueString = textBox.Text;
+            } catch (Exception) {
+                // Invalid input for this property's TypeConverter (e.g. non-numeric text typed into a
+                // property whose converter expects a number) - revert the display to the last known-good
+                // value rather than letting the exception escape a UI event handler.
+                textBox.Text = node.ValueString;
+            }
         }
 
         // Test seam - a real LostFocus RoutedEventArgs can't be fabricated (no public

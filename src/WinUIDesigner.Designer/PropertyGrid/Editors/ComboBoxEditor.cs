@@ -67,13 +67,19 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                 var node = comboBox.DataContext as PropertyNode;
                 if (node != null) {
                     syncingFromModel = true;
-                    comboBox.SelectedValue = node.DesignerValue;
-                    syncingFromModel = false;
+                    try {
+                        comboBox.SelectedValue = node.DesignerValue;
+                    } finally {
+                        syncingFromModel = false;
+                    }
                     node.PropertyChanged += (ps, pe) => {
                         if (pe.PropertyName == "DesignerValue") {
                             syncingFromModel = true;
-                            comboBox.SelectedValue = node.DesignerValue;
-                            syncingFromModel = false;
+                            try {
+                                comboBox.SelectedValue = node.DesignerValue;
+                            } finally {
+                                syncingFromModel = false;
+                            }
                         }
                     };
                 }

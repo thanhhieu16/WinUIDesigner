@@ -47,13 +47,19 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                 var node = checkBox.DataContext as PropertyNode;
                 if (node != null) {
                     syncingFromModel = true;
-                    checkBox.IsChecked = node.DesignerValue as bool?;
-                    syncingFromModel = false;
+                    try {
+                        checkBox.IsChecked = node.DesignerValue as bool?;
+                    } finally {
+                        syncingFromModel = false;
+                    }
                     node.PropertyChanged += (ps, pe) => {
                         if (pe.PropertyName == "DesignerValue") {
                             syncingFromModel = true;
-                            checkBox.IsChecked = node.DesignerValue as bool?;
-                            syncingFromModel = false;
+                            try {
+                                checkBox.IsChecked = node.DesignerValue as bool?;
+                            } finally {
+                                syncingFromModel = false;
+                            }
                         }
                     };
                 }

@@ -164,12 +164,15 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
         void SetValueCore(object value)
         {
             raiseEvents = false;
-            if (value == Unset) {
-                foreach (var p in Properties) p.Reset();
-            } else {
-                foreach (var p in Properties) p.SetValue(value);
+            try {
+                if (value == Unset) {
+                    foreach (var p in Properties) p.Reset();
+                } else {
+                    foreach (var p in Properties) p.SetValue(value);
+                }
+            } finally {
+                raiseEvents = true;
             }
-            raiseEvents = true;
             OnValueChanged();
         }
 
