@@ -197,13 +197,25 @@ namespace WinUIDesigner.Designer.PropertyGrid
             // empirically - exactly this control's own host-less-control-testing situation, since
             // nothing here ever assigns a PropertyGridControl into a Window's content), so track
             // each node's current host Panel explicitly instead of trusting .Parent.
-            Panel oldHost;
-            if (editorHosts.TryGetValue(node, out oldHost)) {
-                oldHost.Children.Remove(node.Editor);
+            // editorHosts tracking is confined to top-level nodes (node.Parent == null - the plain
+            // PropertyNode.Parent field, unrelated to the FrameworkElement.Parent quirk above): a
+            // recursive CHILD node (PropertyNode.Parent != null) is always freshly constructed by
+            // PropertyNode.UpdateChildren() on every expand/value-change, with a freshly-created
+            // Editor each time (Load()'s `if (Editor == null)` check on a brand-new instance), so
+            // there is nothing to detach for it - and the discarded old child instances would
+            // otherwise sit in editorHosts forever (never reachable via nodeCache, which only
+            // caches top-level nodes), a growing memory leak.
+            if (node.Parent == null) {
+                Panel oldHost;
+                if (editorHosts.TryGetValue(node, out oldHost)) {
+                    oldHost.Children.Remove(node.Editor);
+                }
             }
             Grid.SetColumn(node.Editor, 2);
             row.Children.Add(node.Editor);
-            editorHosts[node] = row;
+            if (node.Parent == null) {
+                editorHosts[node] = row;
+            }
 
             var stack = new StackPanel();
             stack.Children.Add(row);
