@@ -17,6 +17,18 @@ namespace WinUIDesigner.Designer.Tests
             "<Button x:Name=\"Target\" Width=\"40\" Height=\"20\" />" +
             "</Grid>";
 
+        const string NestedGridXaml =
+            "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Grid x:Name=\"Target\" />" +
+            "</Grid>";
+
+        const string SizelessButtonXaml =
+            "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Button x:Name=\"Target\" />" +
+            "</Grid>";
+
         static (XamlDesignContext context, Microsoft.UI.Xaml.Controls.Button button, WinUIDesigner.DesignModel.DesignItem buttonItem) Load(Microsoft.UI.Xaml.Window window)
         {
             var settings = new XamlLoadSettings();
@@ -40,6 +52,96 @@ namespace WinUIDesigner.Designer.Tests
             var button = (Microsoft.UI.Xaml.Controls.Button)((Microsoft.UI.Xaml.Controls.Grid)context.RootItem.Component).Children[0];
             var buttonItem = context.Services.Component.GetDesignItem(button);
             return (context, button, buttonItem);
+        }
+
+        static WinUIDesigner.DesignModel.DesignItem LoadTarget(Microsoft.UI.Xaml.Window window, string xaml)
+        {
+            var settings = new XamlLoadSettings();
+            settings.DesignerAssemblies.Add(typeof(DefaultPlacementBehavior).Assembly);
+            settings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.ISelectionService), new WinUIDesigner.Designer.Services.DefaultSelectionService()));
+            settings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.IDesignPanel), new WinUIDesigner.Designer.DesignPanel()));
+            using var reader = XmlReader.Create(new StringReader(xaml));
+            var context = new XamlDesignContext(reader, settings);
+            window.Content = (Microsoft.UI.Xaml.UIElement)context.RootItem.View;
+            ((Microsoft.UI.Xaml.FrameworkElement)window.Content).UpdateLayout();
+            var target = ((Microsoft.UI.Xaml.Controls.Grid)context.RootItem.Component).Children[0];
+            return context.Services.Component.GetDesignItem(target);
+        }
+
+        // Metadata's registries are process-wide static state (matches the reference's own
+        // design - see spec Decision 6). AddDefaultSize is being registered here against real,
+        // widely-shared WinUI types (Grid/Panel/Control) that other tests elsewhere in this same
+        // process may also create - leaving a registration behind would make GetDefaultSize's
+        // result for THOSE tests depend on whether this file happened to run first. Every test
+        // below that calls AddDefaultSize resets the registry in a finally block; there is no
+        // Metadata.RemoveDefaultSize (the reference has none either), so resetting means
+        // clearing the whole private dictionary via reflection (cannot replace a readonly field
+        // after type initialization, so we clear it instead).
+        static void ResetDefaultSizeRegistry()
+        {
+            var field = typeof(WinUIDesigner.DesignModel.Metadata)
+                .GetField("defaultSizes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            var dict = (System.Collections.Generic.Dictionary<System.Type, Windows.Foundation.Size>)field.GetValue(null);
+            dict.Clear();
+        }
+
+        [Test]
+        public void AnExactTypeRegistryEntryShortCircuitsMeasureEntirely()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var item = LoadTarget(window, NestedGridXaml);
+                WinUIDesigner.DesignModel.Metadata.AddDefaultSize(typeof(Microsoft.UI.Xaml.Controls.Grid), new Windows.Foundation.Size(300, 200));
+                try {
+                    var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(item);
+                    Assert.AreEqual(300, size.Width);
+                    Assert.AreEqual(200, size.Height);
+                } finally {
+                    ResetDefaultSizeRegistry();
+                }
+            });
+        }
+
+        [Test]
+        public void ABaseTypeRegistryEntryOverridesASmallMeasuredDimension()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var item = LoadTarget(window, NestedGridXaml); // measures (0,0) - see Empirically-verified facts
+                WinUIDesigner.DesignModel.Metadata.AddDefaultSize(typeof(Microsoft.UI.Xaml.Controls.Panel), new Windows.Foundation.Size(150, 120));
+                try {
+                    var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(item);
+                    Assert.AreEqual(150, size.Width);
+                    Assert.AreEqual(120, size.Height);
+                } finally {
+                    ResetDefaultSizeRegistry();
+                }
+            });
+        }
+
+        [Test]
+        public void ARegistryEntryIsIgnoredWhenTheMeasuredDimensionIsAlreadyLargerThanFive()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var item = LoadTarget(window, SizelessButtonXaml); // measures (20,13) - see Empirically-verified facts
+                WinUIDesigner.DesignModel.Metadata.AddDefaultSize(typeof(Microsoft.UI.Xaml.Controls.Control), new Windows.Foundation.Size(999, 888));
+                try {
+                    var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(item);
+                    Assert.AreEqual(20, size.Width);
+                    Assert.AreEqual(13, size.Height);
+                } finally {
+                    ResetDefaultSizeRegistry();
+                }
+            });
+        }
+
+        [Test]
+        public void WithNoRegistrationAtAllTheExistingMeasureBehaviorIsUnchanged()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (context, button, buttonItem) = Load(window); // existing fixture: Width=40, Height=20 explicit
+                var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(buttonItem);
+                Assert.AreEqual(40, size.Width);
+                Assert.AreEqual(20, size.Height);
+            });
         }
 
         [Test]

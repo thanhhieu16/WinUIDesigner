@@ -37,21 +37,28 @@ namespace WinUIDesigner.Designer
         /// of its own, so a click-without-drag placement (CreateComponentTool.
         /// AddItemsWithDefaultSize, Phase 4d Task 4) doesn't add a 0x0 control. Ported in
         /// trimmed form from the reference's ModelTools.GetDefaultSize (WpfDesign.Designer/
-        /// Project/ModelTools.cs:161-190). Two reference layers are dropped, not ported:
-        /// Metadata.GetDefaultSize's per-type registry (Metadata.cs - the class, not just this
-        /// one method - was never ported to this codebase at all; grep across src/ turns up no
-        /// caller that ever registered a default size through it) and CreateVisualTree's
-        /// XPS-serializer trick (a WPF-only device to force layout on an element with no visual
-        /// parent - WinUI's UIElement.Measure works directly on an unparented element without
-        /// it). Despite both this file's own doc comment and the Phase 4d spec/plan explicitly
-        /// asserting GetDefaultSize "already exists per 4c's ModelTools.cs", it did not - added
-        /// here as Task 4's own prerequisite, since CreateComponentTool.AddItemsWithDefaultSize
-        /// cannot compile without it.</summary>
+        /// Project/ModelTools.cs:161-190). One reference layer is still dropped, not ported:
+        /// CreateVisualTree's XPS-serializer trick (a WPF-only device to force layout on an
+        /// element with no visual parent - WinUI's UIElement.Measure works directly on an
+        /// unparented element without it). Metadata.GetDefaultSize's per-type registry (Phase 4e)
+        /// is now wired in, matching the reference's exact composition: an exact-type hit
+        /// short-circuits before Measure ever runs; otherwise a base-type-walking hit overrides
+        /// a measured dimension only when that dimension is not already larger than 5.</summary>
         public static Size GetDefaultSize(DesignItem createdItem)
         {
+            var type = createdItem.ComponentType;
+            var exact = Metadata.GetDefaultSize(type, false);
+            if (exact.HasValue) return exact.Value;
+
             var view = createdItem.View;
             view.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
             var s = view.DesiredSize;
+
+            var walked = Metadata.GetDefaultSize(type, true);
+            if (walked.HasValue) {
+                if (!(s.Width > 5) && walked.Value.Width > 0) s.Width = walked.Value.Width;
+                if (!(s.Height > 5) && walked.Value.Height > 0) s.Height = walked.Value.Height;
+            }
 
             if (double.IsNaN(s.Width) && GetWidth(view) > 0) s.Width = GetWidth(view);
             if (double.IsNaN(s.Height) && GetHeight(view) > 0) s.Height = GetHeight(view);
