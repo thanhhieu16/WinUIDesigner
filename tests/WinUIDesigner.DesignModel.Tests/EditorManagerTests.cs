@@ -62,12 +62,10 @@ namespace WinUIDesigner.DesignModel.Tests
             // NamedValuesTarget registration below writes into Metadata's own process-wide
             // standardNamedValues dictionary (Phase 4e) - reset it too so this file can't affect
             // MetadataTests.cs, which runs in this same DesignModel.Tests.exe process. The
-            // dictionary's value type (Metadata.NamedValue) is a private nested class, so this
-            // can't spell out `new Dictionary<Type, List<NamedValue>>()` directly -
-            // Activator.CreateInstance(field.FieldType) builds a fresh empty instance of
-            // whatever the field's actual declared type is without naming it.
+            // field is readonly, so we can't replace it; instead retrieve the existing dictionary
+            // and clear its contents in place.
             var namedValuesField = typeof(Metadata).GetField("standardNamedValues", BindingFlags.NonPublic | BindingFlags.Static);
-            namedValuesField.SetValue(null, Activator.CreateInstance(namedValuesField.FieldType));
+            ((System.Collections.IDictionary)namedValuesField.GetValue(null)).Clear();
         }
 
         [Test]
