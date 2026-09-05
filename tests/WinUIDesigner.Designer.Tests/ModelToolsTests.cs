@@ -29,6 +29,19 @@ namespace WinUIDesigner.Designer.Tests
             "<Button x:Name=\"Target\" />" +
             "</Grid>";
 
+        // Width-only Grid (no Height) - empirically probed (see
+        // AGetDefaultSizeOverrideAppliesIndependentlyPerAxis) to measure DesiredSize (40, 0): the
+        // explicit Width comes out above the method's >5 threshold while the unset Height comes
+        // out at the Grid's natural (childless) 0 - a genuine one-axis-small/one-axis-large split.
+        // A same-shaped Button (Width=40, no Height) measures (40, 13) instead - both axes above 5
+        // - so it can't exercise the two independently-checked branches in GetDefaultSize; only
+        // the childless Grid does.
+        const string WidthOnlyGridXaml =
+            "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Grid x:Name=\"Target\" Width=\"40\" />" +
+            "</Grid>";
+
         static (XamlDesignContext context, Microsoft.UI.Xaml.Controls.Button button, WinUIDesigner.DesignModel.DesignItem buttonItem) Load(Microsoft.UI.Xaml.Window window)
         {
             var settings = new XamlLoadSettings();
@@ -127,6 +140,28 @@ namespace WinUIDesigner.Designer.Tests
                     var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(item);
                     Assert.AreEqual(20, size.Width);
                     Assert.AreEqual(13, size.Height);
+                } finally {
+                    ResetDefaultSizeRegistry();
+                }
+            });
+        }
+
+        // Both prior registry tests above are uniform - either both axes measure small (0,0) and
+        // both get overridden, or both measure above 5 (20,13) and neither does - so they can't
+        // tell GetDefaultSize's two independent `if (!(s.Width > 5) ...)` / `if (!(s.Height > 5)
+        // ...)` checks apart from one combined check. WidthOnlyGridXaml measures (40,0) (see its
+        // own comment) - Width already above 5 stays put, Height at 0 gets overridden - so this
+        // is the one test where getting either axis's condition wrong would be visible.
+        [Test]
+        public void AGetDefaultSizeOverrideAppliesIndependentlyPerAxis()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var item = LoadTarget(window, WidthOnlyGridXaml); // measures (40,0) - see WidthOnlyGridXaml's comment
+                WinUIDesigner.DesignModel.Metadata.AddDefaultSize(typeof(Microsoft.UI.Xaml.Controls.Panel), new Windows.Foundation.Size(500, 500));
+                try {
+                    var size = WinUIDesigner.Designer.ModelTools.GetDefaultSize(item);
+                    Assert.AreEqual(40, size.Width, "the already-large measured Width must NOT be replaced by the registered value");
+                    Assert.AreEqual(500, size.Height, "the small measured Height must be overridden by the registered value");
                 } finally {
                     ResetDefaultSizeRegistry();
                 }

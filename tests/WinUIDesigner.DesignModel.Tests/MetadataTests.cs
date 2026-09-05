@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Xml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -27,6 +29,28 @@ namespace WinUIDesigner.DesignModel.Tests
             var button = (Button)grid.Children[0];
             var buttonItem = context.Services.Component.GetDesignItem(button);
             return buttonItem.Properties.GetProperty(propertyName);
+        }
+
+        // Metadata's registries are process-wide static state (matches the reference's own
+        // design). The tests below register a REAL, shared WinUI property (Width/Height/MinWidth/
+        // etc. on Button) into one of Metadata's dictionaries/hashsets - leaving that registration
+        // behind would leak into every other test in the process that happens to touch the same
+        // property (e.g. ModelToolsTests/CreateComponentToolTests/DefaultPlacementBehaviorTests,
+        // which already guard against exactly this via their own reflection-based resets). There
+        // is no Metadata.Remove*/Unhide* API (the reference has none either), and the fields are
+        // `static readonly` so FieldInfo.SetValue throws FieldAccessException outside the type
+        // initializer - fetching the same collection reference via GetValue and calling Clear()
+        // on it achieves the same end state without attempting that disallowed write.
+        static void ResetDictionary(string fieldName)
+        {
+            var field = typeof(Metadata).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
+            ((System.Collections.IDictionary)field.GetValue(null)).Clear();
+        }
+
+        static void ResetHashSet<T>(string fieldName)
+        {
+            var field = typeof(Metadata).GetField(fieldName, BindingFlags.NonPublic | BindingFlags.Static);
+            ((HashSet<T>)field.GetValue(null)).Clear();
         }
 
         // --- Marker types, one per test, so no two tests can disagree about the same
@@ -104,9 +128,13 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var widthProperty = LoadProperty("Width");
-                Metadata.AddStandardValues(widthProperty.DependencyProperty, "small", "medium", "large");
-                var values = Metadata.GetStandardValues(widthProperty.DependencyProperty).Cast<object>().ToList();
-                CollectionAssert.AreEqual(new object[] { "small", "medium", "large" }, values);
+                try {
+                    Metadata.AddStandardValues(widthProperty.DependencyProperty, "small", "medium", "large");
+                    var values = Metadata.GetStandardValues(widthProperty.DependencyProperty).Cast<object>().ToList();
+                    CollectionAssert.AreEqual(new object[] { "small", "medium", "large" }, values);
+                } finally {
+                    ResetDictionary("standardValuesForDependencyPropertys");
+                }
             });
         }
 
@@ -124,8 +152,12 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var heightProperty = LoadProperty("Height");
-                Metadata.HideProperty(heightProperty.DependencyProperty);
-                Assert.IsFalse(Metadata.IsBrowsable(heightProperty));
+                try {
+                    Metadata.HideProperty(heightProperty.DependencyProperty);
+                    Assert.IsFalse(Metadata.IsBrowsable(heightProperty));
+                } finally {
+                    ResetHashSet<DependencyProperty>("hiddenDependencyProperties");
+                }
             });
         }
 
@@ -134,8 +166,12 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var minWidthProperty = LoadProperty("MinWidth");
-                Metadata.HideProperty(minWidthProperty.DeclaringType, minWidthProperty.Name);
-                Assert.IsFalse(Metadata.IsBrowsable(minWidthProperty));
+                try {
+                    Metadata.HideProperty(minWidthProperty.DeclaringType, minWidthProperty.Name);
+                    Assert.IsFalse(Metadata.IsBrowsable(minWidthProperty));
+                } finally {
+                    ResetHashSet<string>("hiddenProperties");
+                }
             });
         }
 
@@ -153,8 +189,12 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var maxWidthProperty = LoadProperty("MaxWidth");
-                Metadata.AddPopularProperty(maxWidthProperty.DependencyProperty);
-                Assert.IsTrue(Metadata.IsPopularProperty(maxWidthProperty));
+                try {
+                    Metadata.AddPopularProperty(maxWidthProperty.DependencyProperty);
+                    Assert.IsTrue(Metadata.IsPopularProperty(maxWidthProperty));
+                } finally {
+                    ResetHashSet<DependencyProperty>("popularDependencyProperties");
+                }
             });
         }
 
@@ -163,8 +203,12 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var minHeightProperty = LoadProperty("MinHeight");
-                Metadata.AddPopularProperty(minHeightProperty.DeclaringType, minHeightProperty.Name);
-                Assert.IsTrue(Metadata.IsPopularProperty(minHeightProperty));
+                try {
+                    Metadata.AddPopularProperty(minHeightProperty.DeclaringType, minHeightProperty.Name);
+                    Assert.IsTrue(Metadata.IsPopularProperty(minHeightProperty));
+                } finally {
+                    ResetHashSet<string>("popularProperties");
+                }
             });
         }
 
@@ -182,11 +226,15 @@ namespace WinUIDesigner.DesignModel.Tests
         {
             WinUITestHost.Run(() => {
                 var maxHeightProperty = LoadProperty("MaxHeight");
-                Metadata.AddValueRange(maxHeightProperty.DependencyProperty, 0, 1000);
-                var range = Metadata.GetValueRange(maxHeightProperty);
-                Assert.IsNotNull(range);
-                Assert.AreEqual(0, range.Min);
-                Assert.AreEqual(1000, range.Max);
+                try {
+                    Metadata.AddValueRange(maxHeightProperty.DependencyProperty, 0, 1000);
+                    var range = Metadata.GetValueRange(maxHeightProperty);
+                    Assert.IsNotNull(range);
+                    Assert.AreEqual(0, range.Min);
+                    Assert.AreEqual(1000, range.Max);
+                } finally {
+                    ResetDictionary("ranges");
+                }
             });
         }
 
