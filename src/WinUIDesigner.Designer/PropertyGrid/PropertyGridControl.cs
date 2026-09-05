@@ -40,6 +40,9 @@ namespace WinUIDesigner.Designer.PropertyGrid
         static PropertyGridControl()
         {
             TextBoxEditor.Register();
+            BoolEditor.Register();
+            ComboBoxEditor.Register();
+            NumberEditor.Register();
         }
 
         readonly Category specialCategory = new Category("Special");

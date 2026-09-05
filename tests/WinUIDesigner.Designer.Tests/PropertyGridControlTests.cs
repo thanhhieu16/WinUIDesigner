@@ -83,21 +83,49 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
+        // Was keyed on Button's "Width" (a double) - proved the TextBox *fallback* path back when
+        // no numeric editor existed yet. Task 5's NumberEditor now legitimately claims every
+        // numeric CLR type (spec Decision - no carve-outs), so "Width" resolves to a NumberBox
+        // instead, and this test needs a property whose REFLECTED type is genuinely
+        // System.String to keep exercising the TextBox path: DesignItemProperty.TypeConverter is
+        // TypeDescriptor.GetConverter(ReturnType) (DesignItemProperty.cs:34-36) - for
+        // System.String that's System.ComponentModel.StringConverter, which overrides
+        // CanConvertFrom to explicitly return true for sourceType==typeof(string) (and the base
+        // TypeConverter.CanConvertTo already returns true whenever destinationType==typeof(string)
+        // regardless of subclass), so PropertyNode.hasStringConverter comes out true and
+        // ValueString's round-trip works. An object-typed property like Button.Content or .Tag
+        // would NOT work here even though it often holds a string at runtime: the *reflected*
+        // type is object, so TypeDescriptor.GetConverter(typeof(object)) returns the plain base
+        // TypeConverter, whose CanConvertFrom(typeof(string)) is false by default (confirmed
+        // empirically - swapping to Content threw/failed before this comment was written) -
+        // exactly the trap the plan's own review caught. Neither Button nor the shared Grid
+        // fixture (GridXaml/Load(), used by 4 other tests below) has any genuinely
+        // string-typed property, so this test loads its own single-control TextBox fixture
+        // (Text is System.String) rather than touching the shared fixture other tests depend on.
         [Test]
         public void EditingThroughTheTextBoxEditorRoundTripsThroughSetValueAndUndo()
         {
-            WinUITestHost.RunWithWindow(window => {
-                var (_, a, _) = Load(window);
-                var grid = new PropertyGridControl();
-                grid.SelectedItems = new[] { a };
+            const string TextBoxXaml =
+                "<TextBox xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" x:Name=\"T\" Text=\"a\" />";
 
-                var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Width");
+            WinUITestHost.RunWithWindow(window => {
+                var surface = new DesignSurface();
+                window.Content = surface;
+                using (var reader = XmlReader.Create(new StringReader(TextBoxXaml)))
+                    surface.LoadDesigner(reader, new XamlLoadSettings());
+                var item = surface.DesignContext.RootItem;
+
+                var grid = new PropertyGridControl();
+                grid.SelectedItems = new[] { item };
+
+                var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Text");
                 var textBox = (TextBox)node.Editor;
                 textBox.Text = "123";
                 RaiseLostFocus(textBox);
 
-                Assert.AreEqual(123.0, (double)((Button)a.Component).Width);
-                Assert.IsTrue(a.Services.GetService<UndoService>().CanUndo);
+                Assert.AreEqual("123", ((TextBox)item.Component).Text);
+                Assert.IsTrue(item.Services.GetService<UndoService>().CanUndo);
             });
         }
 
@@ -141,6 +169,98 @@ namespace WinUIDesigner.Designer.Tests
             // TextBoxEditor exposes CommitForTest as the same "Handle*-extracted, internal test
             // seam" pattern used throughout this codebase (e.g. DesignPanel.HandlePointerPressed).
             WinUIDesigner.Designer.PropertyGrid.Editors.TextBoxEditor.CommitForTest(textBox);
+        }
+
+        [Test]
+        public void ABoolPropertyGetsACheckBoxEditorThatRoundTripsThroughSetValue()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (_, a, _) = Load(window);
+                var grid = new PropertyGridControl();
+                grid.SelectedItems = new[] { a };
+
+                var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "IsEnabled");
+                var checkBox = (CheckBox)node.Editor;
+                Assert.IsTrue(checkBox.IsChecked == true, "IsEnabled defaults to true");
+
+                checkBox.IsChecked = false;
+                RaiseToggle(checkBox);
+
+                Assert.IsFalse(((Button)a.Component).IsEnabled);
+            });
+        }
+
+        [Test]
+        public void AnEnumPropertyGetsAComboBoxEditorPopulatedFromMetadataStandardValues()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (_, a, _) = Load(window);
+                var grid = new PropertyGridControl();
+                grid.SelectedItems = new[] { a };
+
+                var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Visibility");
+                var comboBox = (ComboBox)node.Editor;
+
+                CollectionAssert.Contains(((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList(), Microsoft.UI.Xaml.Visibility.Collapsed);
+
+                comboBox.SelectedItem = Microsoft.UI.Xaml.Visibility.Collapsed;
+                RaiseSelectionChanged(comboBox);
+
+                Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, ((Button)a.Component).Visibility);
+            });
+        }
+
+        [Test]
+        public void ANumericPropertyWithARegisteredRangeGetsANumberBoxEditorWithThatRange()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (_, a, _) = Load(window);
+                Metadata.AddValueRange(Microsoft.UI.Xaml.FrameworkElement.WidthProperty, 0, 500);
+                try {
+                    var grid = new PropertyGridControl();
+                    grid.SelectedItems = new[] { a };
+
+                    var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Width");
+                    var numberBox = (NumberBox)node.Editor;
+
+                    Assert.AreEqual(0, numberBox.Minimum);
+                    Assert.AreEqual(500, numberBox.Maximum);
+
+                    numberBox.Value = 200;
+                    RaiseNumberBoxValueChanged(numberBox);
+
+                    Assert.AreEqual(200.0, (double)((Button)a.Component).Width);
+                } finally {
+                    ResetMetadataValueRanges();
+                }
+            });
+        }
+
+        static void ResetMetadataValueRanges()
+        {
+            // Metadata.ranges is `static readonly` - SetValue-ing the field itself throws
+            // FieldAccessException once the type is initialized (confirmed empirically here;
+            // same class of incident as ResetMetadataPopularProperties above and this project's
+            // two prior readonly-removal reverts). Mutate the existing Dictionary in place via its
+            // non-generic IDictionary surface instead of replacing the field's reference.
+            var field = typeof(Metadata).GetField("ranges", BindingFlags.NonPublic | BindingFlags.Static);
+            var dictionary = (System.Collections.IDictionary)field.GetValue(null);
+            dictionary.Clear();
+        }
+
+        static void RaiseToggle(CheckBox checkBox)
+        {
+            WinUIDesigner.Designer.PropertyGrid.Editors.BoolEditor.CommitForTest(checkBox);
+        }
+
+        static void RaiseSelectionChanged(ComboBox comboBox)
+        {
+            WinUIDesigner.Designer.PropertyGrid.Editors.ComboBoxEditor.CommitForTest(comboBox);
+        }
+
+        static void RaiseNumberBoxValueChanged(NumberBox numberBox)
+        {
+            WinUIDesigner.Designer.PropertyGrid.Editors.NumberEditor.CommitForTest(numberBox);
         }
     }
 }
