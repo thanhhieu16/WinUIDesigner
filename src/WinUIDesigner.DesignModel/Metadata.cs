@@ -54,7 +54,7 @@ namespace WinUIDesigner.DesignModel
 
 		static readonly Dictionary<Type, List<object>> standardValues = new Dictionary<Type, List<object>>();
 		static readonly Dictionary<DependencyProperty, object[]> standardValuesForDependencyPropertys = new Dictionary<DependencyProperty, object[]>();
-		static readonly Dictionary<Type, List<NamedValue>> standardNamedValues = new Dictionary<Type, List<NamedValue>>();
+		static Dictionary<Type, List<NamedValue>> standardNamedValues = new Dictionary<Type, List<NamedValue>>();
 
 		public static void AddStandardValues(Type type, Type valuesContainer)
 		{
