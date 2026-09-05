@@ -161,12 +161,16 @@ existing call sites.
    `IsBrowsable(DesignItemProperty p)` returns `false` if *either* store
    matches: `p.DependencyProperty != null && dependencyPropertySet.Contains(p.DependencyProperty)`,
    or `stringSet.Contains(p.FullName)` (using the already-correct
-   `DesignItemProperty.FullName`, not `DependencyFullName`). Same pattern
-   for `AddPopularProperty`/`IsPopularProperty` (two sets, one check each)
-   and `AddValueRange`/`GetValueRange` (a `Dictionary<DependencyProperty, NumberRange>`
-   plus a `Dictionary<string, NumberRange>`, `GetValueRange` checks the
-   `DependencyProperty` dictionary first, then the string one). A property
-   registered via one overload is still found via a `DesignItemProperty`
+   `DesignItemProperty.FullName`, not `DependencyFullName`). Same
+   two-store pattern for `AddPopularProperty`/`IsPopularProperty` (both
+   have a `Type,string` overload in the reference too). `AddValueRange`
+   has no `Type,string` overload in the reference at all (only
+   `AddValueRange(DependencyProperty, double, double)`) — it needs only
+   the single `Dictionary<DependencyProperty, NumberRange>`, keyed
+   directly by the `DependencyProperty` object; `GetValueRange(DesignItemProperty p)`
+   checks it via `p.DependencyProperty` with no string fallback, since
+   nothing can populate one. A property registered via one overload is
+   still found via a `DesignItemProperty`
    lookup regardless of which overload registered it, since the lookup
    always checks both stores — the only thing lost versus the reference is
    cross-overload aliasing (registering by `Type,string` and separately
@@ -280,8 +284,11 @@ Two runtime chains gain a registry consultation:
   (a `DependencyProperty` registration found via a `DesignItemProperty`
   whose `.DependencyProperty` matches; a `Type,string` registration found
   via `.FullName`) plus a not-hidden case; same two-overload,
-  two-lookup-path shape for `AddPopularProperty`/`IsPopularProperty` and
-  `AddValueRange`/`GetValueRange` (per Decision 3a); `AddPopularControl` /
+  two-lookup-path shape for `AddPopularProperty`/`IsPopularProperty` (per
+  Decision 3a); `AddValueRange`/`GetValueRange` — single
+  `DependencyProperty`-keyed store only (no `Type,string` overload exists
+  to need a second one), a found case and a not-registered-returns-null
+  case; `AddPopularControl` /
   `GetPopularControls` / `IsPopularControl`;
   `DisablePlacement` / `IsPlacementDisabled`; `AddDefaultSize` /
   `GetDefaultSize` (exact-type hit, base-type-walk hit,
