@@ -79,7 +79,7 @@ namespace WinUIDesigner.Designer.Tests
         public void APlacementDisabledTypeDoesNotAttachDefaultPlacementBehavior()
         {
             WinUITestHost.RunWithWindow(window => {
-                Metadata.DisablePlacement(typeof(Microsoft.UI.Xaml.Controls.Button));
+                Metadata.DisablePlacement(typeof(Microsoft.UI.Xaml.Controls.Grid));
                 try {
                     var context = Load(ButtonInGridXaml);
                     window.Content = (Microsoft.UI.Xaml.UIElement)context.RootItem.View;
@@ -96,12 +96,13 @@ namespace WinUIDesigner.Designer.Tests
                     Assert.IsNull(PlacementOperation.GetPlacementBehavior(new[] { buttonItem }));
                 } finally {
                     // Metadata is process-wide static state (matches the reference's own design) -
-                    // undo the registration so later tests in this same process see a plain Button
+                    // undo the registration so later tests in this same process see a plain Grid
                     // again. There is no Metadata.EnablePlacement/RemoveDisabledPlacement (the
-                    // reference has none either) - a fresh HashSet swap is the only way back.
-                    typeof(Metadata)
-                        .GetField("placementDisabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
-                        .SetValue(null, new System.Collections.Generic.HashSet<System.Type>());
+                    // reference has none either) - clear the HashSet to reset it.
+                    var field = typeof(Metadata)
+                        .GetField("placementDisabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                    var hashSet = (System.Collections.Generic.HashSet<System.Type>)field.GetValue(null);
+                    hashSet.Clear();
                 }
             });
         }

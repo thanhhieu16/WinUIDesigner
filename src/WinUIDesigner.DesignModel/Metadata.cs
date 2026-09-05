@@ -230,7 +230,7 @@ namespace WinUIDesigner.DesignModel
 			return null;
 		}
 
-		static HashSet<Type> placementDisabled = new HashSet<Type>();
+		static readonly HashSet<Type> placementDisabled = new HashSet<Type>();
 
 		public static void DisablePlacement(Type type)
 		{
