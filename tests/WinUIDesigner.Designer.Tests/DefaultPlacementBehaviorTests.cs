@@ -71,5 +71,39 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(50, button.Height);
             });
         }
+
+        // Regression for the PlacementMetadata -> Metadata merge (Phase 4e Task 2): no existing
+        // test exercised the placement-disabled branch at all before this - PlacementMetadata had
+        // exactly one caller (this behavior) and zero direct test coverage.
+        [Test]
+        public void APlacementDisabledTypeDoesNotAttachDefaultPlacementBehavior()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                Metadata.DisablePlacement(typeof(Microsoft.UI.Xaml.Controls.Button));
+                try {
+                    var context = Load(ButtonInGridXaml);
+                    window.Content = (Microsoft.UI.Xaml.UIElement)context.RootItem.View;
+                    ((Microsoft.UI.Xaml.FrameworkElement)window.Content).UpdateLayout();
+
+                    var button = (Microsoft.UI.Xaml.Controls.Button)((Microsoft.UI.Xaml.Controls.Grid)context.RootItem.Component).Children[0];
+                    var buttonItem = context.Services.Component.GetDesignItem(button);
+
+                    // PlacementOperation.GetPlacementBehavior (PlacementOperation.cs:231) returns
+                    // parent.GetBehavior<IPlacementBehavior>() - null when no extension ever
+                    // called AddBehavior(typeof(IPlacementBehavior), ...), which is exactly what
+                    // DefaultPlacementBehavior.OnInitialized skips when Metadata.IsPlacementDisabled
+                    // is true. It does not throw.
+                    Assert.IsNull(PlacementOperation.GetPlacementBehavior(new[] { buttonItem }));
+                } finally {
+                    // Metadata is process-wide static state (matches the reference's own design) -
+                    // undo the registration so later tests in this same process see a plain Button
+                    // again. There is no Metadata.EnablePlacement/RemoveDisabledPlacement (the
+                    // reference has none either) - a fresh HashSet swap is the only way back.
+                    typeof(Metadata)
+                        .GetField("placementDisabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                        .SetValue(null, new System.Collections.Generic.HashSet<System.Type>());
+                }
+            });
+        }
     }
 }

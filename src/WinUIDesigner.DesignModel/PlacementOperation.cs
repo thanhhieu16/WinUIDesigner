@@ -228,6 +228,7 @@ namespace WinUIDesigner.DesignModel
                     moveableItems.Add(item);
                 }
             }
+            if (Metadata.IsPlacementDisabled(first.ComponentType)) return null;
             if (parent != null) return parent.GetBehavior<IPlacementBehavior>();
             if (possibleItems.Count() == 1) return first.GetBehavior<IRootPlacementBehavior>();
             return null;

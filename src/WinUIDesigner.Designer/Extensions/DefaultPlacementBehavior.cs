@@ -38,7 +38,7 @@ namespace WinUIDesigner.Designer.Extensions
         protected override void OnInitialized()
         {
             base.OnInitialized();
-            if (ExtendedItem.ContentProperty == null || PlacementMetadata.IsPlacementDisabled(ExtendedItem.ComponentType))
+            if (ExtendedItem.ContentProperty == null || Metadata.IsPlacementDisabled(ExtendedItem.ComponentType))
                 return;
             ExtendedItem.AddBehavior(typeof(IPlacementBehavior), this);
         }
