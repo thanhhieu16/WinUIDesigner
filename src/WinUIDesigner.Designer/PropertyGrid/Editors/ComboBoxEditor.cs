@@ -67,12 +67,12 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                 var node = comboBox.DataContext as PropertyNode;
                 if (node != null) {
                     syncingFromModel = true;
-                    comboBox.SelectedItem = node.DesignerValue;
+                    comboBox.SelectedValue = node.DesignerValue;
                     syncingFromModel = false;
                     node.PropertyChanged += (ps, pe) => {
                         if (pe.PropertyName == "DesignerValue") {
                             syncingFromModel = true;
-                            comboBox.SelectedItem = node.DesignerValue;
+                            comboBox.SelectedValue = node.DesignerValue;
                             syncingFromModel = false;
                         }
                     };
@@ -85,7 +85,7 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
         static void Commit(ComboBox comboBox)
         {
             var node = comboBox.DataContext as PropertyNode;
-            if (node != null) node.DesignerValue = comboBox.SelectedItem;
+            if (node != null) node.DesignerValue = comboBox.SelectedValue;
         }
 
         internal static void CommitForTest(ComboBox comboBox)

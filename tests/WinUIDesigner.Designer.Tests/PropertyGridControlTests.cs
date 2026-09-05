@@ -272,22 +272,23 @@ namespace WinUIDesigner.Designer.Tests
                     var items = ((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList();
                     Assert.AreEqual(2, items.Count, "AddDoubleNamedStandardValues reflects NamedBrushValues' 2 public static properties");
 
-                    // Metadata's NamedValue type is private, so items[x] is opaque here - but WinUI's own
-                    // Selector still resolves SelectedValue by evaluating SelectedValuePath ("Value") against
-                    // whichever opaque item is selected, confirming DisplayMemberPath/SelectedValuePath are
-                    // wired to the real Name/Value shape ComboBoxEditor.Create set up.
-                    // Deliberately NOT round-tripping through RaiseSelectionChanged/Commit here (unlike
-                    // the enum test above): Commit() does `node.DesignerValue = comboBox.SelectedItem`,
-                    // but in named mode SelectedItem is the opaque NamedValue wrapper, not its .Value -
-                    // confirmed empirically this silently nulls out the live property instead of writing
-                    // NamedBrushValues.First (a real, separate bug from what this fix round asked for -
-                    // reported to the coordinator rather than patched here). This assertion instead
-                    // verifies the part of the wiring ComboBoxEditor.Create actually controls: WinUI's
-                    // own Selector resolves SelectedValue by evaluating SelectedValuePath against
-                    // whichever opaque item is selected, proving DisplayMemberPath/SelectedValuePath are
-                    // correctly wired to the real Name/Value shape.
-                    comboBox.SelectedItem = items[0];
-                    Assert.AreSame(NamedBrushValues.First, comboBox.SelectedValue);
+                    // Full round-trip, fix round 2: Commit now reads comboBox.SelectedValue (not
+                    // .SelectedItem, which was the opaque NamedValue wrapper - the bug reported after
+                    // fix round 1). Setting SelectedValue directly to the real underlying value (not
+                    // the wrapper) exercises WinUI's Selector reverse lookup: it searches ItemsSource
+                    // for whichever item's "Value" (SelectedValuePath) matches and selects that item,
+                    // proving DisplayMemberPath/SelectedValuePath are correctly wired both directions.
+                    // This assignment alone already fires a real SelectionChanged synchronously (the
+                    // same mechanism the re-entrancy guard above protects against in the model->control
+                    // sync direction), which commits for real right here - deliberately NOT also calling
+                    // RaiseSelectionChanged/CommitForTest afterward (unlike the enum test above): that
+                    // would be a REDUNDANT second commit of the same live Brush instance, and
+                    // XamlModelProperty.SetValue rejects a second identical commit of a DependencyObject
+                    // ("already has a parent", confirmed empirically) once the first commit has already
+                    // parented it - unlike the enum test's boxed values, which never go through that
+                    // DesignItem-registration path at all.
+                    comboBox.SelectedValue = NamedBrushValues.First;
+                    Assert.AreSame(NamedBrushValues.First, ((Button)a.Component).Background);
                 } finally {
                     ResetMetadataNamedStandardValues();
                 }
