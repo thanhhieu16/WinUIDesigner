@@ -101,6 +101,10 @@ namespace WinUIDesigner.DesignModel.Xaml
 			get { return _property.PropertyTargetType; }
 		}
 
+		public override bool IsAttachedProperty {
+			get { return _property.IsAttached; }
+		}
+
 		public override string Category {
 			get { return _property.Category; }
 		}

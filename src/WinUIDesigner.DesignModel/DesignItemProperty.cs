@@ -53,6 +53,12 @@ namespace WinUIDesigner.DesignModel
         public abstract DependencyProperty DependencyProperty { get; }
         public virtual bool IsAdvanced { get { return false; } }
 
+        // No WinUI equivalent of System.Windows.DependencyPropertyDescriptor exists (confirmed,
+        // src/WinUIDesigner.XamlDom/XamlParser.cs:549-554) - this is how Phase 4f's PropertyGrid
+        // detects an attached property (e.g. Grid.Row) without it, for category bucketing and
+        // display-name qualification (spec Decisions 1-2).
+        public virtual bool IsAttachedProperty { get { return false; } }
+
         public string FullName {
             get { return DeclaringType.FullName + "." + Name; }
         }
