@@ -66,6 +66,16 @@ namespace WinUIDesigner.DesignModel.Xaml
             return site;
         }
 
+        public void SetDefaultPropertyValues(DesignItem designItem)
+        {
+            var values = Metadata.GetDefaultPropertyValues(designItem.ComponentType);
+            if (values != null) {
+                foreach (var value in values) {
+                    designItem.Properties[value.Key].SetValue(value.Value);
+                }
+            }
+        }
+
         public DesignItem RegisterComponentForDesigner(object component)
         {
             return RegisterComponentForDesigner(null, component);

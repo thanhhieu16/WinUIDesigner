@@ -29,6 +29,7 @@ namespace WinUIDesigner.DesignModel
         DesignItem GetDesignItem(object component, bool findByView);
         DesignItem RegisterComponentForDesigner(object component);
         DesignItem RegisterComponentForDesigner(DesignItem parent, object component);
+        void SetDefaultPropertyValues(DesignItem designItem);
 
         event EventHandler<DesignItemEventArgs> ComponentRegisteredAndAddedToContainer;
         event EventHandler<DesignItemEventArgs> ComponentRegistered;

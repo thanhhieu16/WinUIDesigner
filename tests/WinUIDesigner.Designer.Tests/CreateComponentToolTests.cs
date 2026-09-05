@@ -175,5 +175,62 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsFalse(surface.DesignContext.Services.GetService<UndoService>()?.CanUndo ?? false);
             });
         }
+
+        // Metadata.GetDefaultPropertyValues is process-wide static state (spec Decision 6) being
+        // registered here against the real, widely-shared Button type - other tests in this file
+        // (e.g. ADeclinedClickReportsItWasNotHandledSoOtherPanelSubscribersStillSeeIt, which also
+        // creates a Button) must not silently pick up "Default Text" depending on run order.
+        // There is no Metadata.RemoveDefaultPropertyValue (the reference has none either), so
+        // resetting means clearing the private dictionary via reflection.
+        //
+        // Deviation from the brief's literal code: the brief's version calls
+        // FieldInfo.SetValue(null, new Dictionary<...>()) to replace the field's value outright.
+        // That throws System.FieldAccessException ("Cannot set initonly static field
+        // 'standardPropertyValues' after type 'WinUIDesigner.DesignModel.Metadata' is
+        // initialized") - empirically confirmed against this repo's actual .NET 10 runtime -
+        // because Metadata.cs:264 declares the field `static readonly`, and the CLR refuses
+        // reflection writes that reassign an initonly static field post-initialization (unlike
+        // initonly *instance* fields, which reflection can mutate after construction). The field
+        // itself can't be reassigned, but the Dictionary object it already points to is fully
+        // mutable, so fetching that same reference via GetValue and calling Clear() on it
+        // achieves the identical end state (an empty registry) without ever attempting the
+        // disallowed field write. This keeps the fix entirely inside this test file - Metadata.cs
+        // is out of this task's scope and was not touched.
+        static void ResetDefaultPropertyValueRegistry()
+        {
+            var dictionary = (System.Collections.IDictionary)typeof(WinUIDesigner.DesignModel.Metadata)
+                .GetField("standardPropertyValues", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                .GetValue(null);
+            dictionary.Clear();
+        }
+
+        [Test]
+        public void CreatingAnItemWithRegisteredDefaultPropertyValuesAppliesThemToTheNewItem()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+                WinUIDesigner.DesignModel.Metadata.AddDefaultPropertyValue(
+                    typeof(Microsoft.UI.Xaml.Controls.Button), "Content", "Default Text");
+                try {
+                    var createdItem = CreateComponentTool.CreateItem(surface.DesignContext, typeof(Microsoft.UI.Xaml.Controls.Button), null);
+                    Assert.AreEqual("Default Text", ((Microsoft.UI.Xaml.Controls.Button)createdItem.View).Content);
+                } finally {
+                    ResetDefaultPropertyValueRegistry();
+                }
+            });
+        }
+
+        [Test]
+        public void CreatingAnItemOfATypeWithNoRegisteredDefaultPropertyValuesIsUnaffected()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = Load(window);
+
+                var createdItem = CreateComponentTool.CreateItem(surface.DesignContext, typeof(Microsoft.UI.Xaml.Controls.Canvas), null);
+
+                Assert.IsNotNull(createdItem);
+                Assert.IsInstanceOf<Microsoft.UI.Xaml.Controls.Canvas>(createdItem.View);
+            });
+        }
     }
 }

@@ -202,10 +202,7 @@ namespace WinUIDesigner.Designer.Services
 		{
 			var newInstance = context.Services.ExtensionManager.CreateInstanceWithCustomInstanceFactory(type, arguments);
 			var item = context.Services.Component.RegisterComponentForDesigner(newInstance);
-			// Reference also calls context.Services.Component.SetDefaultPropertyValues(item) here
-			// - IComponentService in this port has no such method (confirmed via grep across
-			// src/), so it's dropped. ApplyDefaultInitializers still runs (ExtensionManager.cs:283
-			// - exists, previously had zero callers anywhere in this port).
+			context.Services.Component.SetDefaultPropertyValues(item);
 			context.Services.ExtensionManager.ApplyDefaultInitializers(item);
 			return item;
 		}
