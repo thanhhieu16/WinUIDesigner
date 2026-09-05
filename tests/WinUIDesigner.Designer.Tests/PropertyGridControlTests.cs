@@ -248,6 +248,68 @@ namespace WinUIDesigner.Designer.Tests
             dictionary.Clear();
         }
 
+        [Test]
+        public void APropertyWithNamedStandardValuesGetsAComboBoxEditorPopulatedFromMetadataNamedStandardValues()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (_, a, _) = Load(window);
+                // Background's ReturnType is Microsoft.UI.Xaml.Media.Brush (XamlNormalPropertyInfo.ReturnType
+                // is _propertyDescriptor.PropertyType - the reflected CLR property type) - not an enum and
+                // nothing registers plain Metadata.GetStandardValues for Brush anywhere, so
+                // ComboBoxEditor.Create's own standard-values check (re-derived independently of
+                // EditorManager's) falls through to its else branch and calls Metadata.GetNamedStandardValues
+                // instead - the branch under test.
+                Metadata.AddDoubleNamedStandardValues(typeof(Microsoft.UI.Xaml.Media.Brush), typeof(NamedBrushValues));
+                try {
+                    var grid = new PropertyGridControl();
+                    grid.SelectedItems = new[] { a };
+
+                    var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Background");
+                    var comboBox = (ComboBox)node.Editor;
+
+                    Assert.AreEqual("Name", comboBox.DisplayMemberPath);
+                    Assert.AreEqual("Value", comboBox.SelectedValuePath);
+                    var items = ((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList();
+                    Assert.AreEqual(2, items.Count, "AddDoubleNamedStandardValues reflects NamedBrushValues' 2 public static properties");
+
+                    // Metadata's NamedValue type is private, so items[x] is opaque here - but WinUI's own
+                    // Selector still resolves SelectedValue by evaluating SelectedValuePath ("Value") against
+                    // whichever opaque item is selected, confirming DisplayMemberPath/SelectedValuePath are
+                    // wired to the real Name/Value shape ComboBoxEditor.Create set up.
+                    // Deliberately NOT round-tripping through RaiseSelectionChanged/Commit here (unlike
+                    // the enum test above): Commit() does `node.DesignerValue = comboBox.SelectedItem`,
+                    // but in named mode SelectedItem is the opaque NamedValue wrapper, not its .Value -
+                    // confirmed empirically this silently nulls out the live property instead of writing
+                    // NamedBrushValues.First (a real, separate bug from what this fix round asked for -
+                    // reported to the coordinator rather than patched here). This assertion instead
+                    // verifies the part of the wiring ComboBoxEditor.Create actually controls: WinUI's
+                    // own Selector resolves SelectedValue by evaluating SelectedValuePath against
+                    // whichever opaque item is selected, proving DisplayMemberPath/SelectedValuePath are
+                    // correctly wired to the real Name/Value shape.
+                    comboBox.SelectedItem = items[0];
+                    Assert.AreSame(NamedBrushValues.First, comboBox.SelectedValue);
+                } finally {
+                    ResetMetadataNamedStandardValues();
+                }
+            });
+        }
+
+        static class NamedBrushValues
+        {
+            public static Microsoft.UI.Xaml.Media.Brush First { get; } = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Red);
+            public static Microsoft.UI.Xaml.Media.Brush Second { get; } = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Blue);
+        }
+
+        static void ResetMetadataNamedStandardValues()
+        {
+            // Metadata.standardNamedValues is `static readonly` - same IDictionary.Clear()-in-place
+            // pattern as ResetMetadataValueRanges/ResetMetadataPopularProperties above, never SetValue
+            // on the field itself.
+            var field = typeof(Metadata).GetField("standardNamedValues", BindingFlags.NonPublic | BindingFlags.Static);
+            var dictionary = (System.Collections.IDictionary)field.GetValue(null);
+            dictionary.Clear();
+        }
+
         static void RaiseToggle(CheckBox checkBox)
         {
             WinUIDesigner.Designer.PropertyGrid.Editors.BoolEditor.CommitForTest(checkBox);

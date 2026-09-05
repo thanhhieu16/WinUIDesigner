@@ -52,6 +52,11 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
         {
             var numberBox = new NumberBox();
 
+            // Re-entrancy guard: see BoolEditor.Create for why - NumberBox.ValueChanged fires
+            // synchronously on any Value assignment, including the model->control sync below,
+            // which would otherwise spuriously Commit() back into the model before any real user
+            // interaction.
+            bool syncingFromModel = false;
             numberBox.DataContextChanged += (s, e) => {
                 var node = numberBox.DataContext as PropertyNode;
                 if (node != null) {
@@ -60,13 +65,19 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                         numberBox.Minimum = nodeRange.Min;
                         numberBox.Maximum = nodeRange.Max;
                     }
+                    syncingFromModel = true;
                     numberBox.Value = ToDouble(node.DesignerValue);
+                    syncingFromModel = false;
                     node.PropertyChanged += (ps, pe) => {
-                        if (pe.PropertyName == "DesignerValue") numberBox.Value = ToDouble(node.DesignerValue);
+                        if (pe.PropertyName == "DesignerValue") {
+                            syncingFromModel = true;
+                            numberBox.Value = ToDouble(node.DesignerValue);
+                            syncingFromModel = false;
+                        }
                     };
                 }
             };
-            numberBox.ValueChanged += (s, e) => Commit(numberBox);
+            numberBox.ValueChanged += (s, e) => { if (!syncingFromModel) Commit(numberBox); };
             return numberBox;
         }
 

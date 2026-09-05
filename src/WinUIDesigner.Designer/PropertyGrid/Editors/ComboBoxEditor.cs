@@ -58,16 +58,27 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
                 comboBox.SelectedValuePath = "Value";
             }
 
+            // Re-entrancy guard: see BoolEditor.Create for why - ComboBox.SelectionChanged fires
+            // synchronously on any SelectedItem assignment, including the model->control sync
+            // below, which would otherwise spuriously Commit() back into the model before any real
+            // user interaction.
+            bool syncingFromModel = false;
             comboBox.DataContextChanged += (s, e) => {
                 var node = comboBox.DataContext as PropertyNode;
                 if (node != null) {
+                    syncingFromModel = true;
                     comboBox.SelectedItem = node.DesignerValue;
+                    syncingFromModel = false;
                     node.PropertyChanged += (ps, pe) => {
-                        if (pe.PropertyName == "DesignerValue") comboBox.SelectedItem = node.DesignerValue;
+                        if (pe.PropertyName == "DesignerValue") {
+                            syncingFromModel = true;
+                            comboBox.SelectedItem = node.DesignerValue;
+                            syncingFromModel = false;
+                        }
                     };
                 }
             };
-            comboBox.SelectionChanged += (s, e) => Commit(comboBox);
+            comboBox.SelectionChanged += (s, e) => { if (!syncingFromModel) Commit(comboBox); };
             return comboBox;
         }
 

@@ -35,17 +35,31 @@ namespace WinUIDesigner.Designer.PropertyGrid.Editors
         public static FrameworkElement Create(DesignItemProperty property)
         {
             var checkBox = new CheckBox();
+            // Re-entrancy guard: WinUI DependencyProperty changed events (Checked/Unchecked) fire
+            // synchronously on SetValue regardless of whether the change came from code or user
+            // interaction, so syncing the model's current value into checkBox.IsChecked below would
+            // otherwise immediately re-fire Checked/Unchecked and spuriously Commit() back into the
+            // model (undo-stack pollution the instant an editor is shown, before any real user
+            // interaction). TextBoxEditor doesn't need this because LostFocus only fires from real
+            // focus loss, never from a value assignment.
+            bool syncingFromModel = false;
             checkBox.DataContextChanged += (s, e) => {
                 var node = checkBox.DataContext as PropertyNode;
                 if (node != null) {
+                    syncingFromModel = true;
                     checkBox.IsChecked = node.DesignerValue as bool?;
+                    syncingFromModel = false;
                     node.PropertyChanged += (ps, pe) => {
-                        if (pe.PropertyName == "DesignerValue") checkBox.IsChecked = node.DesignerValue as bool?;
+                        if (pe.PropertyName == "DesignerValue") {
+                            syncingFromModel = true;
+                            checkBox.IsChecked = node.DesignerValue as bool?;
+                            syncingFromModel = false;
+                        }
                     };
                 }
             };
-            checkBox.Checked += (s, e) => Commit(checkBox);
-            checkBox.Unchecked += (s, e) => Commit(checkBox);
+            checkBox.Checked += (s, e) => { if (!syncingFromModel) Commit(checkBox); };
+            checkBox.Unchecked += (s, e) => { if (!syncingFromModel) Commit(checkBox); };
             return checkBox;
         }
 
