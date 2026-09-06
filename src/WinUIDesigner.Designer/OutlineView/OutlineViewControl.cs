@@ -305,6 +305,19 @@ namespace WinUIDesigner.Designer.OutlineView
             if (items.Count == 0)
                 return false;
 
+            // OutlineNodeBase.CanInsert deliberately has no cycle guard (spec Decision 14 - a
+            // container reports it can accept its own descendant, matching the reference). Left
+            // unchecked, dropping a node onto one of its own descendant rows - an ordinary
+            // gesture, since children render directly below and indented under their parent and
+            // are expanded by default - would let Insert Remove() the dragged node from its
+            // parent and then insert it back into its own descendant's content while that
+            // descendant is still among the dragged node's own Children: a live cycle. Rebuild()
+            // below then walks node.Children recursively and recurses forever. Decision 14 itself
+            // is not touched (Task 6's test pinning it must keep passing); the veto belongs here,
+            // in the drag layer, not the model layer.
+            if (items.Any(n => IsSelfOrDescendant(target, n)))
+                return false;
+
             if (!target.CanInsert(items, after, copy))
                 return false;
 
@@ -316,6 +329,20 @@ namespace WinUIDesigner.Designer.OutlineView
             }
             Rebuild();
             return true;
+        }
+
+        /// <summary>True when candidate is dragged itself, or is found anywhere within dragged's
+        /// own Children subtree - the cycle case Decision 14 leaves CanInsert free to allow, and
+        /// that TryApplyDrop vetoes instead.</summary>
+        static bool IsSelfOrDescendant(IOutlineNode candidate, IOutlineNode dragged)
+        {
+            if (candidate == dragged)
+                return true;
+            foreach (var child in dragged.Children) {
+                if (IsSelfOrDescendant(candidate, child))
+                    return true;
+            }
+            return false;
         }
 
         void Node_ChildrenChanged(object sender, NotifyCollectionChangedEventArgs e)

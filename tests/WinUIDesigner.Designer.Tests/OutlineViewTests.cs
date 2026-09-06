@@ -593,5 +593,38 @@ namespace WinUIDesigner.Designer.Tests
                 window.Content = null;
             });
         }
+
+        [Test]
+        public void DroppingOntoADescendantOfTheDraggedNodeDoesNothing()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                // GridXaml's Grid > StackPanel > Button gives an ancestor/descendant pair without
+                // a new fixture. CanInsertReflectsWhetherTheTargetCanAcceptTheItems already pins
+                // that CanInsert itself has no cycle guard (Decision 14) and reports true for
+                // exactly this shape, so this test is only meaningful if TryApplyDrop vetoes it
+                // independently of CanInsert.
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var stackPanelNode = control.Root.Children[1];
+                var stackPanelButtonNode = stackPanelNode.Children[0];
+
+                bool applied = control.TryApplyDrop(stackPanelButtonNode,
+                    new List<IOutlineNode> { stackPanelNode }, null, false);
+
+                Assert.IsFalse(applied,
+                    "dropping a node onto its own descendant must be rejected to avoid a cycle");
+                Assert.AreEqual(2, grid.ContentProperty.CollectionElements.Count);
+                Assert.AreEqual(1, stackPanel.ContentProperty.CollectionElements.Count);
+
+                window.Content = null;
+            });
+        }
     }
 }
