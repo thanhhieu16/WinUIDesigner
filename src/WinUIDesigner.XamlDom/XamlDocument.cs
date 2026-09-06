@@ -45,7 +45,7 @@ namespace WinUIDesigner.XamlDom
 		/// </remarks>
 		private static Dictionary<Windows.UI.Color, string> _colorBrushDictionary;
 
-		static Dictionary<Windows.UI.Color, string> ColorBrushDictionary
+		internal static Dictionary<Windows.UI.Color, string> ColorBrushDictionary
 		{
 			get
 			{
