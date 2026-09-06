@@ -79,10 +79,14 @@ namespace WinUIDesigner.Designer.Tests
         [Test]
         public void ArrangeInGridSetsMarginLeftWhenNotRightAligned()
         {
+            // Two items, so arranging left actually moves one: both align to the leftmost edge
+            // (5), which is a no-op for A and a real move for B. With a single item this asserted
+            // nothing - and passed only while Margin failed to parse and both edges were 0.
             const string gridXaml =
                 "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
                 "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
-                "<Button x:Name=\"A\" Width=\"20\" Height=\"20\" HorizontalAlignment=\"Left\" Margin=\"5,5,0,0\" /></Grid>";
+                "<Button x:Name=\"A\" Width=\"20\" Height=\"20\" HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" Margin=\"5,5,0,0\" />" +
+                "<Button x:Name=\"B\" Width=\"20\" Height=\"20\" HorizontalAlignment=\"Left\" VerticalAlignment=\"Top\" Margin=\"40,5,0,0\" /></Grid>";
             WinUITestHost.RunWithWindow(window => {
                 var settings = new XamlLoadSettings();
                 settings.DesignerAssemblies.Add(typeof(DefaultPlacementBehavior).Assembly);
@@ -96,11 +100,18 @@ namespace WinUIDesigner.Designer.Tests
                 ((Microsoft.UI.Xaml.FrameworkElement)window.Content).UpdateLayout();
                 var grid = (Microsoft.UI.Xaml.Controls.Grid)context.RootItem.Component;
                 var aItem = context.Services.Component.GetDesignItem(grid.Children[0]);
+                var bItem = context.Services.Component.GetDesignItem(grid.Children[1]);
 
-                WinUIDesigner.Designer.ModelTools.ArrangeItems(new[] { aItem }, ArrangeDirection.Left);
+                // Precondition: the margins the XAML asked for actually reached the elements.
+                Assert.AreEqual(5.0, aItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>().Left);
+                Assert.AreEqual(40.0, bItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>().Left);
 
-                var margin = aItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>();
-                Assert.AreEqual(0.0, margin.Left);
+                WinUIDesigner.Designer.ModelTools.ArrangeItems(new[] { aItem, bItem }, ArrangeDirection.Left);
+
+                Assert.AreEqual(5.0, bItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>().Left,
+                    "B did not move to the leftmost edge");
+                Assert.AreEqual(5.0, aItem.Properties.GetProperty("Margin").GetConvertedValueOnInstance<Microsoft.UI.Xaml.Thickness>().Left,
+                    "A, already leftmost, should not have moved");
             });
         }
     }

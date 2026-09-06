@@ -15,20 +15,13 @@ namespace WinUIDesigner.Designer.Tests
     [TestFixture]
     public class PolyLineHandlerExtensionTests
     {
-        // NOTE: no Points="..." attribute here (deliberately, see Load() below) - this port's
-        // XamlDom layer resolves a property's TypeConverter via
-        // System.ComponentModel.TypeDescriptor.GetConverter(propertyType) (XamlPropertyInfo.cs),
-        // and WinUI's Microsoft.UI.Xaml.Media.PointCollection carries no
-        // System.ComponentModel.TypeConverterAttribute (unlike WPF's, which had
-        // PointCollectionConverter) - so TypeDescriptor.GetConverter falls back to the base
-        // TypeConverter, whose ConvertFromString throws NotSupportedException. That exception is
-        // caught and merely Debug.WriteLine-logged by XamlProperty.UpdateValueOnInstance (not
-        // rethrown), so a Points="..." attribute silently leaves Polyline.Points at its default
-        // empty collection - confirmed empirically (all 3 tests initially failed with
-        // PointThumbs.Count == 0 before this fixture change). Matches this phase's own documented
-        // gap (spec's WinUI API surface table: "PointCollectionConverter... this port's XamlDom
-        // layer serializes the object graph itself; no string mini-language conversion needed") -
-        // that note covers serialization; this is the same limitation on the parse side.
+        // NOTE: no Points="..." attribute here. Historically this was a workaround:
+        // Microsoft.UI.Xaml.Media.PointCollection carries no TypeConverterAttribute in this WinUI
+        // SDK (unlike WPF's, which had PointCollectionConverter), so a Points attribute silently
+        // left Polyline.Points empty. That gap is closed - XamlValueConverter converts
+        // PointCollection through WinUI's own XamlReader - but this fixture keeps building its
+        // points in code and handing them to SetValue, the same path PolyLineHandlerExtension
+        // itself uses.
         const string PolylineInCanvasXaml =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"400\" Height=\"400\">" +

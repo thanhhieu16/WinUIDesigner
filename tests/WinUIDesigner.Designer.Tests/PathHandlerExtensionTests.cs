@@ -14,25 +14,15 @@ namespace WinUIDesigner.Designer.Tests
     [TestFixture]
     public class PathHandlerExtensionTests
     {
-        // NOTE: no <Path.Data> here (deliberately, see Load() below). The brief's fixture used
-        // <PathFigure StartPoint="10,10"><LineSegment Point="50,10" />...  - those are
-        // Windows.Foundation.Point-typed XAML attributes, and this port's XamlDom layer resolves a
-        // property's converter via System.ComponentModel.TypeDescriptor.GetConverter(ReturnType)
-        // (XamlPropertyInfo.cs:177). Windows.Foundation.Point carries no
-        // System.ComponentModel.TypeConverterAttribute in this WinUI SDK, so GetConverter falls
-        // back to the base TypeConverter, whose ConvertFromString throws NotSupportedException -
-        // and XamlProperty.UpdateValueOnInstance swallows that into a Debug.WriteLine
-        // (XamlProperty.cs:269-271) rather than rethrowing. Result: the element tree
-        // (PathGeometry/PathFigure/2x LineSegment) parses fine but every Point-typed attribute
-        // silently stays at its (0,0) default. Confirmed empirically with a throwaway probe:
-        //   TypeDescriptor.GetConverter(typeof(Windows.Foundation.Point))
-        //     => System.ComponentModel.TypeConverter, CanConvertFrom(string) == False,
-        //        ConvertFromString("10,10") => NotSupportedException,
-        //        typeof(Point).GetCustomAttributes(typeof(TypeConverterAttribute), true).Length == 0
-        // and by parsing the brief's own fixture: StartPoint 0,0 and both LineSegment.Point 0,0.
-        // Same class of gap Task 9 hit with Microsoft.UI.Xaml.Media.PointCollection, same
-        // workaround: build the object graph in code and hand it to SetValue as a typed CLR
-        // object.
+        // NOTE: no <Path.Data> here. Historically this was a workaround: Windows.Foundation.Point
+        // carries no TypeConverterAttribute in this WinUI SDK, so XamlDom's converter lookup fell
+        // back to the base TypeConverter, whose ConvertFromString throws - and
+        // XamlProperty.UpdateValueOnInstance swallowed it, leaving every Point-typed attribute at
+        // (0,0). That gap is closed: XamlValueConverter now converts Point and Geometry through
+        // WinUI's own XamlReader (see the XamlDom value-conversion Phase A spec). The fixture
+        // still builds its geometry as a CLR object graph and hands it to SetValue, because that
+        // is the same typed-object path SaveGeometry itself uses and the test is about the
+        // extension, not about parsing.
         const string PathInCanvasXaml =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"400\" Height=\"400\">" +

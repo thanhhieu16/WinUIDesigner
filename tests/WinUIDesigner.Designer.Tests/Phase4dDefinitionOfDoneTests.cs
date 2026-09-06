@@ -217,21 +217,13 @@ namespace WinUIDesigner.Designer.Tests
         [Test]
         public void PolyLineHandlerExtensionsInternalIndexStaysInSyncWithAdornerPanelChildren()
         {
-            // Corrected from the brief's version (see task-14-report.md, "Required correction 2"):
-            // the brief's inline XAML used a Points="10,10 50,10 50,50 10,50" string attribute,
-            // which hits the exact same PointCollection-has-no-TypeConverterAttribute bug an
-            // earlier task in this plan already found and fixed for Polyline.Points fixtures
-            // (confirmed via direct WinUI SDK reflection in that task's review -
-            // Microsoft.UI.Xaml.Media.PointCollection carries no TypeConverterAttribute in this
-            // SDK, so XamlProperty.UpdateValueOnInstance's string-to-object conversion silently
-            // fails and swallows the failure - see PolyLineHandlerExtensionTests.cs's own fixture
-            // comment for the full trace). Loaded via surface.LoadDesigner(...) with the brief's
-            // literal XAML, polyline.Points would end up empty and extension.PointThumbs[1] would
-            // throw ArgumentOutOfRangeException before this test's real assertions ever ran.
-            //
-            // Fixed by loading the XAML without a Points attribute (still parses structurally
-            // fine), then setting Points via the DesignItem property API - the same SetValue(object)
-            // path PolyLineHandlerExtension itself uses - BEFORE selection, so
+            // Historically the brief's inline XAML used a Points="10,10 50,10 50,50 10,50" string
+            // attribute, which hit the PointCollection-has-no-TypeConverterAttribute gap: the
+            // conversion failed silently, polyline.Points ended up empty, and
+            // extension.PointThumbs[1] threw ArgumentOutOfRangeException before the real
+            // assertions ran. That gap is closed by XamlValueConverter. This test still sets
+            // Points through the DesignItem property API - the same SetValue(object) path
+            // PolyLineHandlerExtension itself uses - BEFORE selection, so
             // PolyLineHandlerExtension.OnInitialized (which runs when
             // OnlyOneItemSelectedExtensionServer attaches the extension on selection) sees the 4
             // points already in place.

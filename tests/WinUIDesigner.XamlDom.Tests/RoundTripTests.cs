@@ -61,6 +61,12 @@ namespace WinUIDesigner.XamlDom.Tests
 				Assert.IsInstanceOf<SolidColorBrush>(((Button)button.Instance).Background,
 					"{StaticResource AccentBrush} on Button.Background did not resolve against the ancestor Grid.Resources entry");
 
+				// The resource's own Color="Blue" is a Windows.UI.Color-typed attribute. Before
+				// Phase A's value conversion it parsed to transparent, so the brush resolved but
+				// carried no colour - the assertion above passed while the document rendered wrong.
+				Assert.AreEqual(Microsoft.UI.Colors.Blue, ((SolidColorBrush)((Button)button.Instance).Background).Color,
+					"SolidColorBrush.Color did not parse from the sample document");
+
 				var sb = new StringBuilder();
 				using (var writer = XmlWriter.Create(sb, new XmlWriterSettings { OmitXmlDeclaration = true }))
 					doc.Save(writer);

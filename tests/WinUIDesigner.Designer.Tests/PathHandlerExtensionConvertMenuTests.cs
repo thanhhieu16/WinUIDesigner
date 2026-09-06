@@ -15,18 +15,12 @@ namespace WinUIDesigner.Designer.Tests
     [TestFixture]
     public class PathHandlerExtensionConvertMenuTests
     {
-        // NOTE: no <Path.Data> in the XAML, deliberately - the same workaround Tasks 9 and 11 both
-        // landed on, and re-confirmed empirically for this task's own fixture before the change.
-        // The brief's fixture used <PathFigure StartPoint="10,10"><LineSegment Point="50,10" />,
-        // and those Windows.Foundation.Point-typed XAML attributes silently parse to (0,0) in this
-        // port: XamlPropertyInfo resolves converters through TypeDescriptor.GetConverter(ReturnType)
-        // (XamlPropertyInfo.cs:177), Windows.Foundation.Point carries no TypeConverterAttribute, so
-        // the base TypeConverter's ConvertFromString throws NotSupportedException, which
-        // XamlProperty.UpdateValueOnInstance swallows into a Debug.WriteLine (XamlProperty.cs:269-271).
-        // Measured with a throwaway probe over the brief's exact fixture string:
-        //   PROBE StartPoint=0,0  LineSegment.Point=0,0
-        // Every fixture below therefore builds its PathGeometry as a real CLR object graph and hands
-        // it to Properties["Data"].SetValue - the same typed-object path SaveGeometry itself uses.
+        // NOTE: no <Path.Data> in the XAML. Historically this was a workaround for
+        // Windows.Foundation.Point-typed attributes silently parsing to (0,0) - see
+        // PathHandlerExtensionTests for the full history. That gap is closed by
+        // XamlValueConverter; the fixtures still build their PathGeometry as a real CLR object
+        // graph and hand it to Properties["Data"].SetValue, the same typed-object path
+        // SaveGeometry uses.
         const string PathInCanvasXaml =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"400\" Height=\"400\">" +

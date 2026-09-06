@@ -431,5 +431,128 @@ namespace WinUIDesigner.XamlDom.Tests
                 }
             });
         }
+
+        // ---- Document level: the converter is only useful if XamlParser actually reaches it.
+
+        const string PresentationNs = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        [Test]
+        public void ParsesMarginFromARealDocument()
+        {
+            WinUITestHost.Run(() => {
+                var doc = XamlParser.Parse(new System.IO.StringReader(
+                    "<Grid xmlns='" + PresentationNs + "' Margin='4,5,6,7'/>"));
+                var margin = ((Microsoft.UI.Xaml.Controls.Grid)doc.RootInstance).Margin;
+                Assert.AreEqual(4.0, margin.Left);
+                Assert.AreEqual(5.0, margin.Top);
+                Assert.AreEqual(6.0, margin.Right);
+                Assert.AreEqual(7.0, margin.Bottom);
+            });
+        }
+
+        [Test]
+        public void ParsesBackgroundFromARealDocument()
+        {
+            WinUITestHost.Run(() => {
+                var doc = XamlParser.Parse(new System.IO.StringReader(
+                    "<Grid xmlns='" + PresentationNs + "' Background='#FF102030'/>"));
+                var brush = ((Microsoft.UI.Xaml.Controls.Grid)doc.RootInstance).Background
+                    as Microsoft.UI.Xaml.Media.SolidColorBrush;
+                Assert.IsNotNull(brush, "Background did not parse to a SolidColorBrush");
+                Assert.AreEqual(0x10, brush.Color.R);
+                Assert.AreEqual(0x30, brush.Color.B);
+            });
+        }
+
+        [Test]
+        public void ParsesGridStarSizingFromARealDocument()
+        {
+            WinUITestHost.Run(() => {
+                var doc = XamlParser.Parse(new System.IO.StringReader(
+                    "<Grid xmlns='" + PresentationNs + "'><Grid.ColumnDefinitions>" +
+                    "<ColumnDefinition Width='2*'/><ColumnDefinition Width='Auto'/>" +
+                    "</Grid.ColumnDefinitions></Grid>"));
+                var grid = (Microsoft.UI.Xaml.Controls.Grid)doc.RootInstance;
+                Assert.AreEqual(GridUnitType.Star, grid.ColumnDefinitions[0].Width.GridUnitType);
+                Assert.AreEqual(2.0, grid.ColumnDefinitions[0].Width.Value);
+                Assert.AreEqual(GridUnitType.Auto, grid.ColumnDefinitions[1].Width.GridUnitType);
+            });
+        }
+
+        [Test]
+        public void ParsesShapeGeometryFromARealDocument()
+        {
+            WinUITestHost.Run(() => {
+                var polyline = XamlParser.Parse(new System.IO.StringReader(
+                    "<Polyline xmlns='" + PresentationNs + "' Points='1,2 3,4 5,6'/>"));
+                Assert.AreEqual(3, ((Microsoft.UI.Xaml.Shapes.Polyline)polyline.RootInstance).Points.Count);
+
+                var path = XamlParser.Parse(new System.IO.StringReader(
+                    "<Path xmlns='" + PresentationNs + "' Data='M0,0 L10,10 Z'/>"));
+                Assert.IsInstanceOf<Microsoft.UI.Xaml.Media.PathGeometry>(
+                    ((Microsoft.UI.Xaml.Shapes.Path)path.RootInstance).Data);
+            });
+        }
+
+        // ---- Guards: the three pre-existing GetCustomTypeConverter entries must still win.
+        // Both object and Type report CanConvertFrom(string) == false, so a rule that consulted
+        // the host table first would displace them and break conversions that work today.
+
+        [Test]
+        public void StillTreatsAnObjectTypedPropertyAsAString()
+        {
+            WinUITestHost.Run(() => {
+                var doc = XamlParser.Parse(new System.IO.StringReader(
+                    "<Button xmlns='" + PresentationNs + "' Content='hi'/>"));
+                Assert.AreEqual("hi", ((Microsoft.UI.Xaml.Controls.Button)doc.RootInstance).Content);
+            });
+        }
+
+        [Test]
+        public void KeepsThePreExistingCustomConverterEntriesAheadOfTheHostTable()
+        {
+            // Asserted against GetCustomTypeConverter directly rather than through a document,
+            // because this is exactly what the registration changes and the assertion cannot then
+            // fail for an unrelated parsing reason.
+            Assert.AreSame(XamlNormalPropertyInfo.StringTypeConverter,
+                XamlNormalPropertyInfo.GetCustomTypeConverter(typeof(object)));
+            Assert.AreEqual("TypeTypeConverter",
+                XamlNormalPropertyInfo.GetCustomTypeConverter(typeof(Type)).GetType().Name);
+            Assert.AreEqual("DependencyPropertyConverter",
+                XamlNormalPropertyInfo.GetCustomTypeConverter(typeof(DependencyProperty)).GetType().Name);
+        }
+
+        [Test]
+        public void LeavesEnumAndPrimitiveConversionsAlone()
+        {
+            WinUITestHost.Run(() => {
+                var doc = XamlParser.Parse(new System.IO.StringReader(
+                    "<Grid xmlns='" + PresentationNs + "' Width='123' HorizontalAlignment='Center'/>"));
+                var grid = (Microsoft.UI.Xaml.Controls.Grid)doc.RootInstance;
+                Assert.AreEqual(123.0, grid.Width);
+                Assert.AreEqual(HorizontalAlignment.Center, grid.HorizontalAlignment);
+            });
+        }
+
+        [Test]
+        public void OpeningARealDocumentStaysWithinItsTimeBudget()
+        {
+            // Per-attribute conversion costs ~0.06-0.10 ms, roughly 5-9x a single bulk parse of
+            // the same file. This pins that the cost stays a fixed overhead rather than growing
+            // into something a user would notice on open.
+            WinUITestHost.Run(() => {
+                var xaml = System.IO.File.ReadAllText(System.IO.Path.Combine(
+                    TestContext.CurrentContext.TestDirectory, "SampleWindow.xaml"));
+
+                XamlParser.Parse(new System.IO.StringReader(xaml)); // warm up
+
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                XamlParser.Parse(new System.IO.StringReader(xaml));
+                stopwatch.Stop();
+
+                Assert.Less(stopwatch.ElapsedMilliseconds, 250,
+                    "Parsing SampleWindow.xaml took " + stopwatch.ElapsedMilliseconds + " ms");
+            });
+        }
     }
 }

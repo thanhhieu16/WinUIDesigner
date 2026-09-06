@@ -350,7 +350,10 @@ namespace WinUIDesigner.XamlDom
 			else if (propertyType == typeof(DependencyProperty))
 				return DependencyPropertyConverter.Instance;
 			else
-				return null;
+				// Order matters: object and Type both report CanConvertFrom(string) == false, so
+				// consulting the host table first would displace the two entries above and break
+				// conversions that already work.
+				return XamlValueConverter.TryCreate(propertyType);
 		}
 
 		sealed class TypeTypeConverter : TypeConverter
