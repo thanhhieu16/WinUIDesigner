@@ -80,6 +80,12 @@ namespace WinUIDesigner.XamlDom
 				return XamlDocument.ColorBrushDictionary.TryGetValue(color, out name) ? name : Hex(color);
 			});
 
+			// The !string.IsNullOrEmpty(Source) clause is defensive and currently unreachable: a
+			// FontFamily with an empty Source cannot be constructed on this SDK at all - measured,
+			// new FontFamily("") throws ArgumentException, and XamlReader.Load refuses "" too (see
+			// ValueFormattingTests.RefusesInstancesItCannotFormatFaithfully). There is no live
+			// instance to write a test against, so this clause is verified by inspection rather
+			// than by a test.
 			Add(table, typeof(FontFamily),
 				v => v is FontFamily && !string.IsNullOrEmpty(((FontFamily)v).Source),
 				v => ((FontFamily)v).Source);

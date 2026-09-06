@@ -12,8 +12,17 @@ namespace WinUIDesigner.XamlDom.Tests
     /// XAML attribute text that Phase A's converter can read.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every test runs on the WinUI dispatcher thread (see <see cref="WinUITestHost"/>) because
     /// every object involved is a thread-affine WinRT object.
+    /// </para>
+    /// <para>
+    /// Not every rejection branch in <c>XamlValueFormatter</c> has a test here: a live
+    /// <c>FontFamily</c> with an empty <c>Source</c> cannot be constructed on this SDK through any
+    /// path (the constructor throws, and so does <c>XamlReader.Load</c>), so that guard clause is
+    /// verified by inspection at its declaration rather than by a test that could pass with the
+    /// clause removed.
+    /// </para>
     /// </remarks>
     [TestFixture]
     public class ValueFormattingTests
@@ -294,15 +303,10 @@ namespace WinUIDesigner.XamlDom.Tests
                     "A gradient brush has no attribute form");
                 Assert.IsFalse(XamlValueFormatter.CanFormat(typeof(Geometry), new RectangleGeometry()));
 
-                // A live FontFamily with an empty Source cannot exist in this WinUI SDK to begin
-                // with: both `new FontFamily("")` and reading "" back through Phase A's own
-                // converter (which goes through XamlReader.Load, not this constructor) throw -
-                // measured. So CanFormat's own !string.IsNullOrEmpty(Source) guard can never be
-                // exercised by a real instance; this asserts the platform fact instead of a
-                // scenario that cannot be constructed.
-                Assert.Throws<ArgumentException>(() => new FontFamily(""),
-                    "An empty family name has no live FontFamily form to guard against");
-
+                // No case here exercises FontFamily's empty-Source rejection: a live FontFamily
+                // with an empty Source cannot be constructed on this SDK at all (see the comment
+                // beside the predicate in XamlValueFormatter.cs), so that branch is verified by
+                // inspection, not by a test.
                 Assert.IsFalse(
                     XamlValueFormatter.CanFormat(typeof(Windows.UI.Text.FontWeight),
                         new Windows.UI.Text.FontWeight { Weight = 137 }),
