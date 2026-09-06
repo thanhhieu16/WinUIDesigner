@@ -61,5 +61,25 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsFalse(ModelTools.CanSelectComponent(rowDefinition));
             });
         }
+
+        [Test]
+        public void OutlineNodeNameIsTheTypeNameAloneOrWithTheXName()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Button /><Button x:Name=\"A\" />" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                var grid = surface.DesignContext.RootItem;
+                var names = surface.DesignContext.Services.GetService<IOutlineNodeNameService>();
+                Assert.IsNotNull(names, "IOutlineNodeNameService was not registered");
+
+                Assert.AreEqual("Button", names.GetOutlineNodeName(grid.ContentProperty.CollectionElements[0]));
+                Assert.AreEqual("Button (A)", names.GetOutlineNodeName(grid.ContentProperty.CollectionElements[1]));
+                Assert.AreEqual("", names.GetOutlineNodeName(null));
+            });
+        }
     }
 }

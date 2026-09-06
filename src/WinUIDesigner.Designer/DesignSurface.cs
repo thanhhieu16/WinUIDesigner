@@ -41,6 +41,11 @@ namespace WinUIDesigner.Designer
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(OptionService), new OptionService()));
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.Services.ICopyPasteService), new Services.CopyPasteService()));
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IToolService), new Services.ToolService(_designPanel)));
+			// The reference registers both outline services inside XamlDesignContext's own
+			// constructor (Xaml/XamlDesignContext.cs:77-78). Same constraint as OptionService
+			// above: both implementations live in WinUIDesigner.Designer, and XamlDesignContext
+			// lives in WinUIDesigner.DesignModel, which does not (and must not) reference it.
+			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IOutlineNodeNameService), new OutlineView.OutlineNodeNameService()));
 			InitializeDesigner(new XamlDesignContext(xamlReader, loadSettings));
 		}
 
