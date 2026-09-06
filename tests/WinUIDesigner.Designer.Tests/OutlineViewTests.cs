@@ -152,5 +152,48 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsTrue(selection.SelectedItems.Contains(grid.ContentProperty.CollectionElements[0]));
             });
         }
+
+        [Test]
+        public void ASetNonContentPropertyBecomesAPropertyNodeWrappingItsValue()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Button><Button.RenderTransform><RotateTransform Angle=\"10\" /></Button.RenderTransform></Button>" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+
+                var buttonNode = outline.Children[0];
+                var transformNode = buttonNode.Children.FirstOrDefault(n => n.Name == "RenderTransform");
+                Assert.IsNotNull(transformNode, "no PropertyOutlineNode was created for RenderTransform");
+                Assert.AreEqual(1, transformNode.Children.Count);
+                Assert.AreEqual(typeof(Microsoft.UI.Xaml.Media.RotateTransform),
+                    transformNode.Children[0].DesignItem.ComponentType);
+            });
+        }
+
+        [Test]
+        public void AddingAndRemovingACollectionElementUpdatesTheChildNodes()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                Assert.AreEqual(2, outline.Children.Count);
+
+                var added = surface.DesignContext.Services.Component
+                    .RegisterComponentForDesigner(new Button());
+                grid.ContentProperty.CollectionElements.Add(added);
+                Assert.AreEqual(3, outline.Children.Count);
+                Assert.AreEqual(added, outline.Children[2].DesignItem);
+
+                grid.ContentProperty.CollectionElements.Remove(added);
+                Assert.AreEqual(2, outline.Children.Count);
+                Assert.IsTrue(outline.Children.All(n => n.DesignItem != added));
+            });
+        }
     }
 }

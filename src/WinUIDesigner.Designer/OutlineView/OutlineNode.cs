@@ -50,16 +50,42 @@ namespace WinUIDesigner.Designer.OutlineView
         {
             Children.Clear();
 
+            foreach (var prp in DesignItem.AllSetProperties) {
+                if (prp.Name != DesignItem.ContentPropertyName && prp.Value != null) {
+                    var propertyNode = PropertyOutlineNode.Create(prp);
+                    propertyNode.Children.Add(prp.Value.CreateOutlineNode());
+                    Children.Add(propertyNode);
+                }
+            }
+
             if (DesignItem.ContentPropertyName != null) {
                 var content = DesignItem.ContentProperty;
-                if (content.IsCollection)
+                if (content.IsCollection) {
                     UpdateChildrenCore(content.CollectionElements);
+                } else if (content.Value != null) {
+                    // A content value that is itself selectable becomes a plain child node;
+                    // anything else (a non-visual value) gets a PropertyOutlineNode wrapper so it
+                    // is still reachable in the tree.
+                    if (!UpdateChildrenCore(new[] { content.Value })) {
+                        var propertyNode = PropertyOutlineNode.Create(content);
+                        propertyNode.Children.Add(content.Value.CreateOutlineNode());
+                        Children.Add(propertyNode);
+                    }
+                }
             }
         }
 
         protected override void UpdateChildrenCollectionChanged(NotifyCollectionChangedEventArgs e)
         {
-            UpdateChildren();
+            if (e.Action == NotifyCollectionChangedAction.Remove) {
+                foreach (var oldItem in e.OldItems) {
+                    var item = Children.FirstOrDefault(x => x.DesignItem == oldItem);
+                    if (item != null)
+                        Children.Remove(item);
+                }
+            } else if (e.Action == NotifyCollectionChangedAction.Add) {
+                UpdateChildrenCore(e.NewItems.Cast<DesignItem>(), e.NewStartingIndex);
+            }
         }
 
         bool UpdateChildrenCore(IEnumerable<DesignItem> items, int index = -1)
