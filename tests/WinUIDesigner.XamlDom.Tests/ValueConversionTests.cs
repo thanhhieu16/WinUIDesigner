@@ -313,6 +313,10 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.AreEqual(2, dashes.Count);
                 Assert.AreEqual(2.0, dashes[0]);
                 Assert.AreEqual(3.0, dashes[1]);
+
+                var empty = (Microsoft.UI.Xaml.Media.DoubleCollection)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.DoubleCollection), "");
+                Assert.AreEqual(0, empty.Count);
             });
         }
 
