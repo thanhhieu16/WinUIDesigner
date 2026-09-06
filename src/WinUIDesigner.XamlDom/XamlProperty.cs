@@ -267,7 +267,7 @@ namespace WinUIDesigner.XamlDom
 					}
 				}
 				catch (Exception ex) {
-					Debug.WriteLine("UpdateValueOnInstance() failed - Exception:" + ex.Message);
+					ReportValueFailure(ex);
 				}
 			} else if (IsCollection) {
 				var collection = ValueOnInstance;
@@ -288,6 +288,46 @@ namespace WinUIDesigner.XamlDom
 					}
 				}
 			}
+		}
+
+		/// <summary>
+		/// Reports a failure to apply this property's value to the live instance.
+		/// </summary>
+		/// <remarks>
+		/// This used to be a bare <c>Debug.WriteLine</c>, and that is how the XamlDom
+		/// value-conversion gap stayed invisible for four phases: every WinRT-typed attribute
+		/// failed to convert and the property silently kept its default. The failure is reported
+		/// rather than rethrown on purpose - throwing here would make a document with one bad
+		/// attribute impossible to open at all, which is the moment the user most needs to open it.
+		/// </remarks>
+		void ReportValueFailure(Exception ex)
+		{
+			Debug.WriteLine("UpdateValueOnInstance() failed - Exception:" + ex.Message);
+
+			var serviceProvider = parentObject != null && parentObject.OwnerDocument != null
+				? parentObject.OwnerDocument.ServiceProvider
+				: null;
+			if (serviceProvider == null)
+				return;
+
+			var errorSink = serviceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
+			if (errorSink == null)
+				return;
+
+			var lineInfo = GetValueLineInfo();
+			var message = "Cannot set " + propertyInfo.Name + ": " + ex.Message;
+			if (lineInfo != null && lineInfo.HasLineInfo())
+				errorSink.ReportError(message, lineInfo.LineNumber, lineInfo.LinePosition);
+			else
+				errorSink.ReportError(message, 0, 0);
+		}
+
+		System.Xml.IXmlLineInfo GetValueLineInfo()
+		{
+			var textValue = propertyValue as XamlTextValue;
+			if (textValue != null)
+				return textValue.LineInfo;
+			return parentObject != null ? parentObject.XmlElement as System.Xml.IXmlLineInfo : null;
 		}
 
 		// NOTE (WinUI port): the reference exposes SystemXamlMemberForProperty /

@@ -588,5 +588,149 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.AreEqual(2, line.StrokeDashArray.Count);
             });
         }
+
+        // ---- Reporting: conversion failures must reach the error sink, not Debug.WriteLine.
+
+        sealed class CollectingErrorSink : IXamlErrorSink
+        {
+            public readonly System.Collections.Generic.List<string> Messages = new System.Collections.Generic.List<string>();
+            public readonly System.Collections.Generic.List<int> Lines = new System.Collections.Generic.List<int>();
+
+            public void ReportError(string message, int line, int column)
+            {
+                Messages.Add(message);
+                Lines.Add(line);
+            }
+        }
+
+        sealed class SingleServiceProvider : IServiceProvider
+        {
+            readonly Type serviceType;
+            readonly object service;
+
+            public SingleServiceProvider(Type serviceType, object service)
+            {
+                this.serviceType = serviceType;
+                this.service = service;
+            }
+
+            public object GetService(Type type)
+            {
+                return type == serviceType ? service : null;
+            }
+        }
+
+        static CollectingErrorSink ParseCollectingErrors(string xaml)
+        {
+            // XamlParserSettings.ServiceProvider is a plain IServiceProvider, defaulting to a
+            // dummy that resolves nothing; XamlParser reads the error sink out of it
+            // (XamlParser.cs:97,129). XamlDesignContext does the same thing with its own
+            // ServiceContainer (XamlDesignContext.cs:71). Every other setting has a working
+            // default (XamlParserSettings.cs:33-35).
+            var sink = new CollectingErrorSink();
+            var settings = new XamlParserSettings();
+            settings.ServiceProvider = new SingleServiceProvider(typeof(IXamlErrorSink), sink);
+            XamlParser.Parse(new System.IO.StringReader(xaml), settings);
+            return sink;
+        }
+
+        [Test]
+        public void ReportsAnUnconvertibleAttributeInsteadOfSwallowingIt()
+        {
+            WinUITestHost.Run(() => {
+                var sink = ParseCollectingErrors(
+                    "<Grid xmlns='" + PresentationNs + "' Margin='not-a-thickness'/>");
+                Assert.AreEqual(1, sink.Messages.Count, "The failure was not reported");
+                StringAssert.Contains("not-a-thickness", sink.Messages[0]);
+                StringAssert.Contains("Thickness", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void ReportsMarkupExtensionTextInAPropertyElement()
+        {
+            // The attribute form is routed to MarkupExtensionParser, but the property-element form
+            // is not - it arrives as plain text and must be reported, not silently defaulted.
+            WinUITestHost.Run(() => {
+                var sink = ParseCollectingErrors(
+                    "<Border xmlns='" + PresentationNs + "'><Border.Padding>{StaticResource K}</Border.Padding></Border>");
+                Assert.AreEqual(1, sink.Messages.Count, "Markup extension text in a property element was not reported");
+                StringAssert.Contains("Markup extension", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void ReportsAnEscapedBraceThatHidesALiveExtension()
+        {
+            // XamlTextValue.Text strips the leading "{}", so this arrives at the converter as a
+            // live "{Binding}". Before Phase A it converted to a silent default with no error.
+            WinUITestHost.Run(() => {
+                var sink = ParseCollectingErrors(
+                    "<Border xmlns='" + PresentationNs + "' Padding='{}{Binding}'/>");
+                Assert.AreEqual(1, sink.Messages.Count);
+                StringAssert.Contains("Markup extension", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void RefusesAResourceKeyThatExistsOnlyInTheDesignerOwnApplicationResources()
+        {
+            // An isolated fragment resolves {StaticResource} against Application.Current.Resources -
+            // the designer's own scope, not the document's - so a key that exists only there must
+            // be refused rather than silently used.
+            WinUITestHost.Run(() => {
+                Application.Current.Resources["PhaseAProbeThickness"] = new Thickness(9);
+                try {
+                    var sink = ParseCollectingErrors(
+                        "<Border xmlns='" + PresentationNs + "'><Border.Padding>{StaticResource PhaseAProbeThickness}</Border.Padding></Border>");
+                    Assert.AreEqual(1, sink.Messages.Count, "A designer-scoped resource key was silently used");
+                    StringAssert.Contains("Markup extension", sink.Messages[0]);
+                } finally {
+                    Application.Current.Resources.Remove("PhaseAProbeThickness");
+                }
+            });
+        }
+
+        [Test]
+        public void ReportsEachFailureWithItsOwnMessage()
+        {
+            // WinUI caches the first XamlParseException's message for the life of the process and
+            // repeats it for every later failure, across intervening successes. The reported text
+            // must be self-authored, never forwarded from the platform.
+            WinUITestHost.Run(() => {
+                ParseCollectingErrors("<Grid xmlns='" + PresentationNs + "' Margin='first-bad-value'/>");
+                ParseCollectingErrors("<Grid xmlns='" + PresentationNs + "' Width='120'/>");
+                var sink = ParseCollectingErrors(
+                    "<Border xmlns='" + PresentationNs + "' CornerRadius='second-bad-value'/>");
+
+                Assert.AreEqual(1, sink.Messages.Count);
+                StringAssert.Contains("second-bad-value", sink.Messages[0]);
+                StringAssert.DoesNotContain("first-bad-value", sink.Messages[0]);
+                StringAssert.Contains("CornerRadius", sink.Messages[0]);
+                StringAssert.DoesNotContain("Thickness", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void ReportsTheAttributeOwnPositionNotTheSyntheticFragmentPosition()
+        {
+            WinUITestHost.Run(() => {
+                var sink = ParseCollectingErrors(
+                    "<Grid xmlns='" + PresentationNs + "'>\r\n  <Border Padding='not-a-thickness'/>\r\n</Grid>");
+                Assert.AreEqual(1, sink.Messages.Count);
+                Assert.AreEqual(2, sink.Lines[0], "The reported line is not the attribute's own line");
+            });
+        }
+
+        [Test]
+        public void ReportsNothingForADocumentThatConvertsCleanly()
+        {
+            WinUITestHost.Run(() => {
+                var sink = ParseCollectingErrors(
+                    "<Grid xmlns='" + PresentationNs + "' Margin='4,5,6,7' Background='Red' Width='120'/>");
+                Assert.AreEqual(0, sink.Messages.Count,
+                    "A clean document reported: " + string.Join(" | ", sink.Messages));
+            });
+        }
     }
 }

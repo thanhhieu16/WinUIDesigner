@@ -98,6 +98,27 @@ namespace WinUIDesigner.XamlDom
 			}
 		}
 
+		/// <summary>
+		/// Position information for the node this value came from, or <c>null</c> when none is
+		/// available.
+		/// </summary>
+		/// <remarks>
+		/// <see cref="PositionXmlDocument"/> overrides only <c>CreateElement</c> and
+		/// <c>CreateAttribute</c>, so an attribute carries its own line and column but a text node
+		/// does not. A text value therefore falls back to its owning element's position, which is
+		/// still far better than the coordinates of a synthetic conversion fragment.
+		/// </remarks>
+		internal System.Xml.IXmlLineInfo LineInfo {
+			get {
+				var attributeLineInfo = attribute as System.Xml.IXmlLineInfo;
+				if (attributeLineInfo != null)
+					return attributeLineInfo;
+				if (ParentProperty != null && ParentProperty.ParentObject != null)
+					return ParentProperty.ParentObject.XmlElement as System.Xml.IXmlLineInfo;
+				return null;
+			}
+		}
+
 		string NormalizeWhitespace(string text)
 		{
 			if (xmlSpace == XmlSpace.Preserve) {
