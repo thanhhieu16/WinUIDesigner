@@ -36,8 +36,11 @@ namespace WinUIDesigner.Designer.OutlineView
         readonly List<IOutlineNode> subscribed = new List<IOutlineNode>();
         readonly Brush selectionBrush = new SolidColorBrush(Colors.LightSteelBlue);
 
-        // Guards the selection round trip: row -> ISelectionService -> node -> row, and the same
-        // loop in the other direction. Same guard-flag pattern the PropertyGrid editors use.
+        // Guards against re-entrancy between the row, ISelectionService and the node - the same
+        // guard-flag pattern the PropertyGrid editors use. No current call path actually reaches
+        // it: ApplySelectionHighlight only ever sets Grid.Background, so it never re-enters
+        // Node_PropertyChanged. Kept anyway as harmless defensive code - a later task may add a
+        // path that does close the loop, and this flag will already be in place for it.
         bool syncingSelection;
 
         public OutlineViewControl()

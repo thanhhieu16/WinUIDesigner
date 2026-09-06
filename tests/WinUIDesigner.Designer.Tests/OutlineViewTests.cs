@@ -5,6 +5,7 @@ using System.Linq;
 using System.Xml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Services;
@@ -380,11 +381,20 @@ namespace WinUIDesigner.Designer.Tests
                 var childHost = (FrameworkElement)((Grid)childRow).Parent;
                 Assert.AreEqual(Visibility.Visible, childHost.Visibility);
 
-                stackPanelNode.IsExpanded = false;
-                control.Rebuild();
-                childRow = control.RowFor(stackPanelNode.Children[0]);
-                childHost = (FrameworkElement)((Grid)childRow).Parent;
+                // Drive the real expand ToggleButton rather than IsExpanded + Rebuild(), so this
+                // test actually exercises OutlineViewControl's Checked/Unchecked wiring instead of
+                // reaching the same visible result through a side door.
+                var stackPanelRow = (Grid)control.RowFor(stackPanelNode);
+                var expandToggle = (ToggleButton)stackPanelRow.Children
+                    .Single(c => Grid.GetColumn((FrameworkElement)c) == 0);
+
+                expandToggle.IsChecked = false;
                 Assert.AreEqual(Visibility.Collapsed, childHost.Visibility);
+                Assert.IsFalse(stackPanelNode.IsExpanded);
+
+                expandToggle.IsChecked = true;
+                Assert.AreEqual(Visibility.Visible, childHost.Visibility);
+                Assert.IsTrue(stackPanelNode.IsExpanded);
 
                 window.Content = null;
             });
