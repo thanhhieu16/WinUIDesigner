@@ -17,9 +17,11 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Xaml;
 using WinUIDesigner.XamlDom;
@@ -173,6 +175,56 @@ namespace WinUIDesigner.Designer.OutlineView
         {
             _collectionWasChanged = true;
             UpdateChildrenCollectionChanged(e);
+        }
+
+        public bool CanInsert(IEnumerable<IOutlineNode> nodes, IOutlineNode after, bool copy)
+        {
+            var placementBehavior = DesignItem.GetBehavior<IPlacementBehavior>();
+            if (placementBehavior == null)
+                return false;
+            // Nothing without a DesignItem (a PropertyOutlineNode) and nothing without a parent
+            // (the document root) can be placed. PlacementOperation.Start resolves an
+            // IRootPlacementBehavior for a parentless item (PlacementOperation.cs:232), and this
+            // port has never implemented that interface - deferred in Phase 2's plan, never
+            // revisited - so Start would throw PlacementOperationException. Returning false is
+            // both the honest answer (a root has no parent to be reparented from) and what keeps
+            // the exception out of Task 10's drop-veto path. The reference has no such guard
+            // because its RootItemBehavior supplies the missing behavior. Spec Decision 16.
+            if (nodes.Any(node => node.DesignItem == null || node.DesignItem.Parent == null))
+                return false;
+            var operation = PlacementOperation.Start(nodes.Select(node => node.DesignItem).ToArray(), DummyPlacementType);
+            if (operation != null) {
+                bool canEnter = placementBehavior.CanEnterContainer(operation, true);
+                operation.Abort();
+                return canEnter;
+            }
+            return false;
+        }
+
+        public virtual void Insert(IEnumerable<IOutlineNode> nodes, IOutlineNode after, bool copy)
+        {
+            using (var moveTransaction = DesignItem.Context.OpenGroup("Item moved in outline view",
+                       nodes.Select(n => n.DesignItem).ToList())) {
+                if (copy) {
+                    nodes = nodes.Select(n => n.DesignItem.Clone().CreateOutlineNode()).ToList();
+                } else {
+                    foreach (var node in nodes) {
+                        node.DesignItem.Remove();
+                    }
+                }
+
+                var index = after == null ? 0 : Children.IndexOf(after) + 1;
+
+                var content = DesignItem.ContentProperty;
+                if (content.IsCollection) {
+                    foreach (var node in nodes) {
+                        content.CollectionElements.Insert(index++, node.DesignItem);
+                    }
+                } else {
+                    content.SetValue(nodes.First().DesignItem);
+                }
+                moveTransaction.Commit();
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

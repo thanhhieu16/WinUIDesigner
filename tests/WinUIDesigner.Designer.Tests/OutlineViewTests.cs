@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
+using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.DesignModel.Xaml;
 using WinUIDesigner.TestHost;
 
@@ -206,6 +207,88 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsTrue(outline.Children.All(n => n.DesignItem != added));
                 Assert.AreEqual(1, actions.Count(a => a == NotifyCollectionChangedAction.Remove));
                 Assert.IsFalse(actions.Contains(NotifyCollectionChangedAction.Reset));
+            });
+        }
+
+        [Test]
+        public void CanInsertReflectsWhetherTheTargetCanAcceptTheItems()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Button /><Image /><StackPanel><StackPanel /></StackPanel>" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+
+                var buttonNode = outline.Children[0];
+                var imageNode = outline.Children[1];
+                var outerStackNode = outline.Children[2];
+                var innerStackNode = outerStackNode.Children[0];
+
+                // A Grid takes anything.
+                Assert.IsTrue(outline.CanInsert(new[] { imageNode }, buttonNode, false));
+                // A ContentControl with an unset Content takes a single item
+                // (DefaultPlacementBehavior.internalCanEnterContainer, src/WinUIDesigner.Designer/
+                // Extensions/DefaultPlacementBehavior.cs:99-100).
+                Assert.IsTrue(buttonNode.CanInsert(new[] { imageNode }, null, false));
+                // An Image has no ContentProperty, so DefaultPlacementBehavior.OnInitialized
+                // never attaches an IPlacementBehavior to it and CanInsert must be false.
+                Assert.IsFalse(imageNode.CanInsert(new[] { buttonNode }, null, false));
+                // Ported deliberately without a cycle guard (spec Decision 14): inserting a
+                // container into its own descendant reports true, exactly as the reference does.
+                // Both nodes here are non-root, so the root guard below does not mask this.
+                Assert.IsTrue(innerStackNode.CanInsert(new[] { outerStackNode }, null, false));
+                // The document root can never be inserted anywhere: PlacementOperation.Start
+                // resolves an IRootPlacementBehavior for a parentless item
+                // (src/WinUIDesigner.DesignModel/PlacementOperation.cs:232) and nothing in this
+                // port implements that interface - it was deferred in Phase 2 and never revisited
+                // - so Start would throw PlacementOperationException. CanInsert must return false
+                // rather than let that escape (spec Decision 16); the drop path in Task 10 calls
+                // CanInsert to veto, and an exception there would break dragging.
+                Assert.IsFalse(outerStackNode.CanInsert(new[] { outline }, null, false));
+            });
+        }
+
+        [Test]
+        public void InsertMovesAnItemBetweenContainersAsOneUndoEntry()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                var undo = surface.DesignContext.Services.GetService<UndoService>();
+                int before = undo.UndoActions.Count();
+
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+                var stackPanelButton = stackPanel.ContentProperty.CollectionElements[0];
+                outline.Insert(new[] { outline.Children[1].Children[0] }, outline.Children[0], false);
+
+                Assert.AreEqual(3, grid.ContentProperty.CollectionElements.Count);
+                Assert.AreEqual(0, stackPanel.ContentProperty.CollectionElements.Count);
+                Assert.AreEqual(stackPanelButton, grid.ContentProperty.CollectionElements[1]);
+                Assert.AreEqual(before + 1, undo.UndoActions.Count(),
+                    "the whole move must commit as a single undo entry");
+            });
+        }
+
+        [Test]
+        public void InsertInCopyModeLeavesTheSourceInPlace()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+                outline.Insert(new[] { outline.Children[1].Children[0] }, outline.Children[0], true);
+
+                Assert.AreEqual(1, stackPanel.ContentProperty.CollectionElements.Count,
+                    "copy mode must not remove the source");
+                Assert.AreEqual(3, grid.ContentProperty.CollectionElements.Count);
+                Assert.AreEqual(typeof(Button), grid.ContentProperty.CollectionElements[1].ComponentType);
             });
         }
     }

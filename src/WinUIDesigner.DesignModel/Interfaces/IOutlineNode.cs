@@ -16,6 +16,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 
 namespace WinUIDesigner.DesignModel
@@ -38,5 +39,7 @@ namespace WinUIDesigner.DesignModel
         bool IsDesignTimeLocked { get; set; }
         string Name { get; }
         ObservableCollection<IOutlineNode> Children { get; }
+        bool CanInsert(IEnumerable<IOutlineNode> nodes, IOutlineNode after, bool copy);
+        void Insert(IEnumerable<IOutlineNode> nodes, IOutlineNode after, bool copy);
     }
 }
