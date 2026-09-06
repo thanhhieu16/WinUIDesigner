@@ -68,26 +68,47 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
 
         /// <summary>
         /// Whether <see cref="FirstProperty"/>'s <see cref="TypeConverter"/> can round-trip
-        /// through a PropertyGrid text box for the CURRENT value.
+        /// through a PropertyGrid text box for <paramref name="value"/>.
         /// </summary>
         /// <remarks>
+        /// <para>
+        /// Takes the value as a parameter rather than reading <see cref="DesignerValue"/> itself
+        /// so every caller asks about the SAME object it is about to format/enable for: both
+        /// <see cref="ValueString"/> and <see cref="IsEnabled"/> read <c>DesignerValue</c> once and
+        /// pass the result in. <c>XamlProperty.DesignerValue</c> swallows a converter failure and
+        /// falls back to the live CLR value, so two independent reads of <c>DesignerValue</c> are
+        /// not guaranteed to return the same object - and <c>CanConvertFrom</c>/<c>CanConvertTo</c>
+        /// each triggers a full synthetic <c>XamlReader.Load</c> round trip
+        /// (<see cref="XamlValueConverter"/>), so asking twice about two different values would
+        /// both mismatch the answer to the wrong instance and double the parse cost on every
+        /// <c>ValueString</c> read.
+        /// </para>
+        /// <para>
         /// Computed live rather than cached at <see cref="Load"/> time: <c>CanConvertTo(string)</c>
         /// can be instance-dependent (e.g. <c>Brush</c>, <c>Geometry</c>, <c>FontFamily</c>,
         /// <c>FontWeight</c> - a <c>LinearGradientBrush</c> has no text form even though
         /// <c>SolidColorBrush</c>, the same declared type, does). Asking once at load time and
         /// caching the type-level answer would enable an editable, ToString()-prefilled text box
         /// for any instance the formatter actually refuses - exactly the hazard Phase A's original
-        /// <c>CanConvertTo => false</c> existed to avoid. <c>DesignerValue</c> null means the
-        /// property is unset, so there is no instance to ask about; pass a null context and take
-        /// the type-level answer so an unset property (e.g. <c>Margin</c>) stays editable.
+        /// <c>CanConvertTo => false</c> existed to avoid.
+        /// </para>
+        /// <para>
+        /// <paramref name="value"/> is null for a reference-typed property that is genuinely unset
+        /// and whose CLR default is null (e.g. an unset <c>Brush</c> or <c>Geometry</c>) - not for
+        /// a value-typed property such as <c>Margin</c>: <c>XamlProperty.DesignerValue</c> falls
+        /// back to <c>propertyInfo.GetValue(instance)</c>, which returns a boxed default
+        /// <c>Thickness</c> rather than null. A null value passes a null context and takes the
+        /// type-level answer, which stays editable; the value-type case is exercised instead by
+        /// <c>ValueConversionTests.ClaimsAToStringConversionNowThatAFormatterExists</c> in the
+        /// XamlDom test suite, which asks <c>XamlValueConverter.CanConvertTo</c> with a null
+        /// context directly for <c>Thickness</c>.
+        /// </para>
         /// </remarks>
-        bool HasStringConverter {
-            get {
-                var value = DesignerValue;
-                ITypeDescriptorContext context = value != null ? new InstanceOnlyTypeDescriptorContext(value) : null;
-                return FirstProperty.TypeConverter.CanConvertFrom(typeof(string)) &&
-                       FirstProperty.TypeConverter.CanConvertTo(context, typeof(string));
-            }
+        bool HasStringConverter(object value)
+        {
+            ITypeDescriptorContext context = value != null ? new InstanceOnlyTypeDescriptorContext(value) : null;
+            return FirstProperty.TypeConverter.CanConvertFrom(typeof(string)) &&
+                   FirstProperty.TypeConverter.CanConvertTo(context, typeof(string));
         }
 
         public string Name {
@@ -150,7 +171,7 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
                 if (item != null) return "(" + item.ComponentType.Name + ")";
                 var value = DesignerValue;
                 if (value == null) return null;
-                if (HasStringConverter)
+                if (HasStringConverter(value))
                     return FirstProperty.TypeConverter.ConvertToInvariantString(value);
                 return "(" + value.GetType().Name + ")";
             }
@@ -160,7 +181,10 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
         }
 
         public bool IsEnabled {
-            get { return ValueItem == null && HasStringConverter; }
+            get {
+                if (ValueItem != null) return false;
+                return HasStringConverter(DesignerValue);
+            }
         }
 
         public bool IsSet {

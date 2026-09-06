@@ -314,7 +314,21 @@ namespace WinUIDesigner.XamlDom
 			// SetPlacement (PlacementOperation.cs:114), so a throw from a Margin write strands the
 			// transaction and, with no Application.UnhandledException handler in src/, ends the
 			// process.
-			if (forProperty != null && !hasStringConverter &&
+			// A markup extension (a Binding, {StaticResource}/{ThemeResource}/...) round-trips
+			// fine through XamlObject's own markup-extension path (XamlObject.UpdateXmlAttribute,
+			// MarkupExtensionPrinter) regardless of what XamlValueFormatter says about the
+			// DECLARED property type - the formatter table only ever describes plain WinRT
+			// values, so reporting here for one would be a false positive. Checked as
+			// "instance is MarkupExtension || instance is BindingBase" rather than
+			// XamlObject.IsMarkupExtension: that property is exactly "instance is MarkupExtension"
+			// (see its own doc comment), and Task 5 Step 9 (recorded on
+			// MarkupExtensionTests.Test3 and XamlObject.CreateWrapper's remarks) found that
+			// Microsoft.UI.Xaml.Data.Binding does NOT derive from MarkupExtension on WinUI at all
+			// - its base chain is BindingBase -> DependencyObject - so IsMarkupExtension alone
+			// would still misfire on the exact case this finding names.
+			bool isMarkupExtensionValue = instance is MarkupExtension || instance is Microsoft.UI.Xaml.Data.BindingBase;
+
+			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue &&
 			    XamlValueFormatter.HasFormatter(forProperty.ReturnType)) {
 				var sink = ServiceProvider == null
 					? null

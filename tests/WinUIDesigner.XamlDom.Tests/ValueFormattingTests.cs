@@ -200,6 +200,7 @@ namespace WinUIDesigner.XamlDom.Tests
                     { typeof(Microsoft.UI.Xaml.GridLength), new Microsoft.UI.Xaml.GridLength(1, Microsoft.UI.Xaml.GridUnitType.Auto), "Auto" },
                     { typeof(Microsoft.UI.Xaml.GridLength), new Microsoft.UI.Xaml.GridLength(40), "40" },
                     { typeof(Microsoft.UI.Xaml.GridLength), new Microsoft.UI.Xaml.GridLength(2, Microsoft.UI.Xaml.GridUnitType.Star), "2*" },
+                    { typeof(Microsoft.UI.Xaml.GridLength), new Microsoft.UI.Xaml.GridLength(1, Microsoft.UI.Xaml.GridUnitType.Star), "*" },
                     { typeof(Windows.UI.Color), Microsoft.UI.Colors.Blue, "#FF0000FF" },
                     { typeof(Windows.UI.Text.FontWeight), Microsoft.UI.Text.FontWeights.Bold, "Bold" },
                     { typeof(Point), new Point(1.5, 2.5), "1.5,2.5" },
@@ -261,8 +262,10 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.AreEqual("#FF010203", Format(typeof(Brush), unnamed));
 
                 var geometry = BuildAllSegmentGeometry();
-                Assert.AreEqual(GeometryMiniLanguageWriter.Write(geometry),
-                    Format(typeof(Geometry), geometry));
+                var geometryText = Format(typeof(Geometry), geometry);
+                var reloadedGeometry = ReadBack(typeof(Geometry), geometryText);
+                Assert.AreEqual(geometryText, Format(typeof(Geometry), reloadedGeometry),
+                    "Writing the read-back geometry must reproduce the same text");
             });
         }
 
@@ -287,6 +290,16 @@ namespace WinUIDesigner.XamlDom.Tests
                     var doubles = new DoubleCollection();
                     doubles.Add(2.5);
                     Assert.AreEqual("2.5", Format(typeof(DoubleCollection), doubles));
+
+                    // GeometryMiniLanguageWriter keeps its own Num/Pt helpers (a second copy of
+                    // XamlValueFormatter's), so a culture regression in one would not be caught by
+                    // asserting only the other. This is the phase's headline output and its longest
+                    // numeric string, so it gets the same de-DE assertion the rest of this test
+                    // makes for every other formatter.
+                    Assert.AreEqual(
+                        "F1 M0,0 L10,0 L20,5 L30,10 C40,0 50,20 60,10 C70,0 80,20 90,10 " +
+                        "Q100,0 110,10 Q120,0 130,10 A5,7.5 30 1 1 140,10 Z",
+                        Format(typeof(Geometry), BuildAllSegmentGeometry()));
                 } finally {
                     CultureInfo.CurrentCulture = previous;
                 }
@@ -313,6 +326,56 @@ namespace WinUIDesigner.XamlDom.Tests
                     "137 has no name, and Phase A cannot read the numeric form back");
                 Assert.IsFalse(XamlValueFormatter.CanFormat(typeof(Point), null),
                     "A null value has no text form");
+            });
+        }
+
+        [Test]
+        public void RefusesNonFiniteComponents()
+        {
+            WinUITestHost.Run(() => {
+                // DrawPolyLineExtension.cs:65 deliberately passes a Rect with NaN width/height,
+                // and GridPlacementSupport.cs:223-232 derives margins from Bounds.Right/Bottom, so
+                // a non-finite component reaching here is plausible, not hypothetical. Num(NaN)
+                // yields "NaN" and Num(PositiveInfinity) yields "Infinity", neither of which
+                // Phase A's reader can parse back - so the value must be refused to the element
+                // path rather than written and silently lost on reload.
+                Assert.IsFalse(
+                    XamlValueFormatter.CanFormat(typeof(Microsoft.UI.Xaml.Thickness),
+                        new Microsoft.UI.Xaml.Thickness(1, double.NaN, 3, 4)),
+                    "A Thickness with a NaN component has no faithful text form");
+                Assert.IsFalse(
+                    XamlValueFormatter.CanFormat(typeof(Rect),
+                        new Rect(1, 2, double.PositiveInfinity, double.PositiveInfinity)),
+                    "A Rect with a non-finite width/height has no faithful text form");
+            });
+        }
+
+        [Test]
+        public void RefusesAnEmptyPointOrDoubleCollection()
+        {
+            WinUITestHost.Run(() => {
+                // An empty attribute ("Points=\"\"") is not a faithful representation of an empty
+                // collection and its read-back is untested - same reasoning as the poly-segment
+                // count guards in GeometryMiniLanguageWriter.CanWrite.
+                Assert.IsFalse(XamlValueFormatter.CanFormat(typeof(PointCollection), new PointCollection()),
+                    "An empty PointCollection has no faithful text form");
+                Assert.IsFalse(XamlValueFormatter.CanFormat(typeof(DoubleCollection), new DoubleCollection()),
+                    "An empty DoubleCollection has no faithful text form");
+            });
+        }
+
+        [Test]
+        public void HasFormatterIsNullableAware()
+        {
+            WinUITestHost.Run(() => {
+                // XamlValueConverter.TryCreate unwraps Nullable<T> (PointAnimation.From,
+                // ToolTip.PlacementRect are declared Point?/Rect?), so the report gate in
+                // XamlDocument.CreatePropertyValue must ask the same unwrapped question - the
+                // table is never keyed by a nullable type.
+                Assert.IsTrue(XamlValueFormatter.HasFormatter(typeof(Point?)),
+                    "A Point?-declared property must still resolve a formatter");
+                Assert.IsTrue(XamlValueFormatter.CanFormat(typeof(Point?), new Point(1, 2)));
+                Assert.AreEqual("1,2", XamlValueFormatter.Format(typeof(Point?), new Point(1, 2)));
             });
         }
 
@@ -606,6 +669,38 @@ namespace WinUIDesigner.XamlDom.Tests
                     "<Button xmlns='" + PresentationNs + "'/>", "Content",
                     new Microsoft.UI.Xaml.Controls.TextBlock());
                 Assert.AreEqual(0, sink.Messages.Count);
+            });
+        }
+
+        [Test]
+        public void DoesNotReportABindingMarkupExtension()
+        {
+            WinUITestHost.Run(() => {
+                // A Binding on a Brush-declared property is refused by XamlValueFormatter's
+                // predicate (it isn't a SolidColorBrush) but round-trips fine through
+                // XamlObject's own markup-extension path (UpdateXmlAttribute /
+                // MarkupExtensionPrinter) regardless of what the formatter says about the
+                // declared type - reporting it here would be a false positive. Binding does not
+                // derive from MarkupExtension on WinUI (Task 5 Step 9), so this also pins that
+                // the guard catches it via BindingBase, not just XamlObject.IsMarkupExtension.
+                //
+                // This calls CreatePropertyValue directly rather than going through
+                // SetCollectingErrors/property.PropertyValue: assigning that XamlPropertyValue
+                // would also run UpdateValueOnInstance, which reflects the raw Binding onto the
+                // live Brush-typed CLR property and fails for its own, unrelated reason (WinUI's
+                // DependencyProperty.SetValue does not resolve a Binding the way real binding
+                // application does) - a genuine, pre-existing error this fix is not about.
+                // Isolating the call under test to CreatePropertyValue keeps that separate concern
+                // out of this assertion.
+                var sink = new CollectingErrorSink();
+                var settings = new XamlParserSettings();
+                settings.ServiceProvider = new SingleServiceProvider(typeof(IXamlErrorSink), sink);
+                var document = XamlParser.Parse(
+                    new System.IO.StringReader("<Grid xmlns='" + PresentationNs + "'/>"), settings);
+                var property = document.RootElement.FindOrCreateProperty("Background");
+                document.CreatePropertyValue(new Microsoft.UI.Xaml.Data.Binding(), property);
+                Assert.AreEqual(0, sink.Messages.Count,
+                    "A markup extension value must not be reported as unwritable");
             });
         }
     }

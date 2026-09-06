@@ -50,17 +50,21 @@ namespace WinUIDesigner.XamlDom
 		{
 			var table = new Dictionary<Type, Entry>();
 
-			Add(table, typeof(Thickness), v => v is Thickness, v => {
-				var t = (Thickness)v;
-				return Num(t.Left) + "," + Num(t.Top) + "," + Num(t.Right) + "," + Num(t.Bottom);
-			});
+			Add(table, typeof(Thickness),
+				v => v is Thickness t && IsFinite(t.Left) && IsFinite(t.Top) && IsFinite(t.Right) && IsFinite(t.Bottom),
+				v => {
+					var t = (Thickness)v;
+					return Num(t.Left) + "," + Num(t.Top) + "," + Num(t.Right) + "," + Num(t.Bottom);
+				});
 
-			Add(table, typeof(CornerRadius), v => v is CornerRadius, v => {
-				var c = (CornerRadius)v;
-				return Num(c.TopLeft) + "," + Num(c.TopRight) + "," + Num(c.BottomRight) + "," + Num(c.BottomLeft);
-			});
+			Add(table, typeof(CornerRadius),
+				v => v is CornerRadius c && IsFinite(c.TopLeft) && IsFinite(c.TopRight) && IsFinite(c.BottomRight) && IsFinite(c.BottomLeft),
+				v => {
+					var c = (CornerRadius)v;
+					return Num(c.TopLeft) + "," + Num(c.TopRight) + "," + Num(c.BottomRight) + "," + Num(c.BottomLeft);
+				});
 
-			Add(table, typeof(GridLength), v => v is GridLength, v => {
+			Add(table, typeof(GridLength), v => v is GridLength g && IsFinite(g.Value), v => {
 				var g = (GridLength)v;
 				if (g.IsAuto)
 					return "Auto";
@@ -94,9 +98,22 @@ namespace WinUIDesigner.XamlDom
 				v => v is Windows.UI.Text.FontWeight && FontWeightName(((Windows.UI.Text.FontWeight)v).Weight) != null,
 				v => FontWeightName(((Windows.UI.Text.FontWeight)v).Weight));
 
-			Add(table, typeof(Point), v => v is Point, v => Pt((Point)v));
+			Add(table, typeof(Point), v => v is Point p && IsFinite(p.X) && IsFinite(p.Y), v => Pt((Point)v));
 
-			Add(table, typeof(PointCollection), v => v is PointCollection, v => {
+			// An empty collection also refuses: "" is not a faithful attribute form (Points=""
+			// reads back as a different, zero-point collection than the writer's intent was ever
+			// tested against), same reasoning as the poly-segment count guards in
+			// GeometryMiniLanguageWriter.CanWrite.
+			Add(table, typeof(PointCollection), v => {
+				var points = v as PointCollection;
+				if (points == null || points.Count == 0)
+					return false;
+				foreach (var point in points) {
+					if (!IsFinite(point.X) || !IsFinite(point.Y))
+						return false;
+				}
+				return true;
+			}, v => {
 				var text = new StringBuilder();
 				foreach (var point in (PointCollection)v) {
 					if (text.Length > 0)
@@ -106,7 +123,16 @@ namespace WinUIDesigner.XamlDom
 				return text.ToString();
 			});
 
-			Add(table, typeof(DoubleCollection), v => v is DoubleCollection, v => {
+			Add(table, typeof(DoubleCollection), v => {
+				var doubles = v as DoubleCollection;
+				if (doubles == null || doubles.Count == 0)
+					return false;
+				foreach (var value in doubles) {
+					if (!IsFinite(value))
+						return false;
+				}
+				return true;
+			}, v => {
 				var text = new StringBuilder();
 				foreach (var value in (DoubleCollection)v) {
 					if (text.Length > 0)
@@ -120,12 +146,14 @@ namespace WinUIDesigner.XamlDom
 				v => v is Geometry && GeometryMiniLanguageWriter.CanWrite((Geometry)v),
 				v => GeometryMiniLanguageWriter.Write((PathGeometry)v));
 
-			Add(table, typeof(Rect), v => v is Rect, v => {
-				var r = (Rect)v;
-				return Num(r.X) + "," + Num(r.Y) + "," + Num(r.Width) + "," + Num(r.Height);
-			});
+			Add(table, typeof(Rect),
+				v => v is Rect r && IsFinite(r.X) && IsFinite(r.Y) && IsFinite(r.Width) && IsFinite(r.Height),
+				v => {
+					var r = (Rect)v;
+					return Num(r.X) + "," + Num(r.Y) + "," + Num(r.Width) + "," + Num(r.Height);
+				});
 
-			Add(table, typeof(Size), v => v is Size, v => {
+			Add(table, typeof(Size), v => v is Size s && IsFinite(s.Width) && IsFinite(s.Height), v => {
 				var s = (Size)v;
 				return Num(s.Width) + "," + Num(s.Height);
 			});
@@ -137,16 +165,21 @@ namespace WinUIDesigner.XamlDom
 				return d == Duration.Forever ? "Forever" : "Automatic";
 			});
 
-			Add(table, typeof(Matrix), v => v is Matrix, v => {
-				var m = (Matrix)v;
-				return Num(m.M11) + "," + Num(m.M12) + "," + Num(m.M21) + "," + Num(m.M22) + "," +
-				       Num(m.OffsetX) + "," + Num(m.OffsetY);
-			});
+			Add(table, typeof(Matrix),
+				v => v is Matrix m && IsFinite(m.M11) && IsFinite(m.M12) && IsFinite(m.M21) && IsFinite(m.M22) &&
+				     IsFinite(m.OffsetX) && IsFinite(m.OffsetY),
+				v => {
+					var m = (Matrix)v;
+					return Num(m.M11) + "," + Num(m.M12) + "," + Num(m.M21) + "," + Num(m.M22) + "," +
+					       Num(m.OffsetX) + "," + Num(m.OffsetY);
+				});
 
-			Add(table, typeof(System.Numerics.Vector3), v => v is System.Numerics.Vector3, v => {
-				var vec = (System.Numerics.Vector3)v;
-				return Num(vec.X) + "," + Num(vec.Y) + "," + Num(vec.Z);
-			});
+			Add(table, typeof(System.Numerics.Vector3),
+				v => v is System.Numerics.Vector3 vec && IsFinite(vec.X) && IsFinite(vec.Y) && IsFinite(vec.Z),
+				v => {
+					var vec = (System.Numerics.Vector3)v;
+					return Num(vec.X) + "," + Num(vec.Y) + "," + Num(vec.Z);
+				});
 
 			return table;
 		}
@@ -161,8 +194,16 @@ namespace WinUIDesigner.XamlDom
 		/// the answer for a caller that has no instance to ask about - the PropertyGrid, through
 		/// the one-argument <c>CanConvertTo</c> overload.
 		/// </summary>
+		/// <remarks>
+		/// Unwraps <c>Nullable&lt;T&gt;</c> the same way <see cref="XamlValueConverter.TryCreate"/>
+		/// does: the table is never keyed by a nullable type, so asking about
+		/// <c>Point?</c>/<c>Rect?</c>/<c>Color?</c> directly (e.g. <c>PointAnimation.From</c>,
+		/// <c>ToolTip.PlacementRect</c>) would always answer <c>false</c> and silently drop the
+		/// report <see cref="XamlDocument.CreatePropertyValue"/> gates on this method.
+		/// </remarks>
 		public static bool HasFormatter(Type targetType)
 		{
+			targetType = Nullable.GetUnderlyingType(targetType) ?? targetType;
 			return targetType != null && Table.ContainsKey(targetType);
 		}
 
@@ -171,6 +212,7 @@ namespace WinUIDesigner.XamlDom
 		/// </summary>
 		public static bool CanFormat(Type targetType, object value)
 		{
+			targetType = targetType != null ? (Nullable.GetUnderlyingType(targetType) ?? targetType) : null;
 			Entry entry;
 			if (targetType == null || value == null || !Table.TryGetValue(targetType, out entry))
 				return false;
@@ -183,6 +225,7 @@ namespace WinUIDesigner.XamlDom
 		/// </summary>
 		public static string Format(Type targetType, object value)
 		{
+			targetType = targetType != null ? (Nullable.GetUnderlyingType(targetType) ?? targetType) : null;
 			Entry entry;
 			if (targetType == null || !Table.TryGetValue(targetType, out entry))
 				throw new NotSupportedException("No formatter for " + (targetType == null ? "null" : targetType.FullName));
@@ -193,6 +236,21 @@ namespace WinUIDesigner.XamlDom
 		}
 
 		#region Primitives
+
+		/// <summary>
+		/// Gets whether <paramref name="value"/> can round-trip through Phase A's reader.
+		/// <c>Num(double.NaN)</c> yields <c>"NaN"</c> and <c>Num(double.PositiveInfinity)</c>
+		/// yields <c>"Infinity"</c>, neither of which the reader can parse back - so a non-finite
+		/// component must make its owning predicate answer <c>false</c> and take the element path,
+		/// rather than writing text that reloads as a reported failure with the value lost.
+		/// <c>DrawPolyLineExtension.cs:65</c> deliberately passes a <c>Rect</c> with NaN
+		/// width/height, and <c>GridPlacementSupport.cs:223-232</c> derives margins from
+		/// <c>Bounds.Right</c>/<c>Bottom</c>, so this is plausible rather than hypothetical.
+		/// </summary>
+		static bool IsFinite(double value)
+		{
+			return double.IsFinite(value);
+		}
 
 		static string Num(double value)
 		{

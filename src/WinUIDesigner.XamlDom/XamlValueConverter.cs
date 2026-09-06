@@ -129,9 +129,17 @@ namespace WinUIDesigner.XamlDom
 		/// Two callers ask this question and they need different answers.
 		/// <c>XamlDocument.CreatePropertyValue</c> assigns <c>ctx.Instance</c> before asking
 		/// (<c>XamlDocument.cs:283</c>) and wants to know whether THAT value has a text form;
-		/// <c>PropertyNode</c> uses the one-argument overload, which passes a null context
-		/// (measured), and wants to know whether the TYPE has one at all, because that is what
-		/// gates its editable text box (<c>PropertyNode.cs:231-233</c>, <c>:108-118</c>).
+		/// <c>PropertyNode.HasStringConverter(object)</c> passes a null context only when the
+		/// value it was handed is itself null, and wants to know whether the TYPE has a text form
+		/// at all in that case, because that is what gates its editable text box
+		/// (<c>PropertyNode.cs</c>'s <c>ValueString</c>/<c>IsEnabled</c>). A null value there means
+		/// a reference-typed property that is genuinely unset and whose CLR default is null (e.g.
+		/// an unset <c>Brush</c> or <c>Geometry</c>) - never a value-typed property such as
+		/// <c>Thickness</c>, since <c>XamlProperty.DesignerValue</c> falls back to
+		/// <c>propertyInfo.GetValue(instance)</c>, which returns a boxed default rather than null.
+		/// The null-context branch below is exercised directly, without going through PropertyNode
+		/// at all, by <c>ValueConversionTests.ClaimsAToStringConversionNowThatAFormatterExists</c>,
+		/// which calls <c>CanConvertTo(null, typeof(string))</c> for <c>Thickness</c>.
 		/// Answering per-instance is also what keeps the write path from throwing: an instance the
 		/// formatter cannot handle is refused here, so <see cref="ConvertTo"/> is never reached
 		/// for it and serialization simply falls through to the element form.
