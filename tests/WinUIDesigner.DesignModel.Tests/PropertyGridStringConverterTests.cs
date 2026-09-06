@@ -72,5 +72,26 @@ namespace WinUIDesigner.DesignModel.Tests
                     "The value must not fall back to ToString() and leak the CLR type name into the grid");
             });
         }
+
+        [Test]
+        public void AThicknessPropertyIsEditableInTheGrid()
+        {
+            WinUITestHost.Run(() => {
+                using var reader = XmlReader.Create(new StringReader(
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" />"));
+                var context = new XamlDesignContext(reader, new XamlLoadSettings());
+                var margin = context.RootItem.Properties["Margin"];
+
+                var node = new PropertyNode();
+                node.Load(new[] { margin });
+                Assert.IsTrue(node.IsEnabled, "The Thickness text box stayed disabled");
+
+                node.ValueString = "1,2,3,4";
+                var written = (Microsoft.UI.Xaml.Thickness)margin.ValueOnInstance;
+                Assert.AreEqual(1.0, written.Left);
+                Assert.AreEqual(4.0, written.Bottom);
+                Assert.AreEqual("1,2,3,4", node.ValueString);
+            });
+        }
     }
 }

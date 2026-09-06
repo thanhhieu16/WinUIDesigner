@@ -306,6 +306,26 @@ namespace WinUIDesigner.XamlDom
 				return new XamlTextValue(this, c.ConvertToInvariantString(ctx, instance), instance);
 			}
 
+			// A value whose type HAS a text form but whose instance does not - a gradient brush
+			// under a Brush property, a RectangleGeometry under Path.Data - is about to be written
+			// as an element, which is the shape that does not survive a reload. Phase A taught
+			// that failing silently here is how this class of bug lives for four phases, so say
+			// so. Throwing is not an option: PlacementOperation never calls Abort() around
+			// SetPlacement (PlacementOperation.cs:114), so a throw from a Margin write strands the
+			// transaction and, with no Application.UnhandledException handler in src/, ends the
+			// process.
+			if (forProperty != null && !hasStringConverter &&
+			    XamlValueFormatter.HasFormatter(forProperty.ReturnType)) {
+				var sink = ServiceProvider == null
+					? null
+					: ServiceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
+				if (sink != null)
+					sink.ReportError(
+						"Cannot save " + forProperty.PropertyName + " as attribute text: " +
+						elementType.FullName + " has no XAML attribute form, so it is written as an " +
+						"element and will not survive a reload.", 0, 0);
+			}
+
 			string ns = GetNamespaceFor(elementType);
 			string prefix = GetPrefixForNamespace(ns);
 			if (parent != null)

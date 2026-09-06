@@ -521,5 +521,92 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.AreEqual(newText, GeometryMiniLanguageWriter.Write(reparsed));
             });
         }
+
+        sealed class CollectingErrorSink : IXamlErrorSink
+        {
+            public readonly System.Collections.Generic.List<string> Messages =
+                new System.Collections.Generic.List<string>();
+
+            public void ReportError(string message, int line, int column)
+            {
+                Messages.Add(message);
+            }
+        }
+
+        sealed class SingleServiceProvider : IServiceProvider
+        {
+            readonly Type serviceType;
+            readonly object service;
+
+            public SingleServiceProvider(Type serviceType, object service)
+            {
+                this.serviceType = serviceType;
+                this.service = service;
+            }
+
+            public object GetService(Type type)
+            {
+                return type == serviceType ? service : null;
+            }
+        }
+
+        static CollectingErrorSink SetCollectingErrors(string xaml, string propertyName, object value)
+        {
+            var sink = new CollectingErrorSink();
+            var settings = new XamlParserSettings();
+            settings.ServiceProvider = new SingleServiceProvider(typeof(IXamlErrorSink), sink);
+            var document = XamlParser.Parse(new System.IO.StringReader(xaml), settings);
+            var property = document.RootElement.FindOrCreateProperty(propertyName);
+            property.PropertyValue = document.CreatePropertyValue(value, property);
+            return sink;
+        }
+
+        [Test]
+        public void ReportsAValueItCannotWriteAsAttributeText()
+        {
+            WinUITestHost.Run(() => {
+                var sink = SetCollectingErrors(
+                    "<Grid xmlns='" + PresentationNs + "'/>", "Background", new LinearGradientBrush());
+                Assert.AreEqual(1, sink.Messages.Count, "The unwritable value was not reported");
+                StringAssert.Contains("Background", sink.Messages[0]);
+                StringAssert.Contains("LinearGradientBrush", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void ReportsAGeometryTheMiniLanguageCannotExpress()
+        {
+            WinUITestHost.Run(() => {
+                var sink = SetCollectingErrors(
+                    "<Path xmlns='" + PresentationNs + "'/>", "Data", new RectangleGeometry());
+                Assert.AreEqual(1, sink.Messages.Count);
+                StringAssert.Contains("RectangleGeometry", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void DoesNotReportAValueItWroteSuccessfully()
+        {
+            WinUITestHost.Run(() => {
+                var sink = SetCollectingErrors(
+                    "<Grid xmlns='" + PresentationNs + "'/>", "Margin",
+                    new Microsoft.UI.Xaml.Thickness(1, 2, 3, 4));
+                Assert.AreEqual(0, sink.Messages.Count,
+                    "A value that serialized fine must not report anything");
+            });
+        }
+
+        [Test]
+        public void DoesNotReportAValueThatWasNeverInTheTable()
+        {
+            WinUITestHost.Run(() => {
+                // A nested control has always been serialized as an element and always will be.
+                // Reporting it would blame a document that is not at fault.
+                var sink = SetCollectingErrors(
+                    "<Button xmlns='" + PresentationNs + "'/>", "Content",
+                    new Microsoft.UI.Xaml.Controls.TextBlock());
+                Assert.AreEqual(0, sink.Messages.Count);
+            });
+        }
     }
 }

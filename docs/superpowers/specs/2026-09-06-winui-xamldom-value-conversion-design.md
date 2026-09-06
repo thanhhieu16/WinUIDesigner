@@ -465,8 +465,8 @@ New file `tests/WinUIDesigner.XamlDom.Tests/ValueConversionTests.cs`.
 
 ## Out of scope
 
-- **The write side.** `CreatePropertyValue` still emits empty elements for WinRT-typed values, so
-  setting such a property through the model still destroys it on save. Phase B.
+- **The write side.** Closed by Phase B —
+  `docs/superpowers/specs/2026-09-06-winui-xamldom-value-conversion-phase-b-design.md`.
 - Markup extensions, templates and bindings, beyond refusing to convert extension text.
 - Any general `XamlWriter` replacement.
 - Types absent from the host table: reported, not converted.
