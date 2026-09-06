@@ -43,7 +43,52 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
         public IReadOnlyList<DesignItemProperty> Properties { get; private set; }
 
         bool raiseEvents = true;
-        bool hasStringConverter;
+
+        /// <summary>
+        /// A minimal <see cref="ITypeDescriptorContext"/> that carries only <see cref="Instance"/>,
+        /// for asking a <see cref="TypeConverter"/> its per-instance <c>CanConvertTo(string)</c>
+        /// answer. Mirrors <c>XamlDocument.DummyTypeDescriptorContext</c> (XamlDom.cs:296-298), but
+        /// that type is internal to <c>WinUIDesigner.XamlDom</c> - this is its own tiny copy rather
+        /// than widening that assembly's internals to expose it.
+        /// </summary>
+        sealed class InstanceOnlyTypeDescriptorContext : ITypeDescriptorContext
+        {
+            public InstanceOnlyTypeDescriptorContext(object instance)
+            {
+                Instance = instance;
+            }
+
+            public object Instance { get; }
+            public IContainer Container { get { return null; } }
+            public PropertyDescriptor PropertyDescriptor { get { return null; } }
+            public bool OnComponentChanging() { return false; }
+            public void OnComponentChanged() { }
+            public object GetService(Type serviceType) { return null; }
+        }
+
+        /// <summary>
+        /// Whether <see cref="FirstProperty"/>'s <see cref="TypeConverter"/> can round-trip
+        /// through a PropertyGrid text box for the CURRENT value.
+        /// </summary>
+        /// <remarks>
+        /// Computed live rather than cached at <see cref="Load"/> time: <c>CanConvertTo(string)</c>
+        /// can be instance-dependent (e.g. <c>Brush</c>, <c>Geometry</c>, <c>FontFamily</c>,
+        /// <c>FontWeight</c> - a <c>LinearGradientBrush</c> has no text form even though
+        /// <c>SolidColorBrush</c>, the same declared type, does). Asking once at load time and
+        /// caching the type-level answer would enable an editable, ToString()-prefilled text box
+        /// for any instance the formatter actually refuses - exactly the hazard Phase A's original
+        /// <c>CanConvertTo => false</c> existed to avoid. <c>DesignerValue</c> null means the
+        /// property is unset, so there is no instance to ask about; pass a null context and take
+        /// the type-level answer so an unset property (e.g. <c>Margin</c>) stays editable.
+        /// </remarks>
+        bool HasStringConverter {
+            get {
+                var value = DesignerValue;
+                ITypeDescriptorContext context = value != null ? new InstanceOnlyTypeDescriptorContext(value) : null;
+                return FirstProperty.TypeConverter.CanConvertFrom(typeof(string)) &&
+                       FirstProperty.TypeConverter.CanConvertTo(context, typeof(string));
+            }
+        }
 
         public string Name {
             get {
@@ -105,7 +150,7 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
                 if (item != null) return "(" + item.ComponentType.Name + ")";
                 var value = DesignerValue;
                 if (value == null) return null;
-                if (hasStringConverter)
+                if (HasStringConverter)
                     return FirstProperty.TypeConverter.ConvertToInvariantString(value);
                 return "(" + value.GetType().Name + ")";
             }
@@ -115,7 +160,7 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
         }
 
         public bool IsEnabled {
-            get { return ValueItem == null && hasStringConverter; }
+            get { return ValueItem == null && HasStringConverter; }
         }
 
         public bool IsSet {
@@ -227,10 +272,6 @@ namespace WinUIDesigner.DesignModel.PropertyGrid
                 property.ValueChanged += Property_ValueChanged;
                 property.ValueOnInstanceChanged += Property_ValueOnInstanceChanged;
             }
-
-            hasStringConverter =
-                FirstProperty.TypeConverter.CanConvertFrom(typeof(string)) &&
-                FirstProperty.TypeConverter.CanConvertTo(typeof(string));
 
             OnValueChanged();
         }

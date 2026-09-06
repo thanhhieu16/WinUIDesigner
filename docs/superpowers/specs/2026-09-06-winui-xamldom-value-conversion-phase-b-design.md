@@ -365,6 +365,18 @@ siblings). Every WinUI object is created inside `WinUITestHost.Run(...)`.
 - The numeric `FontWeight` form stays unrepresentable in both directions.
 - `RectangleGeometry`, `EllipseGeometry`, `LineGeometry` and `GeometryGroup` still save as empty
   elements. They now report, which is the whole change for them.
+- **A non-`SolidColorBrush` `Brush` (e.g. `LinearGradientBrush`) now serializes as an empty
+  element, losing its content — `GradientStops` included — instead of throwing.** Task 3 removed
+  `XamlDocument.CreatePropertyValue`'s `throw new NotSupportedException(...)` for this case: the
+  write path must never throw (an uncaught exception from a property commit is fatal — no
+  `Application.UnhandledException` handler exists in `src/`, and `PlacementOperation` never wraps
+  `SetPlacement` in a try/catch), so the only alternative left is to fall through to the generic
+  element form, same as every other unhandled type. `WinUIDesigner.XamlDom` has no `XamlWriter`
+  equivalent to fall back to for a gradient brush's children (Decision 1's Out of scope still
+  holds), so `<LinearGradientBrush />` genuinely has nothing else to write. This is a new
+  silent-loss case in the save path — before this task it was a loud, unrecoverable crash instead
+  of a silent one, which is worse, but "silent" is still worth naming rather than leaving in a
+  code comment.
 - Decision 11 fixes a first-call-in-process throw that cannot be regression-tested from inside a
   test process: NUnit's eight parallel workers share one process, and whichever test runs first
   has already tripped the initialization. The measurement is recorded above in place of a test.

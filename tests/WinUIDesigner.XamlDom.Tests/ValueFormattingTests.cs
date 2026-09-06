@@ -489,5 +489,37 @@ namespace WinUIDesigner.XamlDom.Tests
                     "A PolyLineSegment must not be normalized into individual segments by round-tripping through the mini-language");
             });
         }
+
+        [Test]
+        public void RewritingTheTextInvalidatesTheCachedOriginalValue()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Path xmlns='" + PresentationNs + "'/>");
+                var property = document.RootElement.FindOrCreateProperty("Data");
+
+                var original = BuildAllSegmentGeometry();
+                property.PropertyValue = document.CreatePropertyValue(original, property);
+                Assert.AreSame(original, property.ValueOnInstance, "sanity: the cached instance is in place first");
+
+                var replacementFigure = new PathFigure { StartPoint = new Point(0, 0) };
+                replacementFigure.Segments.Add(new LineSegment { Point = new Point(5, 5) });
+                var replacementGeometry = new PathGeometry();
+                replacementGeometry.Figures.Add(replacementFigure);
+                var newText = GeometryMiniLanguageWriter.Write(replacementGeometry);
+
+                // Simulate a PropertyGrid text-box commit rewriting the attribute in place, the way
+                // XamlModelProperty.cs:239's own comment on SetThroughTheDocument describes -
+                // except here the EXISTING XamlTextValue's Text is mutated directly, which is
+                // exactly the path the cached originalValue must not survive.
+                ((XamlTextValue)property.PropertyValue).Text = newText;
+                property.UpdateValueOnInstance();
+
+                var reparsed = property.ValueOnInstance as PathGeometry;
+                Assert.IsNotNull(reparsed, "the rewritten text must still parse to a PathGeometry");
+                Assert.AreNotSame(original, reparsed,
+                    "the stale cached geometry must not be returned once the text it was cached for has changed");
+                Assert.AreEqual(newText, GeometryMiniLanguageWriter.Write(reparsed));
+            });
+        }
     }
 }

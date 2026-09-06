@@ -67,6 +67,18 @@ namespace WinUIDesigner.XamlDom
 		/// <c>PolyBezierSegment</c>/<c>PolyQuadraticBezierSegment</c> coordinate runs into
 		/// individual segments on read-back.
 		/// </summary>
+		/// <remarks>
+		/// <paramref name="originalValue"/> is captured as a SNAPSHOT, not tracked. If a caller
+		/// mutates it in place after this constructor runs - adds a <c>GradientStop</c>, appends a
+		/// <c>PathFigure</c> - <see cref="GetValueFor"/> returns the mutated object (it is the same
+		/// reference), while <see cref="Text"/>/<c>Save</c> still emit whatever
+		/// <paramref name="textValue"/> was at construction time: the live object and the saved XML
+		/// silently diverge until something rewrites <see cref="Text"/> (which drops the snapshot -
+		/// see the setter) or <c>CreatePropertyValue</c> runs again for a fresh commit. This is not
+		/// a regression from the pre-Task-3 element form: that form was exactly as stale, wrapping
+		/// the same live instance behind a one-time snapshot of its serialized children. It is
+		/// still a contract worth stating outright rather than leaving implicit.
+		/// </remarks>
 		internal XamlTextValue(XamlDocument document, string textValue, object originalValue) : this(document, textValue)
 		{
 			this.originalValue = originalValue;
@@ -174,7 +186,14 @@ namespace WinUIDesigner.XamlDom
 			if (targetProperty == null)
 				return this.Text;
 
-			if (originalValue != null)
+			// The coercion a re-parse would otherwise perform (via targetProperty's own
+			// TypeConverter/XamlReader path) still has to hold for the cached instance: nothing in
+			// this class knows the target property is the SAME one CreatePropertyValue formatted
+			// this text for (a property could change type across a document edit; more relevantly,
+			// GetValueFor's caller controls targetProperty independently of what constructed this
+			// value). Falling through to re-parse when the type doesn't match keeps a mismatched
+			// cache from assigning a raw, un-coerced value onto an unrelated dependency property.
+			if (originalValue != null && targetProperty.ReturnType.IsInstanceOfType(originalValue))
 				return originalValue;
 
 			return XamlParser.CreateObjectFromAttributeText(Text, targetProperty, ParentProperty.ParentObject);
