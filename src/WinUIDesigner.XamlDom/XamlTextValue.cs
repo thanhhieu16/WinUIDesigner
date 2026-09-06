@@ -37,6 +37,7 @@ namespace WinUIDesigner.XamlDom
 		XmlSpace xmlSpace;
 		string textValue;
 		XmlCDataSection cDataSection;
+		object originalValue;
 
 		internal XamlTextValue(XamlDocument document, XmlAttribute attribute)
 		{
@@ -50,6 +51,25 @@ namespace WinUIDesigner.XamlDom
 			if (textValue.StartsWith("{"))
 				textValue = "{}" + textValue;
 			this.textValue = textValue;
+		}
+
+		/// <summary>
+		/// Same as <see cref="XamlTextValue(XamlDocument, string)"/>, but remembers the live object
+		/// <paramref name="textValue"/> was formatted from, so <see cref="GetValueFor"/> can hand
+		/// back that exact instance instead of re-parsing the text. Phase B's write path needs
+		/// this: the object a caller passed to <c>CreatePropertyValue</c> must stay the one the
+		/// live visual tree and every Designer-layer extension holds a reference to, even though
+		/// the XML now carries its formatted attribute text. Re-parsing would still be correct for
+		/// a value round-tripped through a real file (that IS the source there), but for a value
+		/// set in memory it would needlessly manufacture a new object - or, for a
+		/// <see cref="Microsoft.UI.Xaml.Media.PathGeometry"/>, a structurally different one:
+		/// WinUI's mini-language parser expands multi-point <c>PolyLineSegment</c>/
+		/// <c>PolyBezierSegment</c>/<c>PolyQuadraticBezierSegment</c> coordinate runs into
+		/// individual segments on read-back.
+		/// </summary>
+		internal XamlTextValue(XamlDocument document, string textValue, object originalValue) : this(document, textValue)
+		{
+			this.originalValue = originalValue;
 		}
 
 		internal XamlTextValue(XamlDocument document, XmlText textNode, XmlSpace xmlSpace)
@@ -86,6 +106,10 @@ namespace WinUIDesigner.XamlDom
 			set {
 				if (value == null)
 					throw new ArgumentNullException("value");
+
+				// A cached originalValue that outlives the text it was derived from is a worse bug
+				// than the one it fixes - drop it so the next GetValueFor re-parses the new text.
+				originalValue = null;
 
 				if (attribute != null)
 					attribute.Value = value;
@@ -149,6 +173,9 @@ namespace WinUIDesigner.XamlDom
 
 			if (targetProperty == null)
 				return this.Text;
+
+			if (originalValue != null)
+				return originalValue;
 
 			return XamlParser.CreateObjectFromAttributeText(Text, targetProperty, ParentProperty.ParentObject);
 		}

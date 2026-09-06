@@ -300,10 +300,10 @@ namespace WinUIDesigner.XamlDom
 
 				if (instance is SolidColorBrush solidBrush && ColorBrushDictionary.ContainsKey(solidBrush.Color)) {
 					var name = ColorBrushDictionary[solidBrush.Color];
-					return new XamlTextValue(this, name);
+					return new XamlTextValue(this, name, instance);
 				}
 
-				return new XamlTextValue(this, c.ConvertToInvariantString(ctx, instance));
+				return new XamlTextValue(this, c.ConvertToInvariantString(ctx, instance), instance);
 			}
 
 			string ns = GetNamespaceFor(elementType);

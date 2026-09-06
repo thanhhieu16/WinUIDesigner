@@ -459,5 +459,35 @@ namespace WinUIDesigner.XamlDom.Tests
                     "A gradient brush has no attribute form and must keep the element form");
             });
         }
+
+        [Test]
+        public void PreservesTheLiveGeometryInstanceAndItsSegmentTypesAfterASetValue()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Path xmlns='" + PresentationNs + "'/>");
+
+                var points = new PointCollection();
+                points.Add(new Point(20, 20));
+                points.Add(new Point(30, 20));
+                points.Add(new Point(40, 10));
+                var figure = new PathFigure { StartPoint = new Point(10, 10) };
+                figure.Segments.Add(new PolyLineSegment { Points = points });
+                var geometry = new PathGeometry();
+                geometry.Figures.Add(figure);
+
+                var property = document.RootElement.FindOrCreateProperty("Data");
+                property.PropertyValue = document.CreatePropertyValue(geometry, property);
+
+                var saved = SaveToString(document);
+                StringAssert.Contains(GeometryMiniLanguageWriter.Write(geometry), saved,
+                    "The XML must still carry the mini-language attribute text - that is Phase B's whole point");
+
+                Assert.AreSame(geometry, property.ValueOnInstance,
+                    "The live geometry instance must survive a SetValue - every Designer extension holds a reference into it");
+                var liveFigure = ((PathGeometry)property.ValueOnInstance).Figures[0];
+                Assert.IsInstanceOf<PolyLineSegment>(liveFigure.Segments[0],
+                    "A PolyLineSegment must not be normalized into individual segments by round-tripping through the mini-language");
+            });
+        }
     }
 }
