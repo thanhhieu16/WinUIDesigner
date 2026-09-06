@@ -226,6 +226,24 @@ namespace WinUIDesigner.Designer
 						obj = VisualTreeHelper.GetParent(obj);
 					}
 					customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);
+
+					// Design-time lock (Phase 4g): a locked item and everything inside it are
+					// unhittable, reproducing the reference's ContinueSkipSelfAndChildren filter
+					// (WpfDesign.Designer/Project/DesignPanel.cs:103). Testing only the resolved
+					// ModelHit would leave a locked container's children selectable, so walk the
+					// whole ancestor chain. DesignItem's base class carries no lock member - the
+					// cast is the mechanism, exactly as in the reference's own OutlineNodeBase.
+					bool lockedInChain = false;
+					for (var ancestor = customResult.ModelHit; ancestor != null; ancestor = ancestor.Parent) {
+						var xamlAncestor = ancestor as WinUIDesigner.DesignModel.Xaml.XamlDesignItem;
+						if (xamlAncestor != null && xamlAncestor.IsDesignTimeLocked) {
+							lockedInChain = true;
+							break;
+						}
+					}
+					if (lockedInChain)
+						continue;
+
 					continueHitTest = callback(customResult);
 				}
 			}

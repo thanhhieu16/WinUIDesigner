@@ -399,5 +399,105 @@ namespace WinUIDesigner.Designer.Tests
                 window.Content = null;
             });
         }
+
+        [Test]
+        public void HidingANodeSetsAndResettingItClearsTheIsHiddenProperty()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                var buttonNode = outline.Children[0];
+                var button = (Button)buttonNode.DesignItem.Component;
+
+                buttonNode.IsDesignTimeVisible = false;
+                Assert.IsTrue(buttonNode.DesignItem.Properties
+                    .GetAttachedProperty(typeof(WinUIDesigner.XamlDom.DesignTimeProperties), "IsHidden").IsSet);
+                Assert.AreEqual(Visibility.Collapsed, button.Visibility);
+
+                buttonNode.IsDesignTimeVisible = true;
+                Assert.IsFalse(buttonNode.DesignItem.Properties
+                    .GetAttachedProperty(typeof(WinUIDesigner.XamlDom.DesignTimeProperties), "IsHidden").IsSet);
+            });
+        }
+
+        [Test]
+        public void LockingANodeWritesTheIsLockedProperty()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                var buttonNode = outline.Children[0];
+
+                buttonNode.IsDesignTimeLocked = true;
+                Assert.IsTrue(((XamlDesignItem)buttonNode.DesignItem).IsDesignTimeLocked);
+            });
+        }
+
+        [Test]
+        public void TheRowCarriesAHideToggleAndALockToggle()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var node = control.Root.Children[0];
+                var row = (Grid)control.RowFor(node);
+                var toggles = row.Children
+                    .OfType<Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>()
+                    .ToList();
+                var hideToggle = toggles.SingleOrDefault(t => Grid.GetColumn(t) == 1);
+                var lockToggle = toggles.SingleOrDefault(t => Grid.GetColumn(t) == 2);
+                Assert.IsNotNull(hideToggle, "no hide toggle in column 1");
+                Assert.IsNotNull(lockToggle, "no lock toggle in column 2");
+
+                hideToggle.IsChecked = true;
+                Assert.IsFalse(node.IsDesignTimeVisible);
+                lockToggle.IsChecked = true;
+                Assert.IsTrue(node.IsDesignTimeLocked);
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void HitTestSkipsALockedItemAndItsChildren()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" Width=\"200\" Height=\"200\">" +
+                    "<StackPanel Width=\"200\" Height=\"200\"><Button Width=\"200\" Height=\"200\" /></StackPanel>" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                surface.UpdateLayout();
+                var grid = surface.DesignContext.RootItem;
+                var stackPanel = grid.ContentProperty.CollectionElements[0];
+                var button = stackPanel.ContentProperty.CollectionElements[0];
+
+                // DesignSurface stretches its DesignPanel to fill the whole window (measured:
+                // 1424x720 on this host - see HitTestTests.cs's identical caveat), and this fixture's
+                // explicitly-sized 200x200 root Grid then gets centred within that much bigger
+                // panel rather than sitting at the panel's local origin (measured here: centred at
+                // panel-local (612,260)). So the hit point is computed from the Button's actual
+                // measured panel-local position instead of assuming a fixed (100,100) sits inside it.
+                var buttonView = (Microsoft.UI.Xaml.FrameworkElement)button.View;
+                var buttonOrigin = buttonView.TransformToVisual(surface.DesignPanel).TransformPoint(new Windows.Foundation.Point(0, 0));
+                var point = new Windows.Foundation.Point(buttonOrigin.X + 100, buttonOrigin.Y + 100);
+                var before = surface.DesignPanel.HitTest(point, false, true, HitTestType.ElementSelection);
+                Assert.AreEqual(button, before.ModelHit, "baseline: the Button is what is under the point");
+
+                ((XamlDesignItem)stackPanel).IsDesignTimeLocked = true;
+                var after = surface.DesignPanel.HitTest(point, false, true, HitTestType.ElementSelection);
+                Assert.AreNotEqual(button, after.ModelHit,
+                    "a child of a locked container must not be hit");
+                Assert.AreNotEqual(stackPanel, after.ModelHit, "the locked container itself must not be hit");
+            });
+        }
     }
 }

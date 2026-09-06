@@ -161,6 +161,31 @@ namespace WinUIDesigner.Designer.OutlineView
                 expandToggleFromNode[node] = expandToggle;
             }
 
+            // A PropertyOutlineNode stands for a property, not an element: its DesignItem is null,
+            // so it gets no hide/lock toggles - both would dereference DesignItem and throw.
+            if (node.DesignItem != null) {
+                // The reference uses Eye.png/EyeClose.png through an IconItem control; this port
+                // ships no image resources, so Segoe Fluent Icons glyphs stand in (spec Decision
+                // 3). E7B3 = View, E72E = Lock.
+                var hideToggle = new ToggleButton {
+                    Content = new FontIcon { Glyph = "" },
+                    IsChecked = !node.IsDesignTimeVisible,
+                };
+                hideToggle.Checked += (s, e) => node.IsDesignTimeVisible = false;
+                hideToggle.Unchecked += (s, e) => node.IsDesignTimeVisible = true;
+                Grid.SetColumn(hideToggle, 1);
+                row.Children.Add(hideToggle);
+
+                var lockToggle = new ToggleButton {
+                    Content = new FontIcon { Glyph = "" },
+                    IsChecked = node.IsDesignTimeLocked,
+                };
+                lockToggle.Checked += (s, e) => node.IsDesignTimeLocked = true;
+                lockToggle.Unchecked += (s, e) => node.IsDesignTimeLocked = false;
+                Grid.SetColumn(lockToggle, 2);
+                row.Children.Add(lockToggle);
+            }
+
             var nameText = new TextBlock { Text = node.Name, VerticalAlignment = VerticalAlignment.Center };
             Grid.SetColumn(nameText, 3);
             row.Children.Add(nameText);
