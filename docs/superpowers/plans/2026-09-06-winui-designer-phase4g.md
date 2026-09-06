@@ -1089,15 +1089,16 @@ Add to `OutlineViewTests.cs`:
                 const string xaml =
                     "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
                     "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
-                    "<Button /><StackPanel><Image /></StackPanel>" +
+                    "<Button /><Image /><StackPanel><StackPanel /></StackPanel>" +
                     "</Grid>";
                 var surface = LoadSurface(window, xaml);
                 var grid = surface.DesignContext.RootItem;
                 var outline = grid.CreateOutlineNode();
 
                 var buttonNode = outline.Children[0];
-                var stackPanelNode = outline.Children[1];
-                var imageNode = stackPanelNode.Children[0];
+                var imageNode = outline.Children[1];
+                var outerStackNode = outline.Children[2];
+                var innerStackNode = outerStackNode.Children[0];
 
                 // A Grid takes anything.
                 Assert.IsTrue(outline.CanInsert(new[] { imageNode }, buttonNode, false));
@@ -1108,9 +1109,18 @@ Add to `OutlineViewTests.cs`:
                 // An Image has no ContentProperty, so DefaultPlacementBehavior.OnInitialized
                 // never attaches an IPlacementBehavior to it and CanInsert must be false.
                 Assert.IsFalse(imageNode.CanInsert(new[] { buttonNode }, null, false));
-                // Ported deliberately without a cycle guard (spec Decision 14): the reference
-                // reports true for inserting an ancestor into its own descendant.
-                Assert.IsTrue(stackPanelNode.CanInsert(new[] { outline }, outline, false));
+                // Ported deliberately without a cycle guard (spec Decision 14): inserting a
+                // container into its own descendant reports true, exactly as the reference does.
+                // Both nodes here are non-root, so the root guard below does not mask this.
+                Assert.IsTrue(innerStackNode.CanInsert(new[] { outerStackNode }, null, false));
+                // The document root can never be inserted anywhere: PlacementOperation.Start
+                // resolves an IRootPlacementBehavior for a parentless item
+                // (src/WinUIDesigner.DesignModel/PlacementOperation.cs:232) and nothing in this
+                // port implements that interface - it was deferred in Phase 2 and never revisited
+                // - so Start would throw PlacementOperationException. CanInsert must return false
+                // rather than let that escape (spec Decision 16); the drop path in Task 10 calls
+                // CanInsert to veto, and an exception there would break dragging.
+                Assert.IsFalse(outerStackNode.CanInsert(new[] { outline }, null, false));
             });
         }
 
@@ -1183,6 +1193,16 @@ In `src/WinUIDesigner.Designer/OutlineView/OutlineNodeBase.cs`, add `using Syste
         {
             var placementBehavior = DesignItem.GetBehavior<IPlacementBehavior>();
             if (placementBehavior == null)
+                return false;
+            // Nothing without a DesignItem (a PropertyOutlineNode) and nothing without a parent
+            // (the document root) can be placed. PlacementOperation.Start resolves an
+            // IRootPlacementBehavior for a parentless item (PlacementOperation.cs:232), and this
+            // port has never implemented that interface - deferred in Phase 2's plan, never
+            // revisited - so Start would throw PlacementOperationException. Returning false is
+            // both the honest answer (a root has no parent to be reparented from) and what keeps
+            // the exception out of Task 10's drop-veto path. The reference has no such guard
+            // because its RootItemBehavior supplies the missing behavior. Spec Decision 16.
+            if (nodes.Any(node => node.DesignItem == null || node.DesignItem.Parent == null))
                 return false;
             var operation = PlacementOperation.Start(nodes.Select(node => node.DesignItem).ToArray(), DummyPlacementType);
             if (operation != null) {
