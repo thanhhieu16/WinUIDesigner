@@ -1240,7 +1240,7 @@ git commit -m "feat: add outline CanInsert/Insert reparenting with single-undo-e
 
 ### Task 7: OutlineViewControl core
 
-The control: a `TreeView` mirroring the node tree, rows built in C#, selection synced to the tree's own selection.
+**Revised 2026-09-06** with spec Decisions 4 and 5: no `Microsoft.UI.Xaml.Controls.TreeView`. Task 1 established that a `TreeView` cannot be realized in this project's test host at all (`UpdateLayout()` throws `COMException` — `Cannot find a Resource with the Name/Key TabViewScrollButtonBackground`), and the standard remedy fail-fast crashes the process. The outline therefore builds its own row tree the way `PropertyGridControl` already does (`src/WinUIDesigner.Designer/PropertyGrid/PropertyGridControl.cs:158-233`): one `Grid` row per node, each node's children in a nested `StackPanel` whose `Visibility` follows `IsExpanded`, indentation by `Margin`.
 
 **Files:**
 - Create: `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`
@@ -1248,15 +1248,15 @@ The control: a `TreeView` mirroring the node tree, rows built in C#, selection s
 
 **Interfaces:**
 - Consumes: `IOutlineNode` and everything from Tasks 2-6.
-- Produces: `public class WinUIDesigner.Designer.OutlineView.OutlineViewControl : StackPanel` with `public IOutlineNode Root { get; set; }` (setting it rebuilds the tree), `public TreeView Tree { get; }`, `internal IOutlineNode NodeFor(TreeViewNode treeNode)`, and `protected void Rebuild()`. `WinUIDesigner.Designer` already carries `[assembly: InternalsVisibleTo("WinUIDesigner.Designer.Tests")]` (`src/WinUIDesigner.Designer/AssemblyInfo.cs:12`), so the tests can call the `internal` members.
+- Produces: `public class WinUIDesigner.Designer.OutlineView.OutlineViewControl : StackPanel` with `public IOutlineNode Root { get; set; }` (setting it rebuilds), `protected void Rebuild()`, `protected virtual FrameworkElement BuildRow(IOutlineNode node, int level)`, `internal IOutlineNode NodeFor(FrameworkElement row)`, `internal FrameworkElement RowFor(IOutlineNode node)`, and `internal void HandleRowInvoked(IOutlineNode node, bool extend)`. `WinUIDesigner.Designer` already carries `[assembly: InternalsVisibleTo("WinUIDesigner.Designer.Tests")]` (`src/WinUIDesigner.Designer/AssemblyInfo.cs:12`), so tests can call the `internal` members.
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `OutlineViewTests.cs` (add `using WinUIDesigner.Designer.OutlineView;` to the usings):
+Add to `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`, and add `using WinUIDesigner.Designer.OutlineView;` to its usings:
 
 ```csharp
         [Test]
-        public void TheControlMirrorsTheOutlineTreeIntoTreeViewNodes()
+        public void TheControlBuildsOneRowPerNode()
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = LoadSurface(window, GridXaml);
@@ -1266,17 +1266,22 @@ Add to `OutlineViewTests.cs` (add `using WinUIDesigner.Designer.OutlineView;` to
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
 
-                Assert.AreEqual(1, control.Tree.RootNodes.Count);
-                var rootTreeNode = control.Tree.RootNodes[0];
-                Assert.AreEqual(2, rootTreeNode.Children.Count);
-                Assert.AreEqual(1, rootTreeNode.Children[1].Children.Count);
-                Assert.IsInstanceOf<FrameworkElement>(rootTreeNode.Content);
-                Assert.AreSame(control.Root, control.NodeFor(rootTreeNode));
+                var root = control.Root;
+                var stackPanelNode = root.Children[1];
+                var nestedButtonNode = stackPanelNode.Children[0];
+
+                foreach (var node in new[] { root, root.Children[0], stackPanelNode, nestedButtonNode }) {
+                    var row = control.RowFor(node);
+                    Assert.IsNotNull(row, "no row was built for " + node.Name);
+                    Assert.AreSame(node, control.NodeFor(row), "row/node mapping does not round-trip");
+                }
+
+                window.Content = null;
             });
         }
 
         [Test]
-        public void SelectingATreeViewNodeSelectsTheDesignItem()
+        public void InvokingARowSelectsTheDesignItem()
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = LoadSurface(window, GridXaml);
@@ -1288,14 +1293,16 @@ Add to `OutlineViewTests.cs` (add `using WinUIDesigner.Designer.OutlineView;` to
                 control.UpdateLayout();
 
                 surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[0]);
-                control.Tree.SelectedNodes.Add(control.Tree.RootNodes[0].Children[0]);
+                control.HandleRowInvoked(control.Root.Children[0], false);
 
                 Assert.IsTrue(surface.DesignContext.Services.Selection.SelectedItems.Contains(button));
+
+                window.Content = null;
             });
         }
 
         [Test]
-        public void SelectingInTheDesignerSelectsTheTreeViewNode()
+        public void SelectingInTheDesignerHighlightsTheRow()
         {
             WinUITestHost.RunWithWindow(window => {
                 var surface = LoadSurface(window, GridXaml);
@@ -1306,12 +1313,47 @@ Add to `OutlineViewTests.cs` (add `using WinUIDesigner.Designer.OutlineView;` to
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
 
-                surface.DesignContext.Services.Selection.SetSelectedComponents(new[] { button });
+                var row = control.RowFor(control.Root.Children[0]);
+                Assert.IsNull(((Grid)row).Background, "an unselected row must have no highlight");
 
-                Assert.IsTrue(control.Tree.SelectedNodes.Contains(control.Tree.RootNodes[0].Children[0]));
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new[] { button });
+                Assert.IsNotNull(((Grid)row).Background, "a selected row must be highlighted");
+
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[0]);
+                Assert.IsNull(((Grid)row).Background, "deselecting must clear the highlight");
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void CollapsingANodeHidesItsChildRows()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var stackPanelNode = control.Root.Children[1];
+                var childRow = control.RowFor(stackPanelNode.Children[0]);
+                var childHost = (FrameworkElement)((Grid)childRow).Parent;
+                Assert.AreEqual(Visibility.Visible, childHost.Visibility);
+
+                stackPanelNode.IsExpanded = false;
+                control.Rebuild();
+                childRow = control.RowFor(stackPanelNode.Children[0]);
+                childHost = (FrameworkElement)((Grid)childRow).Parent;
+                Assert.AreEqual(Visibility.Collapsed, childHost.Visibility);
+
+                window.Content = null;
             });
         }
 ```
+
+`Rebuild` is `protected`, so the last test cannot call it from outside the class. Make it `internal` instead of `protected` when you write the control — `internal` is what the test needs and this assembly already grants the test project access. Record that as the one deviation from the Produces list above.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1330,40 +1372,47 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel;
 
 namespace WinUIDesigner.Designer.OutlineView
 {
     /// <summary>
-    /// The design-time document-tree panel. Derives from StackPanel, not Control: this codebase
-    /// has zero .xaml files in which to declare a ControlTemplate, and a templateless Control
-    /// renders nothing - PropertyGridControl derives from StackPanel for the same reason.
+    /// The design-time document-tree panel.
     ///
-    /// Rows are built in C# and set as TreeViewNode.Content (spec Decision 4); a
-    /// TreeViewItem renders a UIElement-valued Content directly, which
-    /// TreeViewPlatformProbeTests pins. No shell app exists yet (Phase 5), so a host sets Root
-    /// directly, the same host-less-control-testing pattern PropertyGridControl uses.
+    /// Derives from StackPanel and builds its own row tree rather than hosting a
+    /// Microsoft.UI.Xaml.Controls.TreeView: a TreeView cannot be realized in this project's test
+    /// host at all - UpdateLayout() throws COMException "Cannot find a Resource with the Name/Key
+    /// TabViewScrollButtonBackground", and merging XamlControlsResources to fix that fail-fast
+    /// crashes the process (see TreeViewPlatformProbeTests, spec Decisions 4 and 5). This is the
+    /// same shape PropertyGridControl uses, for the same reason a templateless Control would not
+    /// work here: this codebase has zero .xaml files in which to declare a ControlTemplate.
+    ///
+    /// No shell app exists yet (Phase 5), so a host sets Root directly - the same host-less
+    /// control-testing pattern PropertyGridControl uses.
     /// </summary>
     public class OutlineViewControl : StackPanel
     {
-        readonly TreeView tree = new TreeView { SelectionMode = TreeViewSelectionMode.Multiple };
-        readonly Dictionary<TreeViewNode, IOutlineNode> nodeFromTreeNode = new Dictionary<TreeViewNode, IOutlineNode>();
-        readonly Dictionary<IOutlineNode, TreeViewNode> treeNodeFromNode = new Dictionary<IOutlineNode, TreeViewNode>();
+        const double IndentPerLevel = 12;
 
-        // Guards the selection round trip: outline -> ISelectionService -> outline, and the same
+        readonly StackPanel rows = new StackPanel();
+        readonly Dictionary<FrameworkElement, IOutlineNode> nodeFromRow = new Dictionary<FrameworkElement, IOutlineNode>();
+        readonly Dictionary<IOutlineNode, FrameworkElement> rowFromNode = new Dictionary<IOutlineNode, FrameworkElement>();
+        readonly Dictionary<IOutlineNode, ToggleButton> expandToggleFromNode = new Dictionary<IOutlineNode, ToggleButton>();
+        readonly List<IOutlineNode> subscribed = new List<IOutlineNode>();
+        readonly Brush selectionBrush = new SolidColorBrush(Colors.LightSteelBlue);
+
+        // Guards the selection round trip: row -> ISelectionService -> node -> row, and the same
         // loop in the other direction. Same guard-flag pattern the PropertyGrid editors use.
         bool syncingSelection;
 
         public OutlineViewControl()
         {
-            tree.SelectionChanged += Tree_SelectionChanged;
-            Children.Add(tree);
-        }
-
-        public TreeView Tree {
-            get { return tree; }
+            Children.Add(rows);
         }
 
         IOutlineNode root;
@@ -1376,10 +1425,16 @@ namespace WinUIDesigner.Designer.OutlineView
             }
         }
 
-        internal IOutlineNode NodeFor(TreeViewNode treeNode)
+        internal IOutlineNode NodeFor(FrameworkElement row)
         {
             IOutlineNode node;
-            return nodeFromTreeNode.TryGetValue(treeNode, out node) ? node : null;
+            return nodeFromRow.TryGetValue(row, out node) ? node : null;
+        }
+
+        internal FrameworkElement RowFor(IOutlineNode node)
+        {
+            FrameworkElement row;
+            return rowFromNode.TryGetValue(node, out row) ? row : null;
         }
 
         // IOutlineNode does not declare INotifyPropertyChanged, but every implementation in this
@@ -1390,6 +1445,7 @@ namespace WinUIDesigner.Designer.OutlineView
             if (source != null)
                 source.PropertyChanged += Node_PropertyChanged;
             node.Children.CollectionChanged += Node_ChildrenChanged;
+            subscribed.Add(node);
         }
 
         void Unsubscribe(IOutlineNode node)
@@ -1400,116 +1456,142 @@ namespace WinUIDesigner.Designer.OutlineView
             node.Children.CollectionChanged -= Node_ChildrenChanged;
         }
 
-        /// <summary>Discards and rebuilds the whole TreeViewNode tree from Root.</summary>
-        protected void Rebuild()
+        /// <summary>Discards and rebuilds the whole row tree from Root.</summary>
+        internal void Rebuild()
         {
-            foreach (var node in nodeFromTreeNode.Values) {
+            foreach (var node in subscribed) {
                 Unsubscribe(node);
             }
-            nodeFromTreeNode.Clear();
-            treeNodeFromNode.Clear();
-            tree.RootNodes.Clear();
+            subscribed.Clear();
+            nodeFromRow.Clear();
+            rowFromNode.Clear();
+            expandToggleFromNode.Clear();
+            rows.Children.Clear();
 
             if (root == null)
                 return;
 
-            tree.RootNodes.Add(BuildTreeNode(root));
+            AppendNode(root, 0, rows);
         }
 
-        TreeViewNode BuildTreeNode(IOutlineNode node)
+        void AppendNode(IOutlineNode node, int level, Panel host)
         {
-            var treeNode = new TreeViewNode {
-                Content = BuildRow(node),
-                IsExpanded = node.IsExpanded,
-            };
-            nodeFromTreeNode[treeNode] = node;
-            treeNodeFromNode[node] = treeNode;
-
+            var row = BuildRow(node, level);
+            nodeFromRow[row] = node;
+            rowFromNode[node] = row;
             Subscribe(node);
+            host.Children.Add(row);
 
-            foreach (var child in node.Children) {
-                treeNode.Children.Add(BuildTreeNode(child));
+            ApplySelectionHighlight(node);
+
+            var childHost = new StackPanel {
+                Visibility = node.IsExpanded ? Visibility.Visible : Visibility.Collapsed,
+            };
+            host.Children.Add(childHost);
+
+            ToggleButton expandToggle;
+            if (expandToggleFromNode.TryGetValue(node, out expandToggle)) {
+                expandToggle.Checked += (s, e) => {
+                    node.IsExpanded = true;
+                    childHost.Visibility = Visibility.Visible;
+                };
+                expandToggle.Unchecked += (s, e) => {
+                    node.IsExpanded = false;
+                    childHost.Visibility = Visibility.Collapsed;
+                };
             }
 
-            if (node.IsSelected && !tree.SelectedNodes.Contains(treeNode))
-                tree.SelectedNodes.Add(treeNode);
-
-            return treeNode;
+            foreach (var child in node.Children) {
+                AppendNode(child, level + 1, childHost);
+            }
         }
 
         /// <summary>The row visual for one node. Task 8 adds the hide and lock toggles into
-        /// columns 0 and 1; this task fills column 2 with the name only.</summary>
-        protected virtual FrameworkElement BuildRow(IOutlineNode node)
+        /// columns 1 and 2; this task fills column 0 with the expand toggle and column 3 with
+        /// the name.</summary>
+        protected virtual FrameworkElement BuildRow(IOutlineNode node, int level)
         {
-            var row = new Grid();
+            var row = new Grid { Margin = new Thickness(level * IndentPerLevel, 0, 0, 0) };
+            // Four fixed columns, whether or not this node uses each: expand (0), hide (1),
+            // lock (2), name (3). Sharing a column between a toggle and the name makes them
+            // overlap - the same mistake an early draft of PropertyGridControl.BuildPropertyRow
+            // made and its comment still warns about.
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16, GridUnitType.Pixel) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
+            if (node.Children.Count > 0) {
+                var expandToggle = new ToggleButton { Content = "▶", IsChecked = node.IsExpanded };
+                Grid.SetColumn(expandToggle, 0);
+                row.Children.Add(expandToggle);
+                expandToggleFromNode[node] = expandToggle;
+            }
+
             var nameText = new TextBlock { Text = node.Name, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(nameText, 2);
+            Grid.SetColumn(nameText, 3);
             row.Children.Add(nameText);
+
+            row.Tapped += (s, e) => HandleRowInvoked(node, false);
             return row;
+        }
+
+        /// <summary>The real row-click selection path, exposed so a test can drive it directly.
+        /// Tapped carries no public constructor for its args, so this internal seam - reachable
+        /// from WinUIDesigner.Designer.Tests via InternalsVisibleTo - is what makes the real path
+        /// testable, exactly like DesignPanel's own extracted click-to-select seam.</summary>
+        internal void HandleRowInvoked(IOutlineNode node, bool extend)
+        {
+            if (node.DesignItem == null)
+                return;
+            if (!extend) {
+                node.SelectionService.SetSelectedComponents(new[] { node.DesignItem });
+                return;
+            }
+            node.IsSelected = !node.IsSelected;
+        }
+
+        void ApplySelectionHighlight(IOutlineNode node)
+        {
+            FrameworkElement row;
+            if (!rowFromNode.TryGetValue(node, out row))
+                return;
+            var grid = row as Grid;
+            if (grid != null)
+                grid.Background = node.IsSelected ? selectionBrush : null;
         }
 
         void Node_ChildrenChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
             // A node's Children collection is rebuilt wholesale by OutlineNode.UpdateChildren, so
-            // resynchronising the whole tree is both correct and the simplest thing that is.
+            // resynchronising the whole row tree is both correct and the simplest thing that is.
             Rebuild();
         }
 
         void Node_PropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            var node = (IOutlineNode)sender;
-            TreeViewNode treeNode;
-            if (!treeNodeFromNode.TryGetValue(node, out treeNode))
+            var node = sender as IOutlineNode;
+            if (node == null || !rowFromNode.ContainsKey(node))
                 return;
 
             if (e.PropertyName == "Name") {
-                treeNode.Content = BuildRow(node);
+                Rebuild();
             } else if (e.PropertyName == "IsSelected") {
                 if (syncingSelection)
                     return;
                 syncingSelection = true;
                 try {
-                    if (node.IsSelected) {
-                        if (!tree.SelectedNodes.Contains(treeNode))
-                            tree.SelectedNodes.Add(treeNode);
-                    } else {
-                        tree.SelectedNodes.Remove(treeNode);
-                    }
+                    ApplySelectionHighlight(node);
                 } finally {
                     syncingSelection = false;
                 }
-            }
-        }
-
-        void Tree_SelectionChanged(TreeView sender, TreeViewSelectionChangedEventArgs args)
-        {
-            if (syncingSelection)
-                return;
-            syncingSelection = true;
-            try {
-                foreach (TreeViewNode treeNode in args.AddedItems.OfType<TreeViewNode>()) {
-                    var node = NodeFor(treeNode);
-                    if (node != null)
-                        node.IsSelected = true;
-                }
-                foreach (TreeViewNode treeNode in args.RemovedItems.OfType<TreeViewNode>()) {
-                    var node = NodeFor(treeNode);
-                    if (node != null)
-                        node.IsSelected = false;
-                }
-            } finally {
-                syncingSelection = false;
             }
         }
     }
 }
 ```
 
-If `TreeViewSelectionChangedEventArgs` does not expose `AddedItems`/`RemovedItems` under those names, read the real member names off the type in the same byte-scan way Task 1 did, and use them — do not fall back to rescanning `tree.SelectedNodes` wholesale, which would lose the distinction between added and removed.
+`HandleRowInvoked(node, false)` calls `SetSelectedComponents` with the default (replace) overload rather than going through `node.IsSelected`, so a plain click replaces the selection the way clicking on the canvas does. The `extend: true` path toggles the single node, which is what a future Ctrl-click would use. Both end up back here through `Node_PropertyChanged`, which is why the guard exists.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -1518,13 +1600,13 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: PASS (fourteen tests).
+Expected: PASS (fifteen tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs
-git commit -m "feat: add OutlineViewControl mirroring the outline tree into a WinUI TreeView"
+git commit -m "feat: add OutlineViewControl rendering the outline as a hand-built row tree"
 ```
 
 ---
@@ -1538,11 +1620,11 @@ git commit -m "feat: add OutlineViewControl mirroring the outline tree into a Wi
 
 **Interfaces:**
 - Consumes: `IOutlineNode.IsDesignTimeVisible` / `IsDesignTimeLocked` (Tasks 2, 4), `OutlineViewControl.BuildRow` (Task 7).
-- Produces: no new public API. `BuildRow` gains two `ToggleButton`s; `DesignPanel.HitTest` gains lock filtering.
+- Produces: no new public API. `BuildRow` gains two `ToggleButton`s in columns 1 and 2; `DesignPanel.HitTest` gains lock filtering.
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `OutlineViewTests.cs`:
+Add to `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`:
 
 ```csharp
         [Test]
@@ -1591,26 +1673,25 @@ Add to `OutlineViewTests.cs`:
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
 
-                var row = (Grid)control.Tree.RootNodes[0].Children[0].Content;
+                var node = control.Root.Children[0];
+                var row = (Grid)control.RowFor(node);
                 var toggles = row.Children
                     .OfType<Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>()
                     .ToList();
-                Assert.AreEqual(2, toggles.Count, "row must carry a hide toggle and a lock toggle");
+                var hideToggle = toggles.SingleOrDefault(t => Grid.GetColumn(t) == 1);
+                var lockToggle = toggles.SingleOrDefault(t => Grid.GetColumn(t) == 2);
+                Assert.IsNotNull(hideToggle, "no hide toggle in column 1");
+                Assert.IsNotNull(lockToggle, "no lock toggle in column 2");
 
-                var node = control.NodeFor(control.Tree.RootNodes[0].Children[0]);
-                toggles[0].IsChecked = true;   // hide
+                hideToggle.IsChecked = true;
                 Assert.IsFalse(node.IsDesignTimeVisible);
-                toggles[1].IsChecked = true;   // lock
+                lockToggle.IsChecked = true;
                 Assert.IsTrue(node.IsDesignTimeLocked);
+
+                window.Content = null;
             });
         }
-```
 
-- [ ] **Step 2: Write the lock-enforcement test**
-
-Also add:
-
-```csharp
         [Test]
         public void HitTestSkipsALockedItemAndItsChildren()
         {
@@ -1639,67 +1720,47 @@ Also add:
         }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
 dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: `TheRowCarriesAHideToggleAndALockToggle` FAILS (0 toggles) and `HitTestSkipsALockedItemAndItsChildren` FAILS (still hits the Button).
+Expected: `TheRowCarriesAHideToggleAndALockToggle` FAILS (no toggle in column 1) and `HitTestSkipsALockedItemAndItsChildren` FAILS (still hits the Button).
 
-- [ ] **Step 4: Add the two toggles to `BuildRow`**
+- [ ] **Step 3: Add the two toggles to `BuildRow`**
 
-In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, replace the body of `BuildRow` with:
-
-```csharp
-        protected virtual FrameworkElement BuildRow(IOutlineNode node)
-        {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            // The reference uses Eye.png/EyeClose.png through an IconItem control; this port ships
-            // no image resources, so Segoe Fluent Icons glyphs stand in (spec Decision 3).
-            // E7B3 = View, E72E = Lock.
-            var hideToggle = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton {
-                Content = new FontIcon { Glyph = "\uE7B3" },
-                IsChecked = !node.IsDesignTimeVisible,
-            };
-            hideToggle.Checked += (s, e) => node.IsDesignTimeVisible = false;
-            hideToggle.Unchecked += (s, e) => node.IsDesignTimeVisible = true;
-            Grid.SetColumn(hideToggle, 0);
-            row.Children.Add(hideToggle);
-
-            var lockToggle = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton {
-                Content = new FontIcon { Glyph = "\uE72E" },
-                IsChecked = node.IsDesignTimeLocked,
-            };
-            lockToggle.Checked += (s, e) => node.IsDesignTimeLocked = true;
-            lockToggle.Unchecked += (s, e) => node.IsDesignTimeLocked = false;
-            Grid.SetColumn(lockToggle, 1);
-            row.Children.Add(lockToggle);
-
-            var nameText = new TextBlock { Text = node.Name, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(nameText, 2);
-            row.Children.Add(nameText);
-            return row;
-        }
-```
-
-A `PropertyOutlineNode` has a null `DesignItem`, so its toggles would throw. Guard by adding, right after the three `ColumnDefinition`s:
+In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, inside `BuildRow`, insert between the expand-toggle block and the `nameText` block:
 
 ```csharp
-            if (node.DesignItem == null) {
-                var propertyName = new TextBlock { Text = node.Name, VerticalAlignment = VerticalAlignment.Center };
-                Grid.SetColumn(propertyName, 2);
-                row.Children.Add(propertyName);
-                return row;
+            // A PropertyOutlineNode stands for a property, not an element: its DesignItem is null,
+            // so it gets no hide/lock toggles - both would dereference DesignItem and throw.
+            if (node.DesignItem != null) {
+                // The reference uses Eye.png/EyeClose.png through an IconItem control; this port
+                // ships no image resources, so Segoe Fluent Icons glyphs stand in (spec Decision
+                // 3). E7B3 = View, E72E = Lock.
+                var hideToggle = new ToggleButton {
+                    Content = new FontIcon { Glyph = "\uE7B3" },
+                    IsChecked = !node.IsDesignTimeVisible,
+                };
+                hideToggle.Checked += (s, e) => node.IsDesignTimeVisible = false;
+                hideToggle.Unchecked += (s, e) => node.IsDesignTimeVisible = true;
+                Grid.SetColumn(hideToggle, 1);
+                row.Children.Add(hideToggle);
+
+                var lockToggle = new ToggleButton {
+                    Content = new FontIcon { Glyph = "\uE72E" },
+                    IsChecked = node.IsDesignTimeLocked,
+                };
+                lockToggle.Checked += (s, e) => node.IsDesignTimeLocked = true;
+                lockToggle.Unchecked += (s, e) => node.IsDesignTimeLocked = false;
+                Grid.SetColumn(lockToggle, 2);
+                row.Children.Add(lockToggle);
             }
 ```
 
-- [ ] **Step 5: Enforce the lock in `DesignPanel`**
+- [ ] **Step 4: Enforce the lock in `DesignPanel`**
 
 In `src/WinUIDesigner.Designer/DesignPanel.cs`, inside the content pass's `foreach` (lines 214-232), after `customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);` and before `continueHitTest = callback(customResult);`, insert:
 
@@ -1722,16 +1783,16 @@ In `src/WinUIDesigner.Designer/DesignPanel.cs`, inside the content pass's `forea
                         continue;
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 5: Run the tests to verify they pass**
 
 ```bash
 dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: PASS (eighteen tests).
+Expected: PASS (nineteen tests).
 
-- [ ] **Step 7: Run the full suite**
+- [ ] **Step 6: Run the full suite**
 
 ```bash
 tests/WinUIDesigner.XamlDom.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.XamlDom.Tests.exe --noresult
@@ -1739,9 +1800,9 @@ tests/WinUIDesigner.DesignModel.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult
 ```
 
-Expected: all green. `DesignPanel.HitTest` is exercised by many existing Designer tests — a regression there means the lock filter is too aggressive, not that the old tests are wrong.
+Expected: all green. `DesignPanel.HitTest` is exercised by many existing Designer tests — a regression there means the lock filter is too aggressive, not that the old tests are wrong. The XamlDom suite's 4 pre-existing unrelated ignores are the known baseline.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs src/WinUIDesigner.Designer/DesignPanel.cs tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs
@@ -1757,12 +1818,12 @@ git commit -m "feat: add outline hide/lock toggles and enforce the design-time l
 - Test: `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`
 
 **Interfaces:**
-- Consumes: `OutlineViewControl.Rebuild`, `BuildTreeNode` (Task 7).
-- Produces: `public string Filter { get; set; }` on `OutlineViewControl` (setting it rebuilds the tree filtered), and `public AutoSuggestBox FilterBox { get; }`.
+- Consumes: `OutlineViewControl.Rebuild`, `AppendNode` (Task 7).
+- Produces: `public string Filter { get; set; }` on `OutlineViewControl` (setting it rebuilds the tree filtered) and `public AutoSuggestBox FilterBox { get; }`.
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `OutlineViewTests.cs`:
+Add to `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`:
 
 ```csharp
         [Test]
@@ -1780,19 +1841,24 @@ Add to `OutlineViewTests.cs`:
                 window.Content = control;
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
-                Assert.AreEqual(2, control.Tree.RootNodes[0].Children.Count);
+
+                var buttonNode = control.Root.Children[0];
+                var stackPanelNode = control.Root.Children[1];
+                var imageNode = stackPanelNode.Children[0];
+                Assert.IsNotNull(control.RowFor(buttonNode));
 
                 control.Filter = "image";
                 control.UpdateLayout();
-                var rootTreeNode = control.Tree.RootNodes[0];
-                Assert.AreEqual(1, rootTreeNode.Children.Count, "only the StackPanel branch survives");
-                Assert.AreEqual("StackPanel", control.NodeFor(rootTreeNode.Children[0]).Name);
-                Assert.AreEqual(1, rootTreeNode.Children[0].Children.Count);
-                Assert.AreEqual("Image", control.NodeFor(rootTreeNode.Children[0].Children[0]).Name);
+                Assert.IsNull(control.RowFor(buttonNode), "a non-matching leaf must be dropped");
+                Assert.IsNotNull(control.RowFor(stackPanelNode), "an ancestor of a match must survive");
+                Assert.IsNotNull(control.RowFor(imageNode), "the match itself must survive");
+                Assert.IsNotNull(control.RowFor(control.Root), "the root always survives");
 
                 control.Filter = "";
                 control.UpdateLayout();
-                Assert.AreEqual(2, control.Tree.RootNodes[0].Children.Count);
+                Assert.IsNotNull(control.RowFor(buttonNode), "an empty filter restores the tree");
+
+                window.Content = null;
             });
         }
 ```
@@ -1807,21 +1873,21 @@ Expected: FAIL to compile — `OutlineViewControl` has no `Filter`.
 
 - [ ] **Step 3: Add the filter**
 
-In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`:
-
-Add a field and put the box above the tree in the constructor (replace `Children.Add(tree);` with the two lines below):
+In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, add a field beside `rows`:
 
 ```csharp
         readonly AutoSuggestBox filterBox = new AutoSuggestBox { PlaceholderText = "Filter" };
 ```
 
+Replace the constructor body's single `Children.Add(rows);` with:
+
 ```csharp
             filterBox.TextChanged += (s, e) => Filter = filterBox.Text;
             Children.Add(filterBox);
-            Children.Add(tree);
+            Children.Add(rows);
 ```
 
-Add the property:
+Add the property and the predicate:
 
 ```csharp
         public AutoSuggestBox FilterBox {
@@ -1831,9 +1897,9 @@ Add the property:
         string filter;
 
         /// <summary>Case-insensitive name filter. A node survives if its own name matches or any
-        /// descendant's does. WinUI's TreeView has no per-node visibility hook (the reference
-        /// uses WPF's container generator for this), so filtering rebuilds the node tree - which
-        /// discards TreeViewNode expand state for filtered-out branches (spec Known gaps).</summary>
+        /// descendant's does; the root always survives, so the filter narrows branches rather
+        /// than emptying the panel. Filtering rebuilds the row tree, which discards nothing
+        /// persistent - expand state lives on the nodes, not on the rows.</summary>
         public string Filter {
             get { return filter; }
             set {
@@ -1852,16 +1918,14 @@ Add the property:
         }
 ```
 
-In `BuildTreeNode`, replace the child loop with a filtered one:
+In `AppendNode`, filter the child loop:
 
 ```csharp
             foreach (var child in node.Children) {
                 if (Matches(child))
-                    treeNode.Children.Add(BuildTreeNode(child));
+                    AppendNode(child, level + 1, childHost);
             }
 ```
-
-`Rebuild` already clears both dictionaries and `tree.RootNodes`, so no other change is needed. A root that does not itself match is still shown — the filter narrows branches, it never empties the tree of its root.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -1870,7 +1934,7 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: PASS (nineteen tests).
+Expected: PASS (twenty tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1883,19 +1947,19 @@ git commit -m "feat: add name filtering to the outline view"
 
 ### Task 10: Drag wiring
 
-Read Task 1's commit message first — it names branch **A** or **B**. Implement that branch only.
+**Revised 2026-09-06** with spec Decisions 4 and 5: drag runs on this codebase's existing `DragListener` primitive (`src/WinUIDesigner.Designer/Controls/DragListener.cs`), the same one every drag gesture in Phases 4a-4d uses, not on WinUI drag-and-drop and not on `TreeView.CanReorderItems` — there is no `TreeView` any more. The old plan's A/B branch selection no longer applies.
 
 **Files:**
 - Modify: `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`
 - Test: `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`
 
 **Interfaces:**
-- Consumes: `IOutlineNode.CanInsert`/`Insert` (Task 6), `OutlineViewControl.NodeFor`/`TreeNodeFor`/`Rebuild` (Task 7).
-- Produces: `internal bool TryApplyDrop(TreeViewNode targetTreeNode, IList<TreeViewNode> draggedTreeNodes, TreeViewNode afterTreeNode, bool copy)` on `OutlineViewControl` — the seam the tests drive and both branches funnel through.
+- Consumes: `IOutlineNode.CanInsert`/`Insert` (Task 6), `OutlineViewControl.NodeFor`/`RowFor`/`Rebuild`/`BuildRow` (Task 7), `DragListener` (existing: `DragListener(UIElement target)`, events `Started`/`Changed`/`Completed`, `CurrentPoint`, `GetPosition(UIElement relativeTo)`, `IsCanceled`, and the `SimulateDown`/`SimulateMove`/`SimulateUp` test entry points).
+- Produces: `internal bool TryApplyDrop(IOutlineNode target, IList<IOutlineNode> dragged, IOutlineNode after, bool copy)` on `OutlineViewControl`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Add to `OutlineViewTests.cs`:
+Add to `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs` (add `using System.Collections.Generic;` if not already present):
 
 ```csharp
         [Test]
@@ -1912,17 +1976,18 @@ Add to `OutlineViewTests.cs`:
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
 
-                var rootTreeNode = control.Tree.RootNodes[0];
-                var stackPanelTreeNode = rootTreeNode.Children[1];
-                var draggedTreeNode = stackPanelTreeNode.Children[0];
+                var dragged = control.Root.Children[1].Children[0];
+                var after = control.Root.Children[0];
 
-                bool applied = control.TryApplyDrop(rootTreeNode,
-                    new List<TreeViewNode> { draggedTreeNode }, rootTreeNode.Children[0], false);
+                bool applied = control.TryApplyDrop(control.Root,
+                    new List<IOutlineNode> { dragged }, after, false);
 
                 Assert.IsTrue(applied);
                 Assert.AreEqual(3, grid.ContentProperty.CollectionElements.Count);
                 Assert.AreEqual(stackPanelButton, grid.ContentProperty.CollectionElements[1]);
                 Assert.AreEqual(0, stackPanel.ContentProperty.CollectionElements.Count);
+
+                window.Content = null;
             });
         }
 
@@ -1942,20 +2007,19 @@ Add to `OutlineViewTests.cs`:
                 control.Root = grid.CreateOutlineNode();
                 control.UpdateLayout();
 
-                var rootTreeNode = control.Tree.RootNodes[0];
-                var imageTreeNode = rootTreeNode.Children[0];
-                var buttonTreeNode = rootTreeNode.Children[1];
+                var imageNode = control.Root.Children[0];
+                var buttonNode = control.Root.Children[1];
 
-                bool applied = control.TryApplyDrop(imageTreeNode,
-                    new List<TreeViewNode> { buttonTreeNode }, null, false);
+                bool applied = control.TryApplyDrop(imageNode,
+                    new List<IOutlineNode> { buttonNode }, null, false);
 
                 Assert.IsFalse(applied, "an Image has no IPlacementBehavior and must reject the drop");
                 Assert.AreEqual(2, grid.ContentProperty.CollectionElements.Count);
+
+                window.Content = null;
             });
         }
 ```
-
-Add `using System.Collections.Generic;` and `using Microsoft.UI.Xaml.Controls;` to the test file if not already present.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1965,34 +2029,36 @@ dotnet build WinUIDesigner.sln
 
 Expected: FAIL to compile — `OutlineViewControl` has no `TryApplyDrop`.
 
-- [ ] **Step 3: Add the shared drop seam**
+- [ ] **Step 3: Add the drop seam**
 
 In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, add:
 
 ```csharp
-        /// <summary>Applies a drop to the model. Both drag branches funnel through here, and the
+        // Insert fires a burst of Children.CollectionChanged events (one per remove, one per
+        // insert). Rebuilding on each would discard and recreate the very rows the drop is still
+        // walking, so coalesce them into the single Rebuild at the end of TryApplyDrop. Same
+        // guard-flag pattern the PropertyGrid editors use (commit b5eb9c1).
+        bool suppressRebuild;
+
+        /// <summary>Applies a drop to the model. The drag gesture funnels through here, and the
         /// tests drive it directly rather than synthesising a pointer gesture - the same approach
-        /// DragListenerTests/MoveTests already take for drag-driven behaviour in this suite.
+        /// DragListenerTests and MoveTests already take for drag-driven behaviour in this suite.
         /// Returns false, changing nothing, when the target cannot accept the items.</summary>
-        internal bool TryApplyDrop(TreeViewNode targetTreeNode, IList<TreeViewNode> draggedTreeNodes,
-            TreeViewNode afterTreeNode, bool copy)
+        internal bool TryApplyDrop(IOutlineNode target, IList<IOutlineNode> dragged, IOutlineNode after, bool copy)
         {
-            var target = NodeFor(targetTreeNode);
-            if (target == null || target.DesignItem == null)
+            if (target == null || target.DesignItem == null || dragged == null)
                 return false;
 
-            var dragged = draggedTreeNodes.Select(NodeFor).Where(n => n != null && n.DesignItem != null).ToList();
-            if (dragged.Count == 0)
+            var items = dragged.Where(n => n != null && n.DesignItem != null).ToList();
+            if (items.Count == 0)
                 return false;
 
-            var after = afterTreeNode == null ? null : NodeFor(afterTreeNode);
-
-            if (!target.CanInsert(dragged, after, copy))
+            if (!target.CanInsert(items, after, copy))
                 return false;
 
             suppressRebuild = true;
             try {
-                target.Insert(dragged, after, copy);
+                target.Insert(items, after, copy);
             } finally {
                 suppressRebuild = false;
             }
@@ -2001,17 +2067,7 @@ In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, add:
         }
 ```
 
-Add the guard field beside `syncingSelection`:
-
-```csharp
-        // Insert fires a burst of Children.CollectionChanged events (one per remove, one per
-        // insert). Rebuilding on each would discard and recreate the very TreeViewNodes the drop
-        // is still walking, so coalesce them into the single Rebuild that TryApplyDrop does at
-        // the end. Same guard-flag pattern the PropertyGrid editors use (commit b5eb9c1).
-        bool suppressRebuild;
-```
-
-and make `Node_ChildrenChanged` respect it:
+and make `Node_ChildrenChanged` respect the guard:
 
 ```csharp
         void Node_ChildrenChanged(object sender, NotifyCollectionChangedEventArgs e)
@@ -2029,137 +2085,57 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: PASS (twenty-one tests).
+Expected: PASS (twenty-two tests).
 
-- [ ] **Step 5: Wire the platform drag — branch A (only if Task 1 recorded A)**
+- [ ] **Step 5: Wire the real drag gesture**
 
-In the `OutlineViewControl` constructor, after `tree.SelectionChanged += Tree_SelectionChanged;`:
-
-```csharp
-            tree.CanDragItems = true;
-            tree.CanReorderItems = true;
-            tree.AllowDrop = true;
-            tree.DragItemsStarting += Tree_DragItemsStarting;
-            tree.DragItemsCompleted += Tree_DragItemsCompleted;
-```
-
-and add:
+In `BuildRow`, immediately before `return row;`, attach a listener to the row:
 
 ```csharp
-        List<TreeViewNode> draggingTreeNodes = new List<TreeViewNode>();
-        readonly Dictionary<TreeViewNode, TreeViewNode> parentBeforeDrag = new Dictionary<TreeViewNode, TreeViewNode>();
-
-        void Tree_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs args)
-        {
-            draggingTreeNodes = args.Items.OfType<TreeViewNode>().ToList();
-            parentBeforeDrag.Clear();
-            foreach (var treeNode in draggingTreeNodes) {
-                parentBeforeDrag[treeNode] = treeNode.Parent;
+            if (node.DesignItem != null) {
+                var drag = new Controls.DragListener(row);
+                drag.Completed += d => {
+                    if (d.IsCanceled)
+                        return;
+                    var position = d.GetPosition(this);
+                    if (position == null)
+                        return;
+                    var targetRow = RowUnder(position.Value, row);
+                    if (targetRow == null)
+                        return;
+                    var target = NodeFor(targetRow);
+                    if (target == null)
+                        return;
+                    var after = target.Children.Count > 0 ? target.Children[target.Children.Count - 1] : null;
+                    TryApplyDrop(target, new List<IOutlineNode> { node }, after, false);
+                };
             }
-        }
-
-        void Tree_DragItemsCompleted(TreeView sender, TreeViewDragItemsCompletedEventArgs args)
-        {
-            if (draggingTreeNodes.Count == 0)
-                return;
-
-            var moved = draggingTreeNodes[0];
-            var newParent = moved.Parent;
-            TreeViewNode oldParent;
-            parentBeforeDrag.TryGetValue(moved, out oldParent);
-            draggingTreeNodes = new List<TreeViewNode>();
-
-            if (newParent == null)
-                return;
-
-            int index = newParent.Children.IndexOf(moved);
-            var after = index > 0 ? newParent.Children[index - 1] : null;
-
-            // WinUI has already performed the visual move. Put the TreeViewNode tree back the way
-            // it was, then let TryApplyDrop change the MODEL and rebuild from it - otherwise the
-            // visual move and the model move would both apply and double-count.
-            newParent.Children.Remove(moved);
-            if (oldParent != null)
-                oldParent.Children.Add(moved);
-
-            if (!TryApplyDrop(newParent, new List<TreeViewNode> { moved }, after, false))
-                Rebuild();
-        }
 ```
 
-- [ ] **Step 6: Wire the platform drag — branch B (only if Task 1 recorded B)**
-
-Instead of Step 5, in the constructor:
+and add the row hit test:
 
 ```csharp
-            tree.CanDragItems = true;
-            tree.CanReorderItems = false;
-            tree.AllowDrop = true;
-            tree.DragItemsStarting += Tree_DragItemsStarting;
-            tree.DragOver += Tree_DragOver;
-            tree.Drop += Tree_Drop;
-```
-
-and add:
-
-```csharp
-        List<TreeViewNode> draggingTreeNodes = new List<TreeViewNode>();
-
-        void Tree_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs args)
+        /// <summary>The row whose bounds contain a point expressed in this control's coordinates,
+        /// ignoring the row being dragged. There is no insert-line and no 3-zone hit test (spec
+        /// Decision 5): a drop lands ON a row, appending to that row's node.</summary>
+        FrameworkElement RowUnder(Windows.Foundation.Point point, FrameworkElement exclude)
         {
-            draggingTreeNodes = args.Items.OfType<TreeViewNode>().ToList();
-        }
-
-        TreeViewNode TargetUnder(DragEventArgs e)
-        {
-            var source = e.OriginalSource as DependencyObject;
-            while (source != null) {
-                var item = source as TreeViewItem;
-                if (item != null)
-                    return tree.NodeFromContainer(item);
-                source = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(source);
+            foreach (var candidate in rowFromNode.Values) {
+                if (candidate == exclude)
+                    continue;
+                var transform = candidate.TransformToVisual(this);
+                var bounds = transform.TransformBounds(
+                    new Windows.Foundation.Rect(0, 0, candidate.ActualWidth, candidate.ActualHeight));
+                if (bounds.Contains(point))
+                    return candidate;
             }
             return null;
         }
-
-        void Tree_DragOver(object sender, DragEventArgs e)
-        {
-            e.Handled = true;
-            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.None;
-
-            var targetTreeNode = TargetUnder(e);
-            if (targetTreeNode == null || draggingTreeNodes.Count == 0)
-                return;
-
-            var target = NodeFor(targetTreeNode);
-            var dragged = draggingTreeNodes.Select(NodeFor).Where(n => n != null && n.DesignItem != null).ToList();
-            if (target == null || target.DesignItem == null || dragged.Count == 0)
-                return;
-
-            var after = targetTreeNode.Children.Count > 0
-                ? targetTreeNode.Children[targetTreeNode.Children.Count - 1]
-                : null;
-            if (target.CanInsert(dragged, after == null ? null : NodeFor(after), false))
-                e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
-        }
-
-        void Tree_Drop(object sender, DragEventArgs e)
-        {
-            e.Handled = true;
-            var targetTreeNode = TargetUnder(e);
-            if (targetTreeNode == null || draggingTreeNodes.Count == 0)
-                return;
-
-            var after = targetTreeNode.Children.Count > 0
-                ? targetTreeNode.Children[targetTreeNode.Children.Count - 1]
-                : null;
-            var dragged = draggingTreeNodes;
-            draggingTreeNodes = new List<TreeViewNode>();
-            TryApplyDrop(targetTreeNode, dragged, after, false);
-        }
 ```
 
-- [ ] **Step 7: Run the full suite**
+`DragListener` lives in `WinUIDesigner.Designer.Controls`, so either add `using WinUIDesigner.Designer.Controls;` and drop the `Controls.` qualifier, or keep the qualifier as written — both compile from inside `WinUIDesigner.Designer.OutlineView`.
+
+- [ ] **Step 6: Run the full suite**
 
 ```bash
 dotnet build WinUIDesigner.sln
@@ -2170,7 +2146,7 @@ tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64
 
 Expected: all green, with the XamlDom suite's 4 pre-existing unrelated ignores as the known baseline.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs
@@ -2198,11 +2174,11 @@ Every item in the spec's Testing/DoD list, and the task that delivers it:
 | Collection change adds/removes a child node | 5 | `AddingAndRemovingACollectionElementUpdatesTheChildNodes` |
 | Filter narrows and restores | 9 | `FilterKeepsMatchingNodesAndTheirAncestorsAndAnEmptyFilterRestoresTheTree` |
 | Drag: model-level drop outcome | 10 | `DroppingANodeOntoAContainerReparentsTheDesignItem`, `DroppingOntoATargetThatCannotAcceptTheItemDoesNothing` |
-| Decision 4 assumption (UIElement Content) | 1 | `TreeViewItemRendersAUIElementValuedContent` |
-| Decision 5 branch selection | 1 | `MovingATreeViewNodeReportsItsNewParentAndIndex` |
+| `TreeView` unusable in this host; hand-built rows render | 1 | `TreeViewCannotBeRealizedInThisTestHost`, `AHandBuiltRowTreeRendersInThisTestHost` |
 | `CanSelectComponent` | 2 | `CanSelectComponentIsTrueForAVisualItemAndFalseForANonVisualOne` |
-| Control mirrors the tree; row is a FrameworkElement | 7 | `TheControlMirrorsTheOutlineTreeIntoTreeViewNodes` |
-| Control selection sync both ways | 7 | `SelectingATreeViewNodeSelectsTheDesignItem`, `SelectingInTheDesignerSelectsTheTreeViewNode` |
+| Control builds one row per node, maps round-trip | 7 | `TheControlBuildsOneRowPerNode` |
+| Control selection sync both ways | 7 | `InvokingARowSelectsTheDesignItem`, `SelectingInTheDesignerHighlightsTheRow` |
+| Expand/collapse hides child rows | 7 | `CollapsingANodeHidesItsChildRows` |
 | Row carries hide + lock toggles | 8 | `TheRowCarriesAHideToggleAndALockToggle` |
 
 ## Known gaps to record at the end of the phase
@@ -2210,6 +2186,7 @@ Every item in the spec's Testing/DoD list, and the task that delivers it:
 Carry these into the spec's Known gaps section (or a phase-completion commit) if implementation confirms them:
 
 - `UpdateChildrenCollectionChanged` passes `e.NewStartingIndex` — an index into the content collection — straight into `Children`, which may also hold leading property nodes. Ported from the reference as-is; only observable on an element that has both set non-content properties and a collection insert.
-- The filter rebuild discards `TreeViewNode` expand state.
 - `OutlineNodeBase` never unsubscribes from `NameChanged`/`PropertyChanged`/`CollectionChanged`/`SelectionChanged`.
-- Whichever drag branch Task 1 did **not** select, and why.
+- The whole row tree rebuilds on any model change, on any name change, and on every filter keystroke.
+- Reordering within one parent is not expressible: a drop appends to the target's children (no insert-line, no 3-zone hit test).
+- `TreeView` remains unusable in the test host; if a packaged Phase 5 shell can host one, the container could be swapped without touching the node model.
