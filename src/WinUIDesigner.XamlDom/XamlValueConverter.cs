@@ -202,6 +202,17 @@ namespace WinUIDesigner.XamlDom
 				throw new FormatException(FailureMessage(text));
 
 			var result = hostProperty.GetValue(host);
+
+			// WinUI gives a reference-typed property value a single owner: a PointCollection or a
+			// Geometry read off the synthetic host throws
+			// ArgumentException("Value does not fall within the expected range") when it is later
+			// assigned to the real element. Clearing the host's local value releases that claim,
+			// after which the value assigns freely and can be reassigned more than once. Struct
+			// values are unaffected, and a host with no dependency property (Grid.Translation) has
+			// nothing to clear.
+			if (dependencyProperty != null && hostObject != null)
+				hostObject.ClearValue(dependencyProperty);
+
 			if (result != null && !targetType.IsInstanceOfType(result))
 				throw new FormatException(
 					"Converting '" + text + "' produced a " + result.GetType().FullName +

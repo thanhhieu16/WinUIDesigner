@@ -554,5 +554,26 @@ namespace WinUIDesigner.XamlDom.Tests
                     "Parsing SampleWindow.xaml took " + stopwatch.ElapsedMilliseconds + " ms");
             });
         }
+
+        [Test]
+        public void ProducesAValueThatCanBeAssignedToARealElement()
+        {
+            // WinUI gives a reference-typed property value a single owner. A value still owned by
+            // the synthetic conversion host throws ArgumentException when the parser assigns it to
+            // the real element, so the converter has to release the host's claim before returning.
+            WinUITestHost.Run(() => {
+                var points = (Microsoft.UI.Xaml.Media.PointCollection)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.PointCollection), "1,2 3,4");
+                var polyline = new Microsoft.UI.Xaml.Shapes.Polyline();
+                polyline.Points = points;
+                Assert.AreEqual(2, polyline.Points.Count);
+
+                var geometry = (Microsoft.UI.Xaml.Media.Geometry)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.Geometry), "M0,0 L10,10 Z");
+                var path = new Microsoft.UI.Xaml.Shapes.Path();
+                path.Data = geometry;
+                Assert.IsInstanceOf<Microsoft.UI.Xaml.Media.PathGeometry>(path.Data);
+            });
+        }
     }
 }
