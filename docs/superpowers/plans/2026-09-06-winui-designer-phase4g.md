@@ -24,7 +24,7 @@
 - Files ported from SharpDevelop keep their original MIT copyright header (copy the 17-line header verbatim from the reference file being ported).
 - **Zero `.xaml` files in `src/`** — every visual is built by C# object construction.
 - CLAUDE.md's "Known WinUI platform gaps" list applies: before assuming a WPF API exists in WinUI, verify it.
-- Indentation: `src/WinUIDesigner.DesignModel/DesignItem.cs` uses **tabs**; `Services.cs`, `ModelTools.cs` and everything under `PropertyGrid/` use **4 spaces**. Match the file you are editing. New files in `Designer/OutlineView/` and `DesignModel/Interfaces/` use 4 spaces.
+- Indentation is per-file — **match the file you are editing**, and check it rather than trusting this list. Surveyed: **tabs** in `src/WinUIDesigner.DesignModel/DesignItem.cs`, `src/WinUIDesigner.Designer/DesignSurface.cs`, `src/WinUIDesigner.Designer/DesignPanel.cs`; **4 spaces** in `src/WinUIDesigner.DesignModel/Services.cs`, `src/WinUIDesigner.Designer/ModelTools.cs`, everything under `PropertyGrid/`, and `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`. New files in `Designer/OutlineView/` and `DesignModel/Interfaces/` use 4 spaces. Every code block in this plan is written with 4-space indentation for readability; re-indent it to tabs when the destination file uses tabs.
 
 ## Plan-level rulings
 
@@ -1762,7 +1762,7 @@ In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, inside `Build
 
 - [ ] **Step 4: Enforce the lock in `DesignPanel`**
 
-In `src/WinUIDesigner.Designer/DesignPanel.cs`, inside the content pass's `foreach` (lines 214-232), after `customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);` and before `continueHitTest = callback(customResult);`, insert:
+In `src/WinUIDesigner.Designer/DesignPanel.cs`, inside the content pass's `foreach` (lines 214-232), after `customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);` and before `continueHitTest = callback(customResult);`, insert the block below — **re-indented to tabs**, because `DesignPanel.cs` is tab-indented throughout (the block is written here with spaces only for readability):
 
 ```csharp
                     // Design-time lock (Phase 4g): a locked item and everything inside it are
