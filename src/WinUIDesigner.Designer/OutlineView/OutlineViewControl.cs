@@ -70,6 +70,35 @@ namespace WinUIDesigner.Designer.OutlineView
             return rowFromNode.TryGetValue(node, out row) ? row : null;
         }
 
+        string filter;
+
+        /// <summary>Case-insensitive name filter. A node survives if its own name matches or any
+        /// descendant's does; the root always survives, so the filter narrows branches rather
+        /// than emptying the panel. Filtering rebuilds the row tree, which discards nothing
+        /// persistent - expand state lives on the nodes, not on the rows.
+        ///
+        /// The text input belongs to the host, not here: no text-input control can be laid out
+        /// in this project's test host (a TextBox or AutoSuggestBox throws E_FAIL from
+        /// UpdateLayout, and several such tests together crash the test process), and the
+        /// reference splits it the same way - its ClearableTextBox lives in Outline.xaml and
+        /// binds to the tree control's Filter property. See spec Decision 12.</summary>
+        public string Filter {
+            get { return filter; }
+            set {
+                filter = value;
+                Rebuild();
+            }
+        }
+
+        bool Matches(IOutlineNode node)
+        {
+            if (string.IsNullOrEmpty(filter))
+                return true;
+            if (node.Name != null && node.Name.IndexOf(filter, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+            return node.Children.Any(Matches);
+        }
+
         // IOutlineNode does not declare INotifyPropertyChanged, but every implementation in this
         // assembly derives from OutlineNodeBase, which does. These two keep the cast in one place.
         void Subscribe(IOutlineNode node)
@@ -135,7 +164,8 @@ namespace WinUIDesigner.Designer.OutlineView
             }
 
             foreach (var child in node.Children) {
-                AppendNode(child, level + 1, childHost);
+                if (Matches(child))
+                    AppendNode(child, level + 1, childHost);
             }
         }
 

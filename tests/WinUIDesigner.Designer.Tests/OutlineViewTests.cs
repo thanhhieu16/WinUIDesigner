@@ -499,5 +499,41 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreNotEqual(stackPanel, after.ModelHit, "the locked container itself must not be hit");
             });
         }
+
+        [Test]
+        public void FilterKeepsMatchingNodesAndTheirAncestorsAndAnEmptyFilterRestoresTheTree()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Button /><StackPanel><Image /></StackPanel>" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var buttonNode = control.Root.Children[0];
+                var stackPanelNode = control.Root.Children[1];
+                var imageNode = stackPanelNode.Children[0];
+                Assert.IsNotNull(control.RowFor(buttonNode));
+
+                control.Filter = "image";
+                control.UpdateLayout();
+                Assert.IsNull(control.RowFor(buttonNode), "a non-matching leaf must be dropped");
+                Assert.IsNotNull(control.RowFor(stackPanelNode), "an ancestor of a match must survive");
+                Assert.IsNotNull(control.RowFor(imageNode), "the match itself must survive");
+                Assert.IsNotNull(control.RowFor(control.Root), "the root always survives");
+
+                control.Filter = "";
+                control.UpdateLayout();
+                Assert.IsNotNull(control.RowFor(buttonNode), "an empty filter restores the tree");
+
+                window.Content = null;
+            });
+        }
     }
 }
