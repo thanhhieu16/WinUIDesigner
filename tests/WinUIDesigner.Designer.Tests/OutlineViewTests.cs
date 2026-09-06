@@ -81,5 +81,76 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual("", names.GetOutlineNodeName(null));
             });
         }
+
+        [Test]
+        public void TheOutlineMirrorsTheDesignItemHierarchy()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                Assert.IsNotNull(outline);
+
+                Assert.AreEqual(2, outline.Children.Count);
+                Assert.AreEqual(1, outline.Children[1].Children.Count);
+
+                var button = grid.ContentProperty.CollectionElements[0];
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+                var stackPanelButton = stackPanel.ContentProperty.CollectionElements[0];
+
+                Assert.AreEqual(button, outline.Children[0].DesignItem);
+                Assert.AreEqual(stackPanel, outline.Children[1].DesignItem);
+                Assert.AreEqual(stackPanelButton, outline.Children[1].Children[0].DesignItem);
+                Assert.AreEqual("Button", outline.Children[0].Name);
+            });
+        }
+
+        [Test]
+        public void CreateOutlineNodeReturnsTheSameNodeForTheSameDesignItem()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                Assert.AreSame(grid.CreateOutlineNode(), grid.CreateOutlineNode());
+            });
+        }
+
+        [Test]
+        public void SelectingInTheDesignerSelectsTheMatchingOutlineNodes()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+                var stackPanelButton = stackPanel.ContentProperty.CollectionElements[0];
+                surface.DesignContext.Services.Selection.SetSelectedComponents(
+                    new[] { stackPanel, stackPanelButton });
+
+                Assert.IsFalse(outline.IsSelected);
+                Assert.IsFalse(outline.Children[0].IsSelected);
+                Assert.IsTrue(outline.Children[1].IsSelected);
+                Assert.IsTrue(outline.Children[1].Children[0].IsSelected);
+            });
+        }
+
+        [Test]
+        public void SelectingAnOutlineNodeSelectsItInTheDesigner()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var outline = grid.CreateOutlineNode();
+                var selection = surface.DesignContext.Services.Selection;
+
+                selection.SetSelectedComponents(new DesignItem[0]);
+                outline.IsSelected = true;
+                outline.Children[0].IsSelected = true;
+
+                Assert.IsTrue(selection.SelectedItems.Contains(grid));
+                Assert.IsTrue(selection.SelectedItems.Contains(grid.ContentProperty.CollectionElements[0]));
+            });
+        }
     }
 }

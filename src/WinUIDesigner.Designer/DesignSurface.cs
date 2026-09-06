@@ -46,6 +46,7 @@ namespace WinUIDesigner.Designer
 			// above: both implementations live in WinUIDesigner.Designer, and XamlDesignContext
 			// lives in WinUIDesigner.DesignModel, which does not (and must not) reference it.
 			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IOutlineNodeNameService), new OutlineView.OutlineNodeNameService()));
+			loadSettings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(IOutlineNodeService), new OutlineView.OutlineNode.OutlineNodeService()));
 			InitializeDesigner(new XamlDesignContext(xamlReader, loadSettings));
 		}
 
