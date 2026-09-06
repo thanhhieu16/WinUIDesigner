@@ -97,4 +97,16 @@ namespace WinUIDesigner.DesignModel
         void DeregisterBinding(Microsoft.UI.Xaml.Input.KeyboardAccelerator binding);
         Microsoft.UI.Xaml.Input.KeyboardAccelerator GetBinding(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers);
     }
+
+    /// <summary>Creates outline nodes, returning a cached node for an already-seen DesignItem.</summary>
+    public interface IOutlineNodeService
+    {
+        IOutlineNode Create(DesignItem designItem);
+    }
+
+    /// <summary>Produces the display name for an outline node.</summary>
+    public interface IOutlineNodeNameService
+    {
+        string GetOutlineNodeName(DesignItem designItem);
+    }
 }

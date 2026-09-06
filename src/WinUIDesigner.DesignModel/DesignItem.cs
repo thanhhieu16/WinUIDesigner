@@ -355,6 +355,15 @@ namespace WinUIDesigner.DesignModel
 		public abstract DesignItem Clone();
 
 		/// <summary>
+		/// Gets the <see cref="IOutlineNode"/> for this design item, creating it on first use.
+		/// Requires IOutlineNodeService, which DesignSurface.LoadDesigner registers.
+		/// </summary>
+		public IOutlineNode CreateOutlineNode()
+		{
+			return Services.GetRequiredService<IOutlineNodeService>().Create(this);
+		}
+
+		/// <summary>
 		/// Gets a Transform representing all transforms applied to the item's view. Narrowed to
 		/// RenderTransform only - the reference also walks LayoutTransform and
 		/// ContainerVisual.Transform, neither of which exists in WinUI (confirmed absent from

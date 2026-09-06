@@ -33,6 +33,16 @@ namespace WinUIDesigner.Designer
             return double.IsNaN(v) ? element.RenderSize.Height : v;
         }
 
+        /// <summary>Whether this item can appear as a selectable node in its own right. Ported
+        /// verbatim from the reference's ModelTools.CanSelectComponent (WpfDesign.Designer/
+        /// Project/ModelTools.cs:91-94). An item without a View is a non-visual collection
+        /// element (a RowDefinition, say); OutlineNode.UpdateChildrenCore skips over it and
+        /// promotes its own content children in its place instead of showing it as a node.</summary>
+        public static bool CanSelectComponent(DesignItem item)
+        {
+            return item.View != null;
+        }
+
         /// <summary>Gets the default size to use for a newly-created item with no explicit size
         /// of its own, so a click-without-drag placement (CreateComponentTool.
         /// AddItemsWithDefaultSize, Phase 4d Task 4) doesn't add a 0x0 control. Ported in
