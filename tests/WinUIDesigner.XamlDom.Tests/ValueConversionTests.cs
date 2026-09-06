@@ -520,6 +520,12 @@ namespace WinUIDesigner.XamlDom.Tests
                 XamlNormalPropertyInfo.GetCustomTypeConverter(typeof(Type)).GetType().Name);
             Assert.AreEqual("DependencyPropertyConverter",
                 XamlNormalPropertyInfo.GetCustomTypeConverter(typeof(DependencyProperty)).GetType().Name);
+
+            // The order is only safe while none of these three is also a host-table key; that
+            // null-ness is the actual invariant, and a future table entry is what would break it.
+            Assert.IsNull(XamlValueConverter.TryCreate(typeof(object)));
+            Assert.IsNull(XamlValueConverter.TryCreate(typeof(Type)));
+            Assert.IsNull(XamlValueConverter.TryCreate(typeof(DependencyProperty)));
         }
 
         [Test]
@@ -573,6 +579,13 @@ namespace WinUIDesigner.XamlDom.Tests
                 var path = new Microsoft.UI.Xaml.Shapes.Path();
                 path.Data = geometry;
                 Assert.IsInstanceOf<Microsoft.UI.Xaml.Media.PathGeometry>(path.Data);
+                Assert.AreEqual(1, ((Microsoft.UI.Xaml.Media.PathGeometry)path.Data).Figures.Count);
+
+                var dashes = (Microsoft.UI.Xaml.Media.DoubleCollection)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.DoubleCollection), "2 3");
+                var line = new Microsoft.UI.Xaml.Shapes.Line();
+                line.StrokeDashArray = dashes;
+                Assert.AreEqual(2, line.StrokeDashArray.Count);
             });
         }
     }

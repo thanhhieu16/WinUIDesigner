@@ -210,8 +210,15 @@ namespace WinUIDesigner.XamlDom
 			// after which the value assigns freely and can be reassigned more than once. Struct
 			// values are unaffected, and a host with no dependency property (Grid.Translation) has
 			// nothing to clear.
-			if (dependencyProperty != null && hostObject != null)
-				hostObject.ClearValue(dependencyProperty);
+			if (dependencyProperty != null && hostObject != null) {
+				// The value is already captured, so a failed release must not discard it: degrade
+				// to the pre-fix behaviour for this one type rather than losing the conversion to
+				// UpdateValueOnInstance's catch-all.
+				try {
+					hostObject.ClearValue(dependencyProperty);
+				} catch (Exception) {
+				}
+			}
 
 			if (result != null && !targetType.IsInstanceOfType(result))
 				throw new FormatException(
