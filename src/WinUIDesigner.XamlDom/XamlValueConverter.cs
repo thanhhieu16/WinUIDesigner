@@ -150,19 +150,18 @@ namespace WinUIDesigner.XamlDom
 			if (text == null)
 				return base.ConvertFrom(context, culture, value);
 
+			var attributeText = text.StartsWith("{}", StringComparison.Ordinal) ? text.Substring(2) : text;
+
 			// Markup extensions are out of scope, and letting one through is worse than failing:
 			// an isolated fragment resolves {StaticResource}/{ThemeResource} against
 			// Application.Current.Resources - the designer's own resource scope, not the
 			// document's - so the designer would render the user's document with its own theme
-			// values and say nothing. XamlParser guards the attribute form
-			// (XamlParser.cs:751-752), but the property-element form is not routed through
-			// MarkupExtensionParser, and XamlTextValue.Text strips a leading "{}"
-			// (XamlTextValue.cs:73-77), so "{}{Binding}" arrives here as a live "{Binding}".
-			if (text.StartsWith("{", StringComparison.Ordinal) && !text.StartsWith("{}", StringComparison.Ordinal))
+			// values and say nothing. The guard runs on the STRIPPED text on purpose: "{}" is
+			// XAML's escape for a literal leading brace, so "{}{Binding}" means the literal text
+			// "{Binding}", and guarding before the strip let exactly that through.
+			if (attributeText.StartsWith("{", StringComparison.Ordinal))
 				throw new NotSupportedException(
 					"Markup extension text cannot be converted to " + targetType.FullName + ": " + text);
-
-			var attributeText = text.StartsWith("{}", StringComparison.Ordinal) ? text.Substring(2) : text;
 
 			// Host viability depends on the hosting process's IXamlMetadataProvider and available
 			// theme resources - a bare <TextBox/> does not load in this test host, for instance -
@@ -252,7 +251,13 @@ namespace WinUIDesigner.XamlDom
 					usable = false;
 				}
 
-				hostViability[hostType] = usable;
+				// Only a positive result is cached. A failure here can be environmental rather than
+				// permanent - XamlReader.Load is thread-affine, so a call from a non-dispatcher
+				// thread throws - and caching that would report "host unusable in this process" for
+				// every later conversion of this type, including correct ones. Re-probing costs one
+				// XamlReader.Load, and only on a path that is already failing.
+				if (usable)
+					hostViability[hostType] = true;
 				return usable;
 			}
 		}

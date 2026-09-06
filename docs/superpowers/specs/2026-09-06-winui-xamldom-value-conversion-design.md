@@ -446,6 +446,22 @@ New file `tests/WinUIDesigner.XamlDom.Tests/ValueConversionTests.cs`.
   `PathHandlerExtensionConvertMenuTests.cs:18-28` and `Phase4dDefinitionOfDoneTests.cs:220-232`
   each explain a gap that Phase A closes. None asserts a wrong value as correct, so none turns red,
   but all four must be corrected in the same change.
+- **Reported messages are only self-authored for the sixteen table types.**
+  `XamlProperty.ReportValueFailure` prefixes the exception's own message, and only
+  `XamlValueConverter` composes the `Cannot convert '<text>' to <TypeName>.` form. A property
+  whose type has no table entry reports the base .NET converter's text, which names neither the
+  value nor the type — e.g. `<Image Source='ms-appx:///Assets/a.png'/>` now reports
+  `Cannot set Source: TypeConverter cannot convert from System.String.` on open, blaming a
+  document that is not at fault: `ImageSource` is excluded from the table deliberately, by
+  Decision 9, because converting it would start an outbound fetch. Composing the message from
+  `propertyInfo` and the `XamlTextValue` would fix the wording; deciding whether the deliberate
+  exclusions should report at all is a policy question for Phase B.
+- **The performance budget is a smoke test, not a budget.** Definition-of-done item 14 asks that
+  opening `SampleWindow.xaml` not regress by more than 50 ms, but the test asserts an absolute
+  wall-clock under 250 ms against a parse measured at roughly 16 ms. It has no baseline, would
+  pass through a fifteen-fold slowdown, and can flake under load. Timing the same file twice in
+  one test — once normally, once with the converter bypassed — and asserting the delta would
+  make it real.
 
 ## Out of scope
 

@@ -677,17 +677,60 @@ namespace WinUIDesigner.XamlDom.Tests
         {
             // An isolated fragment resolves {StaticResource} against Application.Current.Resources -
             // the designer's own scope, not the document's - so a key that exists only there must
-            // be refused rather than silently used.
+            // never reach the document. Asserting the reported error is not enough: the guard could
+            // fire for the wrong reason, or be bypassed, and the report would look identical. This
+            // asserts the value, and covers the "{}"-escaped forms that once bypassed the guard.
             WinUITestHost.Run(() => {
                 Application.Current.Resources["PhaseAProbeThickness"] = new Thickness(9);
                 try {
-                    var sink = ParseCollectingErrors(
-                        "<Border xmlns='" + PresentationNs + "'><Border.Padding>{StaticResource PhaseAProbeThickness}</Border.Padding></Border>");
-                    Assert.AreEqual(1, sink.Messages.Count, "A designer-scoped resource key was silently used");
-                    StringAssert.Contains("Markup extension", sink.Messages[0]);
+                    foreach (var attributeText in new[] {
+                        "{StaticResource PhaseAProbeThickness}",
+                        "{}{StaticResource PhaseAProbeThickness}",
+                        "{}{}{StaticResource PhaseAProbeThickness}",
+                    }) {
+                        var sink = ParseCollectingErrors(
+                            "<Border xmlns='" + PresentationNs + "'><Border.Padding>" +
+                            attributeText + "</Border.Padding></Border>");
+                        Assert.AreEqual(1, sink.Messages.Count,
+                            "property element '" + attributeText + "' was not reported");
+
+                        var doc = XamlParser.Parse(new System.IO.StringReader(
+                            "<Border xmlns='" + PresentationNs + "'><Border.Padding>" +
+                            attributeText + "</Border.Padding></Border>"));
+                        Assert.AreNotEqual(9.0, ((Microsoft.UI.Xaml.Controls.Border)doc.RootInstance).Padding.Left,
+                            "property element '" + attributeText + "' resolved the designer's own resource");
+                    }
+
+                    var attributeDoc = XamlParser.Parse(new System.IO.StringReader(
+                        "<Border xmlns='" + PresentationNs + "' Padding='{}{}{StaticResource PhaseAProbeThickness}'/>"));
+                    Assert.AreNotEqual(9.0, ((Microsoft.UI.Xaml.Controls.Border)attributeDoc.RootInstance).Padding.Left,
+                        "attribute form resolved the designer's own resource");
                 } finally {
                     Application.Current.Resources.Remove("PhaseAProbeThickness");
                 }
+            });
+        }
+
+        [Test]
+        public void TreatsXmlMetacharactersInAttributeTextAsLiteralContent()
+        {
+            // The converter interpolates untrusted document text into an XML fragment that is then
+            // parsed as XAML. Escaping is the only thing stopping that text from closing its own
+            // attribute and introducing an element or an xmlns. FontFamily is the probe because
+            // WinUI accepts any string as a family name, so the text survives verbatim and can be
+            // compared.
+            WinUITestHost.Run(() => {
+                var quote = (Microsoft.UI.Xaml.Media.FontFamily)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.FontFamily), "A' Foo='B");
+                Assert.AreEqual("A' Foo='B", quote.Source, "a quote broke out of the attribute");
+
+                var ampersand = (Microsoft.UI.Xaml.Media.FontFamily)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.FontFamily), "A&amp;B");
+                Assert.AreEqual("A&amp;B", ampersand.Source, "an entity was decoded rather than kept literal");
+
+                var angle = (Microsoft.UI.Xaml.Media.FontFamily)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.FontFamily), "A<B>C");
+                Assert.AreEqual("A<B>C", angle.Source, "angle brackets were not kept literal");
             });
         }
 
