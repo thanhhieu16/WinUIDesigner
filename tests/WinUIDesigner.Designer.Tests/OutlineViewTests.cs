@@ -535,5 +535,63 @@ namespace WinUIDesigner.Designer.Tests
                 window.Content = null;
             });
         }
+
+        [Test]
+        public void DroppingANodeOntoAContainerReparentsTheDesignItem()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var stackPanel = grid.ContentProperty.CollectionElements[1];
+                var stackPanelButton = stackPanel.ContentProperty.CollectionElements[0];
+
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var dragged = control.Root.Children[1].Children[0];
+                var after = control.Root.Children[0];
+
+                bool applied = control.TryApplyDrop(control.Root,
+                    new List<IOutlineNode> { dragged }, after, false);
+
+                Assert.IsTrue(applied);
+                Assert.AreEqual(3, grid.ContentProperty.CollectionElements.Count);
+                Assert.AreEqual(stackPanelButton, grid.ContentProperty.CollectionElements[1]);
+                Assert.AreEqual(0, stackPanel.ContentProperty.CollectionElements.Count);
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void DroppingOntoATargetThatCannotAcceptTheItemDoesNothing()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Image /><Button />" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var imageNode = control.Root.Children[0];
+                var buttonNode = control.Root.Children[1];
+
+                bool applied = control.TryApplyDrop(imageNode,
+                    new List<IOutlineNode> { buttonNode }, null, false);
+
+                Assert.IsFalse(applied, "an Image has no IPlacementBehavior and must reject the drop");
+                Assert.AreEqual(2, grid.ContentProperty.CollectionElements.Count);
+
+                window.Content = null;
+            });
+        }
     }
 }

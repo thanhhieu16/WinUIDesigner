@@ -221,7 +221,44 @@ namespace WinUIDesigner.Designer.OutlineView
             row.Children.Add(nameText);
 
             row.Tapped += (s, e) => HandleRowInvoked(node, false);
+
+            if (node.DesignItem != null) {
+                var drag = new Controls.DragListener(row);
+                drag.Completed += d => {
+                    if (d.IsCanceled)
+                        return;
+                    var position = d.GetPosition(this);
+                    if (position == null)
+                        return;
+                    var targetRow = RowUnder(position.Value, row);
+                    if (targetRow == null)
+                        return;
+                    var target = NodeFor(targetRow);
+                    if (target == null)
+                        return;
+                    var after = target.Children.Count > 0 ? target.Children[target.Children.Count - 1] : null;
+                    TryApplyDrop(target, new List<IOutlineNode> { node }, after, false);
+                };
+            }
+
             return row;
+        }
+
+        /// <summary>The row whose bounds contain a point expressed in this control's coordinates,
+        /// ignoring the row being dragged. There is no insert-line and no 3-zone hit test (spec
+        /// Decision 5): a drop lands ON a row, appending to that row's node.</summary>
+        FrameworkElement RowUnder(Windows.Foundation.Point point, FrameworkElement exclude)
+        {
+            foreach (var candidate in rowFromNode.Values) {
+                if (candidate == exclude)
+                    continue;
+                var transform = candidate.TransformToVisual(this);
+                var bounds = transform.TransformBounds(
+                    new Windows.Foundation.Rect(0, 0, candidate.ActualWidth, candidate.ActualHeight));
+                if (bounds.Contains(point))
+                    return candidate;
+            }
+            return null;
         }
 
         /// <summary>The real row-click selection path, exposed so a test can drive it directly.
@@ -249,8 +286,42 @@ namespace WinUIDesigner.Designer.OutlineView
                 grid.Background = node.IsSelected ? selectionBrush : null;
         }
 
+        // Insert fires a burst of Children.CollectionChanged events (one per remove, one per
+        // insert). Rebuilding on each would discard and recreate the very rows the drop is still
+        // walking, so coalesce them into the single Rebuild at the end of TryApplyDrop. Same
+        // guard-flag pattern the PropertyGrid editors use (commit b5eb9c1).
+        bool suppressRebuild;
+
+        /// <summary>Applies a drop to the model. The drag gesture funnels through here, and the
+        /// tests drive it directly rather than synthesising a pointer gesture - the same approach
+        /// DragListenerTests and MoveTests already take for drag-driven behaviour in this suite.
+        /// Returns false, changing nothing, when the target cannot accept the items.</summary>
+        internal bool TryApplyDrop(IOutlineNode target, IList<IOutlineNode> dragged, IOutlineNode after, bool copy)
+        {
+            if (target == null || target.DesignItem == null || dragged == null)
+                return false;
+
+            var items = dragged.Where(n => n != null && n.DesignItem != null).ToList();
+            if (items.Count == 0)
+                return false;
+
+            if (!target.CanInsert(items, after, copy))
+                return false;
+
+            suppressRebuild = true;
+            try {
+                target.Insert(items, after, copy);
+            } finally {
+                suppressRebuild = false;
+            }
+            Rebuild();
+            return true;
+        }
+
         void Node_ChildrenChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
+            if (suppressRebuild)
+                return;
             // A node's Children collection is rebuilt wholesale by OutlineNode.UpdateChildren, so
             // resynchronising the whole row tree is both correct and the simplest thing that is.
             Rebuild();
