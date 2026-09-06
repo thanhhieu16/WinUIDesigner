@@ -84,8 +84,30 @@ namespace WinUIDesigner.Designer.OutlineView
                         Children.Remove(item);
                 }
             } else if (e.Action == NotifyCollectionChangedAction.Add) {
-                UpdateChildrenCore(e.NewItems.Cast<DesignItem>(), e.NewStartingIndex);
+                // Final-review fix (F1, read half): e.NewStartingIndex is an index into the
+                // CONTENT collection, but UpdateChildrenCore inserts into Children, which
+                // UpdateChildren prefixes with one PropertyOutlineNode per set non-content
+                // object-valued property. Passing it through unshifted put the new node ahead of
+                // those property nodes (and, for a non-zero insert, one slot too early for every
+                // property node the element has). Same conflation as Insert's, opposite
+                // direction.
+                var index = e.NewStartingIndex < 0
+                    ? -1
+                    : LeadingPropertyNodeCount() + e.NewStartingIndex;
+                UpdateChildrenCore(e.NewItems.Cast<DesignItem>(), index);
             }
+        }
+
+        /// <summary>How many PropertyOutlineNodes lead <see cref="OutlineNodeBase.Children"/>.
+        /// UpdateChildren always emits the property nodes first and the content children after
+        /// them, so this is exactly the offset between the content collection's index space and
+        /// Children's.</summary>
+        int LeadingPropertyNodeCount()
+        {
+            int count = 0;
+            while (count < Children.Count && Children[count] is PropertyOutlineNode)
+                count++;
+            return count;
         }
 
         bool UpdateChildrenCore(IEnumerable<DesignItem> items, int index = -1)
@@ -95,10 +117,17 @@ namespace WinUIDesigner.Designer.OutlineView
                 if (ModelTools.CanSelectComponent(item)) {
                     if (Children.All(x => x.DesignItem != item)) {
                         var node = item.CreateOutlineNode();
-                        if (index > -1)
+                        if (index > -1) {
+                            // Clamp for the same reason Insert clamps (F1): Children can hold
+                            // fewer content nodes than the content collection holds elements (a
+                            // non-selectable element contributes none), so a shifted content
+                            // index can still overshoot, and Insert throws past Count.
+                            if (index > Children.Count)
+                                index = Children.Count;
                             Children.Insert(index++, node);
-                        else
+                        } else {
                             Children.Add(node);
+                        }
                         retVal = true;
                     }
                 } else {

@@ -213,10 +213,45 @@ namespace WinUIDesigner.Designer.OutlineView
                     }
                 }
 
-                var index = after == null ? 0 : Children.IndexOf(after) + 1;
-
                 var content = DesignItem.ContentProperty;
                 if (content.IsCollection) {
+                    // Final-review fix (F1): the insert index has to be computed in
+                    // CollectionElements' own index space. It used to come from
+                    // Children.IndexOf(after), but OutlineNode.UpdateChildren prefixes Children
+                    // with one PropertyOutlineNode per set non-content object-valued property and
+                    // CollectionElements has none of those, so the two spaces diverge by exactly
+                    // that many positions: for a container with one such property and two
+                    // children, an `after` naming the last child produced index 3 against a
+                    // collection of 2 and Collection<T>.Insert threw ArgumentOutOfRangeException
+                    // out of a pointer callback; with a non-last `after` the item silently landed
+                    // N positions early.
+                    //
+                    // An `after` that is not in this content collection at all - a
+                    // PropertyOutlineNode (no DesignItem), or a node belonging to some other
+                    // container - APPENDS. That is a deliberate choice, not IndexOf's -1 falling
+                    // through: `after` names an item to insert behind, so naming something this
+                    // container does not hold is a caller error, and appending keeps the drop
+                    // where the gesture pointed (the drag wiring aims at the end of the target's
+                    // children) instead of silently PREPENDING, which is what the -1 used to do.
+                    // `after == null` still means index 0, unchanged from the reference - that is
+                    // the one case where the caller has said "no position" explicitly rather than
+                    // by accident, and no caller in this port passes it for a non-empty target.
+                    int index;
+                    if (after == null) {
+                        index = 0;
+                    } else {
+                        var afterIndex = after.DesignItem != null
+                            ? content.CollectionElements.IndexOf(after.DesignItem)
+                            : -1;
+                        index = afterIndex < 0 ? content.CollectionElements.Count : afterIndex + 1;
+                    }
+                    // Defensive clamp: Insert throws outside [0, Count], and this runs inside a
+                    // drag gesture's callback where an exception is not recoverable.
+                    if (index < 0)
+                        index = 0;
+                    if (index > content.CollectionElements.Count)
+                        index = content.CollectionElements.Count;
+
                     foreach (var node in nodes) {
                         content.CollectionElements.Insert(index++, node.DesignItem);
                     }

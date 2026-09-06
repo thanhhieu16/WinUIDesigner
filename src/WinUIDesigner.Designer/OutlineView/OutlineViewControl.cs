@@ -6,6 +6,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel;
 
@@ -118,9 +119,14 @@ namespace WinUIDesigner.Designer.OutlineView
             node.Children.CollectionChanged -= Node_ChildrenChanged;
         }
 
-        /// <summary>Discards and rebuilds the whole row tree from Root.</summary>
+        /// <summary>Discards and rebuilds the whole row tree from Root. Callers that are not
+        /// themselves a model event handler (the Root and Filter setters, TryApplyDrop) call this
+        /// directly and get their rows synchronously; model events go through RequestRebuild
+        /// instead.</summary>
         internal void Rebuild()
         {
+            rebuildPending = false;
+
             foreach (var node in subscribed) {
                 Unsubscribe(node);
             }
@@ -220,12 +226,34 @@ namespace WinUIDesigner.Designer.OutlineView
             Grid.SetColumn(nameText, 3);
             row.Children.Add(nameText);
 
-            row.Tapped += (s, e) => HandleRowInvoked(node, false);
+            // Final-review fix (F4): HandleRowInvoked's extend branch used to be unreachable -
+            // every caller hardcoded false - so Decision 6's multi-select could not happen from
+            // the control at all. TappedRoutedEventArgs carries no modifier state, so the keys are
+            // read at click time from the thread's keyboard state, the same mechanism (and the
+            // same empirically-confirmed-in-this-unpackaged-host API) that
+            // DefaultSelectionService.ResolveAutoSelectionType already uses
+            // (src/WinUIDesigner.Designer/Services/SelectionService.cs:117-126).
+            row.Tapped += (s, e) => HandleRowInvoked(node, IsExtendSelectionKeyDown());
 
             if (node.DesignItem != null) {
+                // Final-review fix (F3): DragListener registers its PointerPressed handler with
+                // handledEventsToo and captures the pointer unconditionally, and ButtonBase
+                // cancels its own click when it loses capture. Every other DragListener in this
+                // codebase targets a bare thumb/overlay/handle with no interactive children; this
+                // row is the first target that hosts other controls, so a press on the expand,
+                // hide or lock toggle also reaches the row's listener. Remember where the press
+                // landed and refuse to interpret that gesture as a row drag. A press on the row's
+                // background or on its name TextBlock walks up to the row without meeting a
+                // ToggleButton, so it still starts a drag normally. Defensive: the gesture cannot
+                // be synthesised in this test host, so this is not a demonstrated failure.
+                bool pressedOnToggle = false;
+                row.AddHandler(UIElement.PointerPressedEvent,
+                    (PointerEventHandler)((s, e) => pressedOnToggle = IsInsideToggleButton(e.OriginalSource, row)),
+                    true);
+
                 var drag = new Controls.DragListener(row);
                 drag.Completed += d => {
-                    if (d.IsCanceled)
+                    if (d.IsCanceled || pressedOnToggle)
                         return;
                     var position = d.GetPosition(this);
                     if (position == null)
@@ -259,6 +287,30 @@ namespace WinUIDesigner.Designer.OutlineView
                     return candidate;
             }
             return null;
+        }
+
+        /// <summary>True when <paramref name="source"/> is a ToggleButton, or sits inside one at
+        /// or below <paramref name="row"/>. Internal so a test can drive it with a real row's real
+        /// toggles: no pointer gesture can be synthesised in this test host, so the predicate is
+        /// what is testable, not the press it guards.</summary>
+        internal static bool IsInsideToggleButton(object source, FrameworkElement row)
+        {
+            var obj = source as DependencyObject;
+            while (obj != null && obj != row) {
+                if (obj is ToggleButton)
+                    return true;
+                obj = VisualTreeHelper.GetParent(obj);
+            }
+            return false;
+        }
+
+        /// <summary>Ctrl or Shift held right now. See the Tapped wiring in BuildRow (F4).</summary>
+        static bool IsExtendSelectionKeyDown()
+        {
+            var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+            var shift = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
+            return (ctrl & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down
+                || (shift & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down;
         }
 
         /// <summary>The real row-click selection path, exposed so a test can drive it directly.
@@ -345,13 +397,44 @@ namespace WinUIDesigner.Designer.OutlineView
             return false;
         }
 
+        // Set while a Rebuild is already queued on the dispatcher - see RequestRebuild.
+        bool rebuildPending;
+
+        /// <summary>Queues a single Rebuild onto the dispatcher instead of running one now.
+        ///
+        /// Final-review fix (F2). Setting IsDesignTimeVisible/IsDesignTimeLocked writes an
+        /// attached property, which raises DesignItem.PropertyChanged, which makes
+        /// OutlineNodeBase call UpdateChildren(), which calls Children.Clear() - and
+        /// ObservableCollection.Clear() raises Reset unconditionally, even when the collection is
+        /// empty. Rebuilding straight off that event had two problems: a node with k children
+        /// produced k+1 full rebuilds for one property change (Clear plus one Add per re-added
+        /// child), and every one of them ran while the ToggleButton whose Checked handler started
+        /// it was still on the stack - and the rebuild destroys that very ToggleButton.
+        ///
+        /// Deferring rather than extending suppressRebuild is deliberate: suppressRebuild can
+        /// coalesce the burst, but whatever runs the deferred-until-the-end rebuild would still
+        /// be running inside the toggle's own event handler, which is the half of this that
+        /// actually bites. One dispatcher turn later, the handler has returned and nothing the
+        /// rebuild frees is still in use. The O(n) rebuild itself is unchanged - an accepted cost
+        /// recorded in the spec's Known gaps.</summary>
+        void RequestRebuild()
+        {
+            if (suppressRebuild || rebuildPending)
+                return;
+            rebuildPending = true;
+            var queue = this.DispatcherQueue;
+            if (queue == null || !queue.TryEnqueue(() => { if (rebuildPending) Rebuild(); })) {
+                // No dispatcher to defer onto (an element that never reached a live tree):
+                // synchronous is still better than never rebuilding at all.
+                Rebuild();
+            }
+        }
+
         void Node_ChildrenChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
-            if (suppressRebuild)
-                return;
             // A node's Children collection is rebuilt wholesale by OutlineNode.UpdateChildren, so
             // resynchronising the whole row tree is both correct and the simplest thing that is.
-            Rebuild();
+            RequestRebuild();
         }
 
         void Node_PropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -361,7 +444,7 @@ namespace WinUIDesigner.Designer.OutlineView
                 return;
 
             if (e.PropertyName == "Name") {
-                Rebuild();
+                RequestRebuild();
             } else if (e.PropertyName == "IsSelected") {
                 if (syncingSelection)
                     return;

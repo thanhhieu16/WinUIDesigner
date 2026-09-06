@@ -231,12 +231,25 @@ namespace WinUIDesigner.Designer
 					// unhittable, reproducing the reference's ContinueSkipSelfAndChildren filter
 					// (WpfDesign.Designer/Project/DesignPanel.cs:103). Testing only the resolved
 					// ModelHit would leave a locked container's children selectable, so walk the
-					// whole ancestor chain. DesignItem's base class carries no lock member - the
-					// cast is the mechanism, exactly as in the reference's own OutlineNodeBase.
+					// whole ancestor chain.
+					//
+					// Final-review fix (F5/F6): read IsLocked off the live view's attached dependency
+					// property rather than through XamlDesignItem.IsDesignTimeLocked. The model path
+					// runs XamlModelPropertyCollection.GetAttachedProperty ->
+					// XamlObject.FindOrCreateAttachedProperty, whose miss path ADDS a XamlProperty to
+					// the object's property list - so a read mutates the document, and
+					// XamlDesignItem.AllSetProperties (which PropertyGridControl renders, with no IsSet
+					// filter) would then carry a phantom IsLocked entry for every element the pointer
+					// has passed over. It also put an allocation, a linear scan of the property list and
+					// a reflection lookup into this method, which runs on every pointer move even on a
+					// document with nothing locked. IsLockedProperty is the same source of truth
+					// GetConvertedValueOnInstance ultimately reads (XamlProperty writes it onto the
+					// instance), so this is O(1), allocation-free and non-mutating. The chain semantics
+					// are unchanged: a locked container's children stay unhittable.
 					bool lockedInChain = false;
 					for (var ancestor = customResult.ModelHit; ancestor != null; ancestor = ancestor.Parent) {
-						var xamlAncestor = ancestor as WinUIDesigner.DesignModel.Xaml.XamlDesignItem;
-						if (xamlAncestor != null && xamlAncestor.IsDesignTimeLocked) {
+						var ancestorView = ancestor.View;
+						if (ancestorView != null && WinUIDesigner.XamlDom.DesignTimeProperties.GetIsLocked(ancestorView)) {
 							lockedInChain = true;
 							break;
 						}
