@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Xml;
@@ -184,15 +186,26 @@ namespace WinUIDesigner.Designer.Tests
                 var outline = grid.CreateOutlineNode();
                 Assert.AreEqual(2, outline.Children.Count);
 
+                var actions = new List<NotifyCollectionChangedAction>();
+                outline.Children.CollectionChanged += (s, e) => actions.Add(e.Action);
+
                 var added = surface.DesignContext.Services.Component
                     .RegisterComponentForDesigner(new Button());
                 grid.ContentProperty.CollectionElements.Add(added);
                 Assert.AreEqual(3, outline.Children.Count);
                 Assert.AreEqual(added, outline.Children[2].DesignItem);
+                // An incremental update raises exactly one Add and never rebuilds via Reset; a full
+                // UpdateChildren() rebuild (the pre-Task-5 behaviour) would raise a Reset followed by
+                // one Add per surviving element instead.
+                Assert.AreEqual(1, actions.Count(a => a == NotifyCollectionChangedAction.Add));
+                Assert.IsFalse(actions.Contains(NotifyCollectionChangedAction.Reset));
 
+                actions.Clear();
                 grid.ContentProperty.CollectionElements.Remove(added);
                 Assert.AreEqual(2, outline.Children.Count);
                 Assert.IsTrue(outline.Children.All(n => n.DesignItem != added));
+                Assert.AreEqual(1, actions.Count(a => a == NotifyCollectionChangedAction.Remove));
+                Assert.IsFalse(actions.Contains(NotifyCollectionChangedAction.Reset));
             });
         }
     }
