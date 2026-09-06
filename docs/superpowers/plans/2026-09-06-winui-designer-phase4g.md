@@ -39,21 +39,24 @@ These resolve wording in the spec that would otherwise be ambiguous to an implem
 
 ### Task 1: WinUI TreeView platform probe
 
-The spec's Decision 5 leaves one thing genuinely unknown: whether WinUI's built-in `CanReorderItems` reorder reports enough information afterwards to apply the same move to the model. Decision 4 likewise assumes, without proof, that a `TreeViewItem` renders a `UIElement`-valued `Content`. Both are settled here, by characterization tests that stay in the suite as living documentation of the platform's behaviour — the same role `RenderedGeometryInvestigationTests.cs` already plays in this project.
+**Revised 2026-09-06.** The first attempt at this task established, empirically, that `Microsoft.UI.Xaml.Controls.TreeView` **cannot be realized in this project's test host at all**: constructing a bare `TreeView`, adding one `TreeViewNode`, and calling `UpdateLayout()` throws `System.Runtime.InteropServices.COMException` out of `Microsoft.UI.Xaml.UIElement.UpdateLayout()` with `RestrictedDescription: Cannot find a Resource with the Name/Key TabViewScrollButtonBackground`. Merging `Microsoft.UI.Xaml.Controls.XamlControlsResources` into the shared `TestApplication` — the standard remedy — makes it worse: the test process fail-fast crashes with `STATUS_STACK_BUFFER_OVERRUN` (exit `-1073741189`). `Button` resolves its default style in the same host with no merged resources, so this is specific to `TreeView`, not a wholesale gap.
+
+Spec Decisions 4 and 5 were re-ruled on that finding: the outline tree is built by hand from nested `StackPanel`s and `Grid` rows exactly as `PropertyGridControl` builds its own, and drag runs on the existing `DragListener` primitive. This task now pins **both** halves of that finding as characterization tests — the same role `RenderedGeometryInvestigationTests.cs` plays — so a future SDK bump that fixes `TreeView` fails loudly here and invites revisiting Decision 4.
 
 **Files:**
 - Create: `tests/WinUIDesigner.Designer.Tests/TreeViewPlatformProbeTests.cs`
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: a recorded ruling — **drag branch A (primary)** or **drag branch B (fallback)** — written into this task's commit message and consumed by Task 10. Nothing else in the codebase depends on this task.
+- Produces: nothing the codebase depends on. This task's output is the recorded platform finding.
 
 - [ ] **Step 1: Write the probe tests**
 
 Create `tests/WinUIDesigner.Designer.Tests/TreeViewPlatformProbeTests.cs`:
 
 ```csharp
-using System.Linq;
+using System;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
@@ -62,61 +65,68 @@ using WinUIDesigner.TestHost;
 namespace WinUIDesigner.Designer.Tests
 {
     /// <summary>
-    /// Characterization tests for the two WinUI TreeView behaviours Phase 4g's design depends on
-    /// (spec Decisions 4 and 5). These assert what the platform actually does, not what this
-    /// codebase does - they exist so a future SDK bump that changes either behaviour fails loudly
-    /// here instead of silently breaking OutlineViewControl. Same role as
-    /// RenderedGeometryInvestigationTests.cs.
+    /// Characterization tests for the platform constraint that shaped Phase 4g's view layer
+    /// (spec Decisions 4 and 5). They assert what this host actually does, not what this codebase
+    /// does. Same role as RenderedGeometryInvestigationTests.cs.
     /// </summary>
     [TestFixture]
     public class TreeViewPlatformProbeTests
     {
         [Test]
-        public void TreeViewItemRendersAUIElementValuedContent()
+        public void TreeViewCannotBeRealizedInThisTestHost()
         {
             WinUITestHost.RunWithWindow(window => {
                 var tree = new TreeView();
                 window.Content = tree;
+                tree.RootNodes.Add(new TreeViewNode { Content = new TextBlock { Text = "probe" } });
 
-                var row = new TextBlock { Text = "probe" };
-                var node = new TreeViewNode { Content = row };
-                tree.RootNodes.Add(node);
+                // TreeView's default style chain reaches a theme resource this unpackaged,
+                // registration-free-activation host cannot resolve. Merging XamlControlsResources
+                // into TestApplication does not fix it - it fail-fast crashes the whole test
+                // process (STATUS_STACK_BUFFER_OVERRUN), because there is no package identity or
+                // MRT for it to load from. Hence spec Decision 4: the outline builds its own rows.
+                var ex = Assert.Throws<COMException>(() => tree.UpdateLayout());
+                Assert.That(ex.Data["RestrictedDescription"], Is.Not.Null,
+                    "expected a WinRT restricted-error description on the COMException");
+                StringAssert.Contains("Cannot find a Resource",
+                    ex.Data["RestrictedDescription"].ToString());
 
-                tree.UpdateLayout();
-
-                var container = tree.ContainerFromNode(node) as TreeViewItem;
-                Assert.IsNotNull(container, "TreeView did not realize a container for a root node");
-                Assert.AreSame(row, container.Content,
-                    "TreeViewItem.Content is not the UIElement we put on TreeViewNode.Content");
+                // Leave the shared window in a good state for every later test in this process.
+                window.Content = null;
             });
         }
 
         [Test]
-        public void MovingATreeViewNodeReportsItsNewParentAndIndex()
+        public void AHandBuiltRowTreeRendersInThisTestHost()
         {
             WinUITestHost.RunWithWindow(window => {
-                var tree = new TreeView();
-                window.Content = tree;
+                // The shape OutlineViewControl uses instead: a StackPanel of Grid rows, with each
+                // node's children in a nested StackPanel. Exactly what PropertyGridControl already
+                // does, and it lays out here without any merged resource dictionary.
+                var outer = new StackPanel();
+                window.Content = outer;
 
-                var root = new TreeViewNode { Content = new TextBlock { Text = "root" }, IsExpanded = true };
-                var a = new TreeViewNode { Content = new TextBlock { Text = "a" } };
-                var b = new TreeViewNode { Content = new TextBlock { Text = "b" }, IsExpanded = true };
-                root.Children.Add(a);
-                root.Children.Add(b);
-                tree.RootNodes.Add(root);
-                tree.UpdateLayout();
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                var toggle = new Microsoft.UI.Xaml.Controls.Primitives.ToggleButton { Content = "▶" };
+                Grid.SetColumn(toggle, 0);
+                row.Children.Add(toggle);
+                var text = new TextBlock { Text = "Button" };
+                Grid.SetColumn(text, 1);
+                row.Children.Add(text);
+                outer.Children.Add(row);
 
-                // Exactly the mutation WinUI's own built-in reorder performs on drop: detach the
-                // node from its old parent's Children and insert it into the new parent's. If the
-                // node reports its new parent and index correctly afterwards, DragItemsCompleted
-                // can drive IOutlineNode.Insert; if it does not, branch B is forced.
-                root.Children.Remove(a);
-                b.Children.Add(a);
-                tree.UpdateLayout();
+                var childStack = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+                childStack.Children.Add(new TextBlock { Text = "child" });
+                outer.Children.Add(childStack);
 
-                Assert.AreSame(b, a.Parent, "TreeViewNode.Parent does not track a reparent");
-                Assert.AreEqual(0, b.Children.IndexOf(a), "new parent does not report the moved node's index");
-                Assert.AreEqual(-1, root.Children.IndexOf(a), "old parent still contains the moved node");
+                outer.UpdateLayout();
+
+                Assert.Greater(row.ActualWidth, 0, "the row did not lay out");
+                Assert.Greater(text.ActualHeight, 0, "the name text did not lay out");
+
+                window.Content = null;
             });
         }
     }
@@ -130,26 +140,24 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.TreeViewPlatformProbeTests
 ```
 
-Expected: both tests pass. If `TreeViewItemRendersAUIElementValuedContent` fails, **stop and report** — Decision 4's entire row-rendering approach is invalid and the spec needs revisiting, which is a plan defect, not something to work around.
+Expected: both tests PASS.
 
-- [ ] **Step 3: Record the drag branch**
+If `TreeViewCannotBeRealizedInThisTestHost` **fails because `UpdateLayout` did not throw**, that is good news, not a defect: `TreeView` has become usable. Do not force the test to fail — report `DONE_WITH_CONCERNS` naming exactly what happened, so Decision 4 can be revisited. Do not switch the later tasks to `TreeView` on your own.
 
-Decide from the second test's result:
-- **Both assertions in `MovingATreeViewNodeReportsItsNewParentAndIndex` pass → branch A (primary).** Task 10 uses `CanReorderItems = true` and drives the model from `DragItemsCompleted`.
-- **Either assertion fails → branch B (fallback).** Task 10 uses `CanReorderItems = false` and handles `DragOver`/`Drop` directly, inserting at the end of the drop target's children.
+If `AHandBuiltRowTreeRendersInThisTestHost` fails, report `BLOCKED` with the exact output — the replacement approach would be invalid too, and that is a spec-level ruling, not something to patch.
 
-If a probe assertion fails, keep the test but invert it to assert the behaviour actually observed, with a comment naming which branch that forces. Do not delete the test.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add tests/WinUIDesigner.Designer.Tests/TreeViewPlatformProbeTests.cs
-git commit -m "test: characterize WinUI TreeView content rendering and node reparenting
+git commit -m "test: pin that WinUI TreeView cannot render in this test host
 
-Records Phase 4g drag branch: <A|B>."
+TreeView.UpdateLayout throws COMException 'Cannot find a Resource with the
+Name/Key TabViewScrollButtonBackground' in this unpackaged, registration-free
+activation host, and merging XamlControlsResources fail-fast crashes the
+process. Hand-built rows lay out fine, which is what spec Decisions 4 and 5
+now require the outline view to use."
 ```
-
-The commit message MUST name the branch — Task 10's implementer reads it.
 
 ---
 
