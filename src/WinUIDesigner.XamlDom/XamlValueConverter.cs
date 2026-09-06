@@ -61,9 +61,21 @@ namespace WinUIDesigner.XamlDom
 		{
 			var table = new Dictionary<Type, KeyValuePair<Type, string>>();
 			Add(table, typeof(Thickness), typeof(Microsoft.UI.Xaml.Controls.Border), "Padding");
+			Add(table, typeof(CornerRadius), typeof(Microsoft.UI.Xaml.Controls.Border), "CornerRadius");
+			Add(table, typeof(GridLength), typeof(Microsoft.UI.Xaml.Controls.ColumnDefinition), "Width");
+			Add(table, typeof(Windows.UI.Color), typeof(Microsoft.UI.Xaml.Media.SolidColorBrush), "Color");
+			Add(table, typeof(Microsoft.UI.Xaml.Media.Brush), typeof(Microsoft.UI.Xaml.Controls.Border), "Background");
+			Add(table, typeof(Microsoft.UI.Xaml.Media.FontFamily), typeof(Microsoft.UI.Xaml.Controls.TextBlock), "FontFamily");
+			Add(table, typeof(Windows.UI.Text.FontWeight), typeof(Microsoft.UI.Xaml.Controls.TextBlock), "FontWeight");
 			Add(table, typeof(Windows.Foundation.Point), typeof(Microsoft.UI.Xaml.Controls.Border), "RenderTransformOrigin");
 			Add(table, typeof(Microsoft.UI.Xaml.Media.PointCollection), typeof(Microsoft.UI.Xaml.Shapes.Polygon), "Points");
+			Add(table, typeof(Microsoft.UI.Xaml.Media.DoubleCollection), typeof(Microsoft.UI.Xaml.Shapes.Line), "StrokeDashArray");
 			Add(table, typeof(Microsoft.UI.Xaml.Media.Geometry), typeof(Microsoft.UI.Xaml.Shapes.Path), "Data");
+			Add(table, typeof(Windows.Foundation.Rect), typeof(Microsoft.UI.Xaml.Media.RectangleGeometry), "Rect");
+			Add(table, typeof(Windows.Foundation.Size), typeof(Microsoft.UI.Xaml.Media.ArcSegment), "Size");
+			Add(table, typeof(Duration), typeof(Microsoft.UI.Xaml.Media.Animation.Storyboard), "Duration");
+			Add(table, typeof(Microsoft.UI.Xaml.Media.Matrix), typeof(Microsoft.UI.Xaml.Media.MatrixTransform), "Matrix");
+			Add(table, typeof(System.Numerics.Vector3), typeof(Microsoft.UI.Xaml.Controls.Grid), "Translation");
 			return table;
 		}
 

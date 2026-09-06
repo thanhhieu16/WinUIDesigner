@@ -206,5 +206,226 @@ namespace WinUIDesigner.XamlDom.Tests
                 }
             });
         }
+
+        // ---- One test per host-table entry. A host that cannot be activated, or a host property
+        // whose grammar differs from the target type's, can then never ship silently.
+
+        [Test]
+        public void ConvertsCornerRadius()
+        {
+            WinUITestHost.Run(() => {
+                var radius = (CornerRadius)Convert(typeof(CornerRadius), "5");
+                Assert.AreEqual(5.0, radius.TopLeft);
+                Assert.AreEqual(5.0, radius.BottomRight);
+            });
+        }
+
+        [Test]
+        public void ConvertsGridLengthInEveryUnit()
+        {
+            WinUITestHost.Run(() => {
+                var star = (GridLength)Convert(typeof(GridLength), "2*");
+                Assert.AreEqual(GridUnitType.Star, star.GridUnitType);
+                Assert.AreEqual(2.0, star.Value);
+
+                var fractionalStar = (GridLength)Convert(typeof(GridLength), "1.5*");
+                Assert.AreEqual(GridUnitType.Star, fractionalStar.GridUnitType);
+                Assert.AreEqual(1.5, fractionalStar.Value);
+
+                var auto = (GridLength)Convert(typeof(GridLength), "Auto");
+                Assert.AreEqual(GridUnitType.Auto, auto.GridUnitType);
+
+                var pixel = (GridLength)Convert(typeof(GridLength), "40");
+                Assert.AreEqual(GridUnitType.Pixel, pixel.GridUnitType);
+                Assert.AreEqual(40.0, pixel.Value);
+            });
+        }
+
+        [Test]
+        public void ConvertsColorFromBothNamedAndHexForms()
+        {
+            WinUITestHost.Run(() => {
+                var named = (Windows.UI.Color)Convert(typeof(Windows.UI.Color), "Red");
+                Assert.AreEqual(255, named.R);
+                Assert.AreEqual(0, named.G);
+                Assert.AreEqual(255, named.A);
+
+                var hex = (Windows.UI.Color)Convert(typeof(Windows.UI.Color), "#FF102030");
+                Assert.AreEqual(0x10, hex.R);
+                Assert.AreEqual(0x20, hex.G);
+                Assert.AreEqual(0x30, hex.B);
+            });
+        }
+
+        [Test]
+        public void ConvertsBrushFromBothNamedAndHexForms()
+        {
+            WinUITestHost.Run(() => {
+                var named = Convert(typeof(Microsoft.UI.Xaml.Media.Brush), "Red") as Microsoft.UI.Xaml.Media.SolidColorBrush;
+                Assert.IsNotNull(named);
+                Assert.AreEqual(255, named.Color.R);
+
+                var hex = Convert(typeof(Microsoft.UI.Xaml.Media.Brush), "#FF102030") as Microsoft.UI.Xaml.Media.SolidColorBrush;
+                Assert.IsNotNull(hex);
+                Assert.AreEqual(0x30, hex.Color.B);
+            });
+        }
+
+        [Test]
+        public void ConvertsFontFamilyIncludingAFragmentUri()
+        {
+            WinUITestHost.Run(() => {
+                var plain = (Microsoft.UI.Xaml.Media.FontFamily)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.FontFamily), "Consolas");
+                Assert.AreEqual("Consolas", plain.Source);
+
+                var fragment = (Microsoft.UI.Xaml.Media.FontFamily)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.FontFamily), "ms-appx:///Fonts/Custom.ttf#Custom");
+                Assert.AreEqual("ms-appx:///Fonts/Custom.ttf#Custom", fragment.Source);
+            });
+        }
+
+        [Test]
+        public void ConvertsFontWeightFromItsNamedForm()
+        {
+            // WinUI rejects the numeric form: FontWeight='450' throws. Only names convert, so a
+            // non-standard weight is not representable through this mechanism - a recorded gap.
+            WinUITestHost.Run(() => {
+                var bold = (Windows.UI.Text.FontWeight)Convert(typeof(Windows.UI.Text.FontWeight), "Bold");
+                Assert.AreEqual(700, bold.Weight);
+
+                var semiBold = (Windows.UI.Text.FontWeight)Convert(typeof(Windows.UI.Text.FontWeight), "SemiBold");
+                Assert.AreEqual(600, semiBold.Weight);
+
+                var converter = XamlValueConverter.TryCreate(typeof(Windows.UI.Text.FontWeight));
+                Assert.Throws<FormatException>(
+                    () => converter.ConvertFrom(null, CultureInfo.InvariantCulture, "450"),
+                    "WinUI is expected to reject the numeric FontWeight form");
+            });
+        }
+
+        [Test]
+        public void ConvertsDoubleCollectionIncludingTheEmptyForm()
+        {
+            WinUITestHost.Run(() => {
+                var dashes = (Microsoft.UI.Xaml.Media.DoubleCollection)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.DoubleCollection), "2 3");
+                Assert.AreEqual(2, dashes.Count);
+                Assert.AreEqual(2.0, dashes[0]);
+                Assert.AreEqual(3.0, dashes[1]);
+            });
+        }
+
+        [Test]
+        public void ConvertsRect()
+        {
+            WinUITestHost.Run(() => {
+                var rect = (Windows.Foundation.Rect)Convert(typeof(Windows.Foundation.Rect), "1,2,3,4");
+                Assert.AreEqual(1.0, rect.X);
+                Assert.AreEqual(2.0, rect.Y);
+                Assert.AreEqual(3.0, rect.Width);
+                Assert.AreEqual(4.0, rect.Height);
+            });
+        }
+
+        [Test]
+        public void ConvertsSize()
+        {
+            WinUITestHost.Run(() => {
+                var size = (Windows.Foundation.Size)Convert(typeof(Windows.Foundation.Size), "3,4");
+                Assert.AreEqual(3.0, size.Width);
+                Assert.AreEqual(4.0, size.Height);
+            });
+        }
+
+        [Test]
+        public void ConvertsDurationInAllThreeForms()
+        {
+            WinUITestHost.Run(() => {
+                // Asserted through ToString() because those are the exact forms measured on this
+                // SDK; Duration's own member names were not verified and are not worth guessing.
+                Assert.AreEqual("00:00:01", Convert(typeof(Duration), "0:0:1").ToString());
+                Assert.AreEqual("Forever", Convert(typeof(Duration), "Forever").ToString());
+                Assert.AreEqual("Automatic", Convert(typeof(Duration), "Automatic").ToString());
+            });
+        }
+
+        [Test]
+        public void ConvertsMatrix()
+        {
+            WinUITestHost.Run(() => {
+                var matrix = Convert(typeof(Microsoft.UI.Xaml.Media.Matrix), "1,0,0,1,5,6");
+                Assert.IsInstanceOf<Microsoft.UI.Xaml.Media.Matrix>(matrix);
+                Assert.AreEqual("1,0,0,1,5,6", matrix.ToString());
+            });
+        }
+
+        [Test]
+        public void ConvertsVector3()
+        {
+            // UIElement.Translation is a plain CLR property with no TranslationProperty static, so
+            // the ReadLocalValue guard cannot apply to this entry; it relies on the throw alone.
+            WinUITestHost.Run(() => {
+                var vector = (System.Numerics.Vector3)Convert(typeof(System.Numerics.Vector3), "1,2,3");
+                Assert.AreEqual(1f, vector.X);
+                Assert.AreEqual(2f, vector.Y);
+                Assert.AreEqual(3f, vector.Z);
+            });
+        }
+
+        [Test]
+        public void ConvertsAnEmptyPointCollection()
+        {
+            WinUITestHost.Run(() => {
+                var points = (Microsoft.UI.Xaml.Media.PointCollection)Convert(
+                    typeof(Microsoft.UI.Xaml.Media.PointCollection), "");
+                Assert.AreEqual(0, points.Count);
+            });
+        }
+
+        [Test]
+        public void HasNoEntryForTheTwoTypesWithNoViableHost()
+        {
+            // Recorded gaps, asserted so they are a decision rather than an oversight.
+            // RectangleGeometry: UIElement.Clip declares it, but WinUI runs the Geometry
+            // mini-language on that property, so the only host returns a PathGeometry.
+            // Vector2: the only Vector2-typed property, UIElement.ActualSize, is read-only.
+            Assert.IsNull(XamlValueConverter.TryCreate(typeof(Microsoft.UI.Xaml.Media.RectangleGeometry)));
+            Assert.IsNull(XamlValueConverter.TryCreate(typeof(System.Numerics.Vector2)));
+        }
+
+        [Test]
+        public void EveryHostInTheTableCanBeActivatedInThisProcess()
+        {
+            // The failure mode this guards is the reason the table is hand-listed at all: a
+            // reflection-built map picked TwoPaneView and WebView2, which cannot be activated, and
+            // their XamlParseException is indistinguishable from a bad value.
+            var targets = new[] {
+                typeof(Thickness), typeof(CornerRadius), typeof(GridLength), typeof(Windows.UI.Color),
+                typeof(Microsoft.UI.Xaml.Media.Brush), typeof(Microsoft.UI.Xaml.Media.FontFamily),
+                typeof(Windows.UI.Text.FontWeight), typeof(Windows.Foundation.Point),
+                typeof(Microsoft.UI.Xaml.Media.PointCollection), typeof(Microsoft.UI.Xaml.Media.DoubleCollection),
+                typeof(Microsoft.UI.Xaml.Media.Geometry), typeof(Windows.Foundation.Rect),
+                typeof(Windows.Foundation.Size), typeof(Duration),
+                typeof(Microsoft.UI.Xaml.Media.Matrix), typeof(System.Numerics.Vector3),
+            };
+
+            WinUITestHost.Run(() => {
+                foreach (var target in targets) {
+                    var converter = XamlValueConverter.TryCreate(target);
+                    Assert.IsNotNull(converter, "No host-table entry for " + target.FullName);
+                    // A NotSupportedException here means the host itself could not be activated.
+                    // A FormatException would mean the host is fine and this filler text is not a
+                    // valid value, which is expected and not what this test is about.
+                    try {
+                        converter.ConvertFrom(null, CultureInfo.InvariantCulture, "0");
+                    } catch (NotSupportedException ex) {
+                        Assert.Fail("Host for " + target.FullName + " is unusable: " + ex.Message);
+                    } catch (FormatException) {
+                        // Fine - the host activated and rejected the filler value.
+                    }
+                }
+            });
+        }
     }
 }
