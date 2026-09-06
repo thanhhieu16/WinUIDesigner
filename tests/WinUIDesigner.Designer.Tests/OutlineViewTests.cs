@@ -9,6 +9,7 @@ using NUnit.Framework;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.DesignModel.Xaml;
+using WinUIDesigner.Designer.OutlineView;
 using WinUIDesigner.TestHost;
 
 namespace WinUIDesigner.Designer.Tests
@@ -289,6 +290,103 @@ namespace WinUIDesigner.Designer.Tests
                     "copy mode must not remove the source");
                 Assert.AreEqual(3, grid.ContentProperty.CollectionElements.Count);
                 Assert.AreEqual(typeof(Button), grid.ContentProperty.CollectionElements[1].ComponentType);
+            });
+        }
+
+        [Test]
+        public void TheControlBuildsOneRowPerNode()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var root = control.Root;
+                var stackPanelNode = root.Children[1];
+                var nestedButtonNode = stackPanelNode.Children[0];
+
+                foreach (var node in new[] { root, root.Children[0], stackPanelNode, nestedButtonNode }) {
+                    var row = control.RowFor(node);
+                    Assert.IsNotNull(row, "no row was built for " + node.Name);
+                    Assert.AreSame(node, control.NodeFor(row), "row/node mapping does not round-trip");
+                }
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void InvokingARowSelectsTheDesignItem()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var button = grid.ContentProperty.CollectionElements[0];
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[0]);
+                control.HandleRowInvoked(control.Root.Children[0], false);
+
+                Assert.IsTrue(surface.DesignContext.Services.Selection.SelectedItems.Contains(button));
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void SelectingInTheDesignerHighlightsTheRow()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var button = grid.ContentProperty.CollectionElements[0];
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var row = control.RowFor(control.Root.Children[0]);
+                Assert.IsNull(((Grid)row).Background, "an unselected row must have no highlight");
+
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new[] { button });
+                Assert.IsNotNull(((Grid)row).Background, "a selected row must be highlighted");
+
+                surface.DesignContext.Services.Selection.SetSelectedComponents(new DesignItem[0]);
+                Assert.IsNull(((Grid)row).Background, "deselecting must clear the highlight");
+
+                window.Content = null;
+            });
+        }
+
+        [Test]
+        public void CollapsingANodeHidesItsChildRows()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSurface(window, GridXaml);
+                var grid = surface.DesignContext.RootItem;
+                var control = new OutlineViewControl();
+                window.Content = control;
+                control.Root = grid.CreateOutlineNode();
+                control.UpdateLayout();
+
+                var stackPanelNode = control.Root.Children[1];
+                var childRow = control.RowFor(stackPanelNode.Children[0]);
+                var childHost = (FrameworkElement)((Grid)childRow).Parent;
+                Assert.AreEqual(Visibility.Visible, childHost.Visibility);
+
+                stackPanelNode.IsExpanded = false;
+                control.Rebuild();
+                childRow = control.RowFor(stackPanelNode.Children[0]);
+                childHost = (FrameworkElement)((Grid)childRow).Parent;
+                Assert.AreEqual(Visibility.Collapsed, childHost.Visibility);
+
+                window.Content = null;
             });
         }
     }
