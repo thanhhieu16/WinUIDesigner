@@ -134,5 +134,36 @@ namespace WinUIDesigner.XamlDom.Tests
                     "IsFilled=false has no mini-language form");
             });
         }
+
+        [Test]
+        public void RefusesPolySegmentsWhoseCountIsNotAMultipleOfTheirCommandArity()
+        {
+            WinUITestHost.Run(() => {
+                var badBezierPoints = new PointCollection();
+                badBezierPoints.Add(new Point(0, 0));
+                badBezierPoints.Add(new Point(10, 0));
+                badBezierPoints.Add(new Point(20, 10));
+                badBezierPoints.Add(new Point(30, 10));
+                var badBezierFigure = new PathFigure { StartPoint = new Point(0, 0) };
+                badBezierFigure.Segments.Add(new PolyBezierSegment { Points = badBezierPoints });
+                var badBezierGeometry = new PathGeometry();
+                badBezierGeometry.Figures.Add(badBezierFigure);
+                Assert.IsFalse(GeometryMiniLanguageWriter.CanWrite(badBezierGeometry),
+                    "A PolyBezierSegment with a point count that isn't a multiple of 3 would " +
+                    "silently drop its trailing points");
+
+                var badQuadPoints = new PointCollection();
+                badQuadPoints.Add(new Point(0, 0));
+                badQuadPoints.Add(new Point(10, 0));
+                badQuadPoints.Add(new Point(20, 10));
+                var badQuadFigure = new PathFigure { StartPoint = new Point(0, 0) };
+                badQuadFigure.Segments.Add(new PolyQuadraticBezierSegment { Points = badQuadPoints });
+                var badQuadGeometry = new PathGeometry();
+                badQuadGeometry.Figures.Add(badQuadFigure);
+                Assert.IsFalse(GeometryMiniLanguageWriter.CanWrite(badQuadGeometry),
+                    "A PolyQuadraticBezierSegment with a point count that isn't a multiple of 2 " +
+                    "would silently drop its trailing point");
+            });
+        }
     }
 }

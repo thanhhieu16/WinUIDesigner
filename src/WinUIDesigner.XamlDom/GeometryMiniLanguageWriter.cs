@@ -52,6 +52,26 @@ namespace WinUIDesigner.XamlDom
 						// Refusing the whole geometry beats dropping one segment: a silently
 						// shortened path is exactly the failure mode this phase exists to remove.
 						return false;
+
+					// Write's poly-segment loops consume points three (Bezier) or two
+					// (QuadraticBezier) at a time and stop as soon as a full group no longer
+					// fits, silently dropping any remainder. A point count that isn't an exact,
+					// positive multiple of the command's arity - and an empty PolyLineSegment,
+					// which contributes nothing and reads back as a different figure - must
+					// refuse the whole geometry here rather than let Write drop points.
+					var polyLine = segment as PolyLineSegment;
+					if (polyLine != null && polyLine.Points.Count == 0)
+						return false;
+
+					var polyBezier = segment as PolyBezierSegment;
+					if (polyBezier != null &&
+					    (polyBezier.Points.Count == 0 || polyBezier.Points.Count % 3 != 0))
+						return false;
+
+					var polyQuadratic = segment as PolyQuadraticBezierSegment;
+					if (polyQuadratic != null &&
+					    (polyQuadratic.Points.Count == 0 || polyQuadratic.Points.Count % 2 != 0))
+						return false;
 				}
 			}
 
