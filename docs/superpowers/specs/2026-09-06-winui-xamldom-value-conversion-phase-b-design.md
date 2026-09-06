@@ -1,6 +1,6 @@
 # XamlDom Value Conversion, Phase B — the write side
 
-**Status:** approved, not yet implemented.
+**Status:** implemented. Shipped as commits `0d5f6b4..451cac0` on `main`.
 **Phase A:** `docs/superpowers/specs/2026-09-06-winui-xamldom-value-conversion-design.md`,
 shipped as commits `23abc32..ab5221b` on `main`.
 
