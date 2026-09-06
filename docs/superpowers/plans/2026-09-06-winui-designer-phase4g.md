@@ -1833,13 +1833,17 @@ git commit -m "feat: add outline hide/lock toggles and enforce the design-time l
 
 ### Task 9: Name filter
 
+**Revised 2026-09-06.** The first attempt at this task established that **no text-input control can be laid out in this project's test host**: a bare `TextBox` and an `AutoSuggestBox` both throw `COMException` (`E_FAIL`) from `UpdateLayout()` once attached to the shared window, with no diagnostic `RestrictedDescription`, and running several affected tests together fail-fast crashes the whole test executable (exit 127, no results). A `ComboBox` lays out fine, so it is specific to text input. It went unnoticed until now because `PropertyGrid`'s `TextBoxEditor` is only ever *constructed* in tests, never laid out — `PropertyGridControlTests` puts the `DesignSurface` in `window.Content` and leaves the `PropertyGridControl` unparented.
+
+So this task ships **no text box**: `Filter` is a settable `string` property and the host supplies the input. That is also closer to the reference than the original plan was — the reference's filter input is a `ClearableTextBox` in its *host* markup (`Outline.xaml:8`), two-way bound to `OutlineTreeView.Filter`, with the tree control exposing only the property.
+
 **Files:**
 - Modify: `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`
 - Test: `tests/WinUIDesigner.Designer.Tests/OutlineViewTests.cs`
 
 **Interfaces:**
 - Consumes: `OutlineViewControl.Rebuild`, `AppendNode` (Task 7).
-- Produces: `public string Filter { get; set; }` on `OutlineViewControl` (setting it rebuilds the tree filtered) and `public AutoSuggestBox FilterBox { get; }`.
+- Produces: `public string Filter { get; set; }` on `OutlineViewControl` — setting it rebuilds the row tree, filtered. No `FilterBox`, no `AutoSuggestBox`, no change to the constructor.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1893,33 +1897,21 @@ Expected: FAIL to compile — `OutlineViewControl` has no `Filter`.
 
 - [ ] **Step 3: Add the filter**
 
-In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, add a field beside `rows`:
+In `src/WinUIDesigner.Designer/OutlineView/OutlineViewControl.cs`, leave the fields and the constructor exactly as they are — no text box is added. Add the property and the predicate:
 
 ```csharp
-        readonly AutoSuggestBox filterBox = new AutoSuggestBox { PlaceholderText = "Filter" };
-```
-
-Replace the constructor body's single `Children.Add(rows);` with:
-
-```csharp
-            filterBox.TextChanged += (s, e) => Filter = filterBox.Text;
-            Children.Add(filterBox);
-            Children.Add(rows);
-```
-
-Add the property and the predicate:
-
-```csharp
-        public AutoSuggestBox FilterBox {
-            get { return filterBox; }
-        }
-
         string filter;
 
         /// <summary>Case-insensitive name filter. A node survives if its own name matches or any
         /// descendant's does; the root always survives, so the filter narrows branches rather
         /// than emptying the panel. Filtering rebuilds the row tree, which discards nothing
-        /// persistent - expand state lives on the nodes, not on the rows.</summary>
+        /// persistent - expand state lives on the nodes, not on the rows.
+        ///
+        /// The text input belongs to the host, not here: no text-input control can be laid out
+        /// in this project's test host (a TextBox or AutoSuggestBox throws E_FAIL from
+        /// UpdateLayout, and several such tests together crash the test process), and the
+        /// reference splits it the same way - its ClearableTextBox lives in Outline.xaml and
+        /// binds to the tree control's Filter property. See spec Decision 12.</summary>
         public string Filter {
             get { return filter; }
             set {
