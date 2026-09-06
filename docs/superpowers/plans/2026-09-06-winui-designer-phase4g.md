@@ -193,13 +193,15 @@ namespace WinUIDesigner.Designer.Tests
     [TestFixture]
     public class OutlineViewTests
     {
-        // The reference's own outline fixture (HierarchyTests/SelectionTests/InsertTests all use
-        // "<Button/><StackPanel><Button/></StackPanel>" inside a Grid), plus two RowDefinitions so
-        // a non-visual collection element is available for CanSelectComponent's false case.
+        // The reference's own outline fixture, verbatim: HierarchyTests, SelectionTests and
+        // InsertTests all use "<Button/><StackPanel><Button/></StackPanel>" inside a Grid.
+        // It deliberately sets NO non-content property on the Grid: from Task 5 onwards every set
+        // non-content property becomes a leading PropertyOutlineNode, which would shift every
+        // index-based assertion in Tasks 4-10. Any test needing a non-visual collection element
+        // declares its own XAML instead of adding one here.
         const string GridXaml =
             "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
             "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
-            "<Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>" +
             "<Button />" +
             "<StackPanel><Button /></StackPanel>" +
             "</Grid>";
@@ -217,7 +219,16 @@ namespace WinUIDesigner.Designer.Tests
         public void CanSelectComponentIsTrueForAVisualItemAndFalseForANonVisualOne()
         {
             WinUITestHost.RunWithWindow(window => {
-                var surface = LoadSurface(window, GridXaml);
+                // Own fixture: RowDefinitions gives a non-visual collection element, and keeping
+                // it out of GridXaml keeps every other test's child indices stable once Task 5
+                // starts emitting PropertyOutlineNodes for set non-content properties.
+                const string xaml =
+                    "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+                    "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+                    "<Grid.RowDefinitions><RowDefinition /><RowDefinition /></Grid.RowDefinitions>" +
+                    "<Button />" +
+                    "</Grid>";
+                var surface = LoadSurface(window, xaml);
                 var grid = surface.DesignContext.RootItem;
                 var button = grid.ContentProperty.CollectionElements[0];
 
@@ -1034,7 +1045,7 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult --test=WinUIDesigner.Designer.Tests.OutlineViewTests
 ```
 
-Expected: PASS (eight tests). If `TheOutlineMirrorsTheDesignItemHierarchy` now fails because the `Grid` reports set non-content properties (`RowDefinitions`) ahead of its children, adjust that test to locate children by `DesignItem` rather than by fixed index — do not weaken the new behaviour to keep the old indices.
+Expected: PASS (eight tests). `GridXaml` deliberately sets no non-content property on the `Grid`, so no leading `PropertyOutlineNode` appears and Task 4's index-based assertions still hold. If some other set property does surface one, locate children by `DesignItem` rather than by fixed index — do not weaken the new behaviour to keep the old indices.
 
 - [ ] **Step 6: Commit**
 
