@@ -126,22 +126,33 @@ namespace WinUIDesigner.XamlDom
 		}
 
 		/// <remarks>
-		/// Deliberately false for <see cref="string"/> while no value-to-string formatter exists.
-		/// <c>PropertyNode</c> gates an editable PropertyGrid text box on
-		/// <c>CanConvertFrom(string) &amp;&amp; CanConvertTo(string)</c>
-		/// (<c>PropertyNode.cs:231-233</c>) and fills it from
-		/// <c>ConvertToInvariantString</c>, which on a converter that does not override
-		/// <c>ConvertTo</c> is <c>value.ToString()</c> - a type name. For most types the commit
-		/// throws and reverts, but WinUI accepts any string as a font family name, so a user
-		/// merely tabbing through the grid would silently rewrite their font to
-		/// "Microsoft.UI.Xaml.Media.FontFamily". Phase B turns this on per type as each formatter
-		/// lands.
+		/// Two callers ask this question and they need different answers.
+		/// <c>XamlDocument.CreatePropertyValue</c> assigns <c>ctx.Instance</c> before asking
+		/// (<c>XamlDocument.cs:283</c>) and wants to know whether THAT value has a text form;
+		/// <c>PropertyNode</c> uses the one-argument overload, which passes a null context
+		/// (measured), and wants to know whether the TYPE has one at all, because that is what
+		/// gates its editable text box (<c>PropertyNode.cs:231-233</c>, <c>:108-118</c>).
+		/// Answering per-instance is also what keeps the write path from throwing: an instance the
+		/// formatter cannot handle is refused here, so <see cref="ConvertTo"/> is never reached
+		/// for it and serialization simply falls through to the element form.
 		/// </remarks>
 		public override bool CanConvertTo(ITypeDescriptorContext context, Type destinationType)
 		{
-			if (destinationType == typeof(string))
-				return false;
+			if (destinationType == typeof(string)) {
+				var instance = context != null ? context.Instance : null;
+				return instance == null
+					? XamlValueFormatter.HasFormatter(targetType)
+					: XamlValueFormatter.CanFormat(targetType, instance);
+			}
 			return base.CanConvertTo(context, destinationType);
+		}
+
+		public override object ConvertTo(ITypeDescriptorContext context, CultureInfo culture,
+		                                 object value, Type destinationType)
+		{
+			if (destinationType == typeof(string) && XamlValueFormatter.CanFormat(targetType, value))
+				return XamlValueFormatter.Format(targetType, value);
+			return base.ConvertTo(context, culture, value, destinationType);
 		}
 
 		public override object ConvertFrom(ITypeDescriptorContext context, CultureInfo culture, object value)

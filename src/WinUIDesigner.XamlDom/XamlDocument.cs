@@ -278,7 +278,21 @@ namespace WinUIDesigner.XamlDom
 				throw new ArgumentNullException("instance");
 
 			Type elementType = instance.GetType();
-			TypeConverter c = TypeDescriptor.GetConverter(instance);
+			// The converter is resolved from the DECLARED property type, not from the instance:
+			// the host and format tables match exactly, so a Path.Data value resolves under
+			// Geometry while its instance is a PathGeometry. Resolving through
+			// GetCustomTypeConverter instead would be wrong in a different way - measured, it
+			// returns StringConverter for a property declared `object`, and that converter turns a
+			// nested Button into the literal text 'Microsoft.UI.Xaml.Controls.Button'.
+			// The null forProperty case is CreateObject's, which must keep its current behaviour:
+			// MarkupExtensionParser.cs:403 runs it for every {Binding} at parse time.
+			//
+			// TypeDescriptor's Type overload is used rather than its instance overload: measured,
+			// the instance overload throws FileNotFoundException for System.Windows.Forms on its
+			// first call in a process and succeeds on every call afterwards, while the Type
+			// overload never throws.
+			TypeConverter c = (forProperty != null ? XamlValueConverter.TryCreate(forProperty.ReturnType) : null)
+				?? TypeDescriptor.GetConverter(elementType);
 			var ctx = new DummyTypeDescriptorContext(this.ServiceProvider);
 			ctx.Instance = instance;
 			bool hasStringConverter = c.CanConvertTo(ctx, typeof(string)) && c.CanConvertFrom(typeof(string));
@@ -304,16 +318,20 @@ namespace WinUIDesigner.XamlDom
 			} else if (instance is SolidColorBrush brush && forProperty != null) {
 				// WPF fell back to System.Windows.Markup.XamlWriter.Save here; WinUI has no
 				// XamlWriter at all (only XamlReader), so the common case is serialized by hand.
+				// Reachable only when XamlValueFormatter refuses this instance despite it being a
+				// SolidColorBrush (forProperty's declared type is not Brush-shaped, so the early
+				// return above never claimed it) - the formatted branch above handles every other
+				// SolidColorBrush.
 				var col = brush.Color;
 				var colorText = ColorBrushDictionary.TryGetValue(col, out var name)
 					? name
 					: $"#{col.A:X2}{col.R:X2}{col.G:X2}{col.B:X2}";
 				xml.InnerText = colorText;
-			} else if (instance is Brush && forProperty != null) {
-				throw new NotSupportedException(
-					$"Serializing {instance.GetType().Name} to XAML is not supported in Phase 1 " +
-					"(only SolidColorBrush; WinUI has no XamlWriter.Save equivalent to fall back to).");
 			}
+			// Any other Brush (e.g. LinearGradientBrush) that XamlValueFormatter cannot format
+			// falls through here and keeps its element form (Rule 3: never throw from this path -
+			// the design lets an unformattable instance serialize as its own empty/child-bearing
+			// element instead, exactly like every other type this method doesn't special-case).
 
 			return new XamlObject(this, xml, elementType, instance);
 		}

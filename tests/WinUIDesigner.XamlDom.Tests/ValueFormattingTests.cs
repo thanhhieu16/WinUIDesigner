@@ -326,5 +326,138 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.IsFalse(XamlValueFormatter.HasFormatter(typeof(Microsoft.UI.Xaml.Controls.Button)));
             });
         }
+
+        const string PresentationNs = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        static XamlDocument ParseDocument(string xaml)
+        {
+            return XamlParser.Parse(new System.IO.StringReader(xaml));
+        }
+
+        static string SaveToString(XamlDocument document)
+        {
+            var text = new System.IO.StringWriter();
+            var settings = new System.Xml.XmlWriterSettings();
+            settings.OmitXmlDeclaration = true;
+            using (var writer = System.Xml.XmlWriter.Create(text, settings))
+                document.Save(writer);
+            return text.ToString();
+        }
+
+        /// <summary>Sets a property the way XamlModelProperty.cs:239 sets it.</summary>
+        static void SetThroughTheDocument(XamlDocument document, string propertyName, object value)
+        {
+            var property = document.RootElement.FindOrCreateProperty(propertyName);
+            property.PropertyValue = document.CreatePropertyValue(value, property);
+        }
+
+        [Test]
+        public void SavesAGeometryAsAttributeTextInsteadOfAnEmptyElement()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Path xmlns='" + PresentationNs + "'/>");
+                var geometry = BuildAllSegmentGeometry();
+                SetThroughTheDocument(document, "Data", geometry);
+
+                var saved = SaveToString(document);
+                StringAssert.DoesNotContain("<PathGeometry", saved,
+                    "The geometry was still serialized as an empty element");
+                StringAssert.Contains("A5,7.5 30 1 1 140,10", saved);
+
+                var reloaded = ParseDocument(saved);
+                var reloadedGeometry = reloaded.RootElement.FindOrCreateProperty("Data").ValueOnInstance as PathGeometry;
+                Assert.IsNotNull(reloadedGeometry, "The saved document did not reload a PathGeometry");
+                Assert.AreEqual(GeometryMiniLanguageWriter.Write(geometry),
+                    GeometryMiniLanguageWriter.Write(reloadedGeometry));
+            });
+        }
+
+        [Test]
+        public void SavesAPointCollectionAsAttributeTextInsteadOfAnEmptyElement()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Polyline xmlns='" + PresentationNs + "'/>");
+                var points = new PointCollection();
+                points.Add(new Point(10, 10));
+                points.Add(new Point(50, 10));
+                points.Add(new Point(50, 40));
+                SetThroughTheDocument(document, "Points", points);
+
+                var saved = SaveToString(document);
+                StringAssert.Contains("10,10 50,10 50,40", saved);
+
+                var reloaded = ParseDocument(saved);
+                var reloadedPoints = reloaded.RootElement.FindOrCreateProperty("Points").ValueOnInstance as PointCollection;
+                Assert.IsNotNull(reloadedPoints);
+                Assert.AreEqual(3, reloadedPoints.Count);
+                Assert.AreEqual(50.0, reloadedPoints[2].X);
+                Assert.AreEqual(40.0, reloadedPoints[2].Y);
+            });
+        }
+
+        [Test]
+        public void SavesAThicknessAsAttributeText()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Margin", new Microsoft.UI.Xaml.Thickness(1, 2.5, 3, 4));
+                StringAssert.Contains("Margin=\"1,2.5,3,4\"", SaveToString(document));
+            });
+        }
+
+        [Test]
+        public void KeepsSerializingANestedControlAsAnElement()
+        {
+            WinUITestHost.Run(() => {
+                // ContentControl.Content is declared `object`. Resolving through
+                // GetCustomTypeConverter would hand back StringConverter, whose
+                // ConvertToInvariantString(new Button()) is the literal text
+                // 'Microsoft.UI.Xaml.Controls.Button' - the whole subtree, replaced by a type name.
+                var document = ParseDocument("<Button xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Content", new Microsoft.UI.Xaml.Controls.TextBlock());
+
+                var saved = SaveToString(document);
+                StringAssert.Contains("<TextBlock", saved, "The nested control was not serialized as an element");
+                StringAssert.DoesNotContain("Microsoft.UI.Xaml.Controls.TextBlock", saved,
+                    "The nested control was serialized as its type name");
+            });
+        }
+
+        [Test]
+        public void StillParsesADocumentContainingMarkupExtensions()
+        {
+            WinUITestHost.Run(() => {
+                // CreatePropertyValue is also CreateObject's body, and MarkupExtensionParser.cs:403
+                // runs it for every markup extension at parse time.
+                var document = ParseDocument(
+                    "<Grid xmlns='" + PresentationNs + "' " +
+                    "xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' " +
+                    "Tag='{Binding Path=Whatever}'/>");
+                Assert.IsNotNull(document.RootElement);
+            });
+        }
+
+        [Test]
+        public void StillSavesANamedColourByName()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Background", new SolidColorBrush(Microsoft.UI.Colors.Blue));
+                var saved = SaveToString(document);
+                StringAssert.Contains("Background=\"Blue\"", saved);
+            });
+        }
+
+        [Test]
+        public void LeavesAnUnformattableInstanceOnTheElementPath()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Background", new LinearGradientBrush());
+                var saved = SaveToString(document);
+                StringAssert.Contains("<LinearGradientBrush", saved,
+                    "A gradient brush has no attribute form and must keep the element form");
+            });
+        }
     }
 }

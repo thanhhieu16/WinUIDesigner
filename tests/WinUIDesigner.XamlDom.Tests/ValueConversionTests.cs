@@ -173,16 +173,20 @@ namespace WinUIDesigner.XamlDom.Tests
         }
 
         [Test]
-        public void DoesNotClaimAToStringConversion()
+        public void ClaimsAToStringConversionNowThatAFormatterExists()
         {
             // PropertyNode gates an editable PropertyGrid text box on
-            // CanConvertFrom(string) && CanConvertTo(string). Claiming the to-string direction
-            // without a formatter would prefill that box from value.ToString() - a type name - and
-            // for FontFamily WinUI accepts any string as a family name, so tabbing through the
-            // grid would commit "Microsoft.UI.Xaml.Media.FontFamily" as the user's font.
+            // CanConvertFrom(string) && CanConvertTo(string). Before Phase B this asserted the
+            // opposite: claiming the to-string direction without a formatter would have prefilled
+            // that box from value.ToString() - a type name - and for FontFamily WinUI accepts any
+            // string as a family name, so tabbing through the grid would have committed
+            // "Microsoft.UI.Xaml.Media.FontFamily" as the user's font. Thickness now has a
+            // formatter (XamlValueFormatter), so the gate correctly opens for it - this is Task 3
+            // wiring CanConvertTo/ConvertTo to XamlValueFormatter, exactly as the old CanConvertTo
+            // remark predicted ("Phase B turns this on per type as each formatter lands").
             var converter = XamlValueConverter.TryCreate(typeof(Thickness));
             Assert.IsTrue(converter.CanConvertFrom(null, typeof(string)));
-            Assert.IsFalse(converter.CanConvertTo(null, typeof(string)));
+            Assert.IsTrue(converter.CanConvertTo(null, typeof(string)));
         }
 
         [Test]
