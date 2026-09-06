@@ -40,6 +40,42 @@ dispatcher thread, through a throwaway NUnit fixture run via
 | `TypeDescriptor.GetConverter(<boxed Thickness>)` | `TypeConverter`, `from=False`, `to=True` |
 | `new Thickness(1,2,3,4).ToString()` | `'1,2,3,4'` |
 
+A second probe wrote each of the sixteen types with the formatter expressions this spec
+prescribes and read the text back through Phase A's `ConvertFrom`:
+
+| Type | Text written | Read back |
+|---|---|---|
+| `Thickness(1,2.5,3,4)` | `1,2.5,3,4` | equal |
+| `CornerRadius(1,2,3,4)` | `1,2,3,4` | equal |
+| `GridLength` Auto / 40 / 2\* | `Auto` / `40` / `2*` | equal |
+| `Colors.Blue` | `#FF0000FF` | equal |
+| `FontWeights.Bold` | `Bold` | equal |
+| `Point(1.5,2.5)` | `1.5,2.5` | equal |
+| `Rect(1,2,3.5,4)` | `1,2,3.5,4` | equal |
+| `Size(3.5,4)` | `3.5,4` | equal |
+| `Duration` 1s / Forever / Automatic | `00:00:01` / `Forever` / `Automatic` | equal |
+| `Matrix(1,2,3,4,5.5,6)` | `1,2,3,4,5.5,6` | equal |
+| `Vector3(1,2.5,3)` | `1,2.5,3` | equal |
+| `FontFamily("Segoe UI")` | `Segoe UI` | `Source` matches |
+| `PointCollection` | `1,2 3.5,4` | 2 points, matching |
+| `DoubleCollection` | `1,2.5,3` | 3 doubles, matching |
+| `SolidColorBrush(Blue)` | `Blue` | `Color == Colors.Blue` |
+| `PathGeometry`, all 7 segment types | see the writer section | shape matches, text stable |
+
+**The five reference types compare unequal under `Equals`** — `FontFamily`, `PointCollection`,
+`DoubleCollection`, `SolidColorBrush` and `PathGeometry` all measured `equal=False` while
+converting correctly, because none implements value equality. Their round-trip tests must compare
+content (`Source`, the point sequence, the double sequence, `Color`, the written text), never
+`Equals`. A test written the obvious way would fail against a correct implementation.
+
+The eleven named font weights, read off `Microsoft.UI.Text.FontWeights` by reflection:
+`Thin=100 ExtraLight=200 Light=300 SemiLight=350 Normal=400 Medium=500 SemiBold=600 Bold=700
+ExtraBold=800 Black=900 ExtraBlack=950`.
+
+Under `de-DE`, `double.ToString("R", CultureInfo.InvariantCulture)` still yields `2.5`, and
+`TimeSpan.ToString("c", CultureInfo.InvariantCulture)` still yields `00:00:01`, while
+`Point.ToString()` yields `1,5;2,5` — which is why Decision 6 forbids the `ToString()` path.
+
 Facts read out of the tree rather than measured:
 
 - The only write entry point a designer tool reaches is `XamlModelProperty.cs:239`
@@ -254,28 +290,46 @@ the predicate, the same as a non-null `Transform`.
 | Segment | Output |
 |---|---|
 | `LineSegment` | `L x,y` |
-| `PolyLineSegment` | `L x1,y1 x2,y2 ...` |
+| `PolyLineSegment` | one `L x,y` per point |
 | `BezierSegment` | `C p1 p2 p3` |
-| `PolyBezierSegment` | `C x1,y1 x2,y2 ...` |
+| `PolyBezierSegment` | one `C p p p` per group of three points |
 | `QuadraticBezierSegment` | `Q p1 p2` |
-| `PolyQuadraticBezierSegment` | `Q x1,y1 x2,y2 ...` |
-| `ArcSegment` | `A size rotationAngle isLargeArc sweepDirection point` |
+| `PolyQuadraticBezierSegment` | one `Q p p` per pair of points |
+| `ArcSegment` | `A w,h rotationAngle isLargeArc sweepDirection x,y` |
 
 `isLargeArc` is written `1`/`0`; `sweepDirection` is `1` for `Clockwise` and `0` for
 `Counterclockwise`. An unknown `PathSegment` subtype makes the predicate answer `false` rather
 than dropping the segment — a silently shortened path is the failure mode this whole phase exists
 to remove.
 
+**One command per resulting segment, never a run of coordinates.** WinUI's mini-language parser
+expands a coordinate run into individual segments: measured, `L20,5 30,10` reads back as two
+`LineSegment`s, not one `PolyLineSegment`, and the same holds for `C` and `Q`. Emitting the run
+form therefore produces text that changes on the next save even when nothing was edited. Emitting
+one command per segment makes the writer a fixed point — measured over a figure carrying all
+seven segment types: the text written from the reloaded geometry is byte-identical to the text
+that produced it.
+
+A worked example, measured end to end, is the canonical-form assertion this writer owes its
+tests:
+
+```
+F1 M0,0 L10,0 L20,5 L30,10 C40,0 50,20 60,10 C70,0 80,20 90,10 Q100,0 110,10 Q120,0 130,10 A5,7.5 30 1 1 140,10 Z
+```
+
 ## Testing / definition of done
 
 Tests live in `tests/WinUIDesigner.XamlDom.Tests/ValueFormattingTests.cs` (4 spaces, matching its
 siblings). Every WinUI object is created inside `WinUITestHost.Run(...)`.
 
-1. Sixteen round-trip tests, one per table entry: `ConvertFrom(Format(v))` equals `v`.
+1. Sixteen round-trip tests, one per table entry: `ConvertFrom(Format(v))` equals `v` for the
+   eleven value types, and matches on content for the five reference types named above.
 2. Sixteen canonical-text assertions, one per entry, against the exact strings above.
 3. The whole round-trip set repeated under `de-DE` (`CultureInfo.CurrentCulture` swapped and
    restored in a `finally`), proving Decision 6.
-4. A `PathGeometry` covering all seven segment types in one figure, round-tripped.
+4. A `PathGeometry` covering all seven segment types in one figure: its written text equals the
+   canonical string in the writer section, and writing the reloaded geometry reproduces that same
+   text byte for byte.
 5. `PathGeometry` with `FillRule.Nonzero`, with `IsClosed`, and with two figures.
 6. Predicate rejections, each asserting that the element form is still produced and that the sink
    received a report: `LinearGradientBrush`, `RectangleGeometry`, a `PathGeometry` with a
@@ -300,6 +354,13 @@ siblings). Every WinUI object is created inside `WinUITestHost.Run(...)`.
 
 ## Known gaps this phase accepts
 
+- **A save/reload normalizes poly segments away.** WinUI's mini-language parser expands
+  coordinate runs, so a `PolyLineSegment` written by this phase reads back as individual
+  `LineSegment`s (measured). The drawn shape is identical and the text is stable, but
+  `PathHandlerExtension`'s `PolyLineSegment` handling — its `PolyLineIndex` splitting at
+  `PathHandlerExtension.ConvertMenu.cs:169-173` — sees the normalized form after a reload. There
+  is no way around it: the mini-language has no poly-segment concept, and the alternative is the
+  element form, which is what this phase exists to stop emitting.
 - `Vector2` gets neither a host entry nor a formatter (Decision 14).
 - The numeric `FontWeight` form stays unrepresentable in both directions.
 - `RectangleGeometry`, `EllipseGeometry`, `LineGeometry` and `GeometryGroup` still save as empty
