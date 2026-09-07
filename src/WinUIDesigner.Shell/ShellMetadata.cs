@@ -32,11 +32,15 @@ namespace WinUIDesigner.Shell
             {
                 if (registered)
                     return;
+
+                RegisterDefaultSizes();
+                RegisterPopularProperties();
+
+                // Set last, and inside the lock: a caller that returns from Register() must be
+                // able to read the seeded tables, which means no other caller may leave this
+                // method while seeding is still in flight.
                 registered = true;
             }
-
-            RegisterDefaultSizes();
-            RegisterPopularProperties();
         }
 
         static void RegisterDefaultSizes()
