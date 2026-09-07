@@ -38,12 +38,11 @@ namespace WinUIDesigner.Shell
             list.DisplayMemberPath = "Name";
             list.SelectionChanged += OnSelectionChanged;
 
-            Content = new ScrollViewer
-            {
-                Content = list,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            };
+            // A ListView already contains its own ScrollViewer. Wrapping it in another one
+            // hands the inner list an infinite available height, so its virtualizing panel
+            // realizes every container against an unbounded viewport instead of the real one -
+            // measured at 6360px for 159 items inside a 680px-tall host. Fix per code review.
+            Content = list;
         }
 
         public void Attach(IToolService service)
