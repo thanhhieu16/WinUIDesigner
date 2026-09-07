@@ -489,7 +489,7 @@ Append to `ElementSerializationTests`:
         }
 
         [Test]
-        public void AnEnumPropertyStillGoesThroughTheExistingConverterBranch()
+        public void ANestedListedTypeIsWrittenByRecursion()
         {
             WinUITestHost.Run(() => {
                 var document = ParseDocument("<Path xmlns='" + PresentationNs + "'/>");
@@ -840,12 +840,16 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.XamlDom.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.XamlDom.Tests.exe --noresult
 ```
 
-Expected: 159 tests, 155 passed, **1 failed**, 4 ignored. The failure is
-`ValueFormattingTests.LeavesAnUnformattableInstanceOnTheElementPath`, which asserts a
-`LinearGradientBrush` "must keep the element form". It still does keep the element form — the
-element is no longer empty — so the assertion's *text* is now stale while its check still
-passes. Read it before assuming: if it passes, this step expects 156 passed and 0 failed. Task 3
-updates that test either way.
+Expected: **160 tests, 156 passed, 0 failed, 4 ignored** (154 after Task 1, plus this task's
+six).
+
+`ValueFormattingTests.LeavesAnUnformattableInstanceOnTheElementPath` is the one to watch and it
+must stay green: it asserts a `LinearGradientBrush` "must keep the element form", and the brush
+it uses is **empty**. An empty brush has no stops to write and no locally-set scalars, so the
+writer refuses it and the element stays exactly as before. Its sibling
+`ValueFormattingTests.ReportsAValueItCannotWriteAsAttributeText` uses the same empty brush and
+must also stay green. If either goes red, the writer is emitting something for a value with
+nothing set — that is a defect in this task, not a stale test.
 
 - [ ] **Step 8: Commit**
 
@@ -1075,7 +1079,7 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.XamlDom.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.XamlDom.Tests.exe --noresult
 ```
 
-Expected: 163 tests, 159 passed, 0 failed, 4 ignored.
+Expected: **164 tests, 160 passed, 0 failed, 4 ignored** (160 after Task 2, plus this task's four).
 
 - [ ] **Step 6: Commit**
 
@@ -1165,7 +1169,7 @@ tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64
 tests/WinUIDesigner.Shell.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.Tests.exe --noresult
 ```
 
-Expected: XamlDom 163 (159 passed, 0 failed, 4 ignored), DesignModel 77/77, Designer 246/246,
+Expected: XamlDom 164 (160 passed, 0 failed, 4 ignored), DesignModel 77/77, Designer 246/246,
 Shell 47 (46 passed, 0 failed, 1 explicit).
 
 `ModelToolsTests.ApplyingASecondTransformKindWrapsBothInATransformGroup` is the one to watch in
