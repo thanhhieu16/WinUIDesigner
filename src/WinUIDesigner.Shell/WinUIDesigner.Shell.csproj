@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>WinUIDesigner.Shell</RootNamespace>
+    <Nullable>disable</Nullable>
+    <UseWinUI>true</UseWinUI>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <!--
+      EnableMsixTooling=true is chosen over false only because it makes the build emit the
+      merged resources.pri as a visible output. Both values were measured to work once
+      App.xaml exists (see the spec's "Which knobs matter" table); the visible artifact
+      makes a future regression in the PRI pipeline obvious instead of silent.
+    -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <GenerateAppxPackageOnBuild>false</GenerateAppxPackageOnBuild>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.7.250606001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.4188" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinUIDesigner.XamlDom\WinUIDesigner.XamlDom.csproj" />
+    <ProjectReference Include="..\WinUIDesigner.DesignModel\WinUIDesigner.DesignModel.csproj" />
+    <ProjectReference Include="..\WinUIDesigner.Designer\WinUIDesigner.Designer.csproj" />
+  </ItemGroup>
+
+</Project>

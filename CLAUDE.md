@@ -6,6 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A port of SharpDevelop's `WpfDesign` (a runtime WYSIWYG XAML designer engine) from WPF to **WinUI 3**. Read-only reference source for the port lives at `F:\ReferencesCode\CSharp\WpfDesigner` — never edit it, only read from it. The port is being built in five sequential phases (XamlDom → DesignModel core engine → DesignPanel/DesignSurface → concrete design-time behaviors → shell app); phases 1–4b are done. Each phase has a spec and a plan under `docs/superpowers/specs/` and `docs/superpowers/plans/` — read the relevant one for exact rationale, verified WinUI API facts, and file:line history before making non-trivial changes in an area you haven't touched before.
 
+`src/` contains exactly one `.xaml` file: `src/WinUIDesigner.Shell/App.xaml`. That is not a
+style choice. A WinUI 3 project containing no compiled XAML produces no app-level merged
+`resources.pri`, so `ms-appx:///` cannot be resolved, `XamlControlsResources` fails to load
+`themeresources.xaml`, and every control whose default template references a theme brush
+fail-fasts the process with `0xC0000409` during the first layout pass. All other shell UI is
+written in C#, like `OutlineViewControl` and `PropertyGridControl`. Do not add a second
+`.xaml` file, and do not add a hand-written `app.manifest` — it replaces the generated
+registration-free WinRT activation manifest and the app will not start.
+
 ## Build
 
 ```
@@ -24,6 +33,7 @@ dotnet build WinUIDesigner.sln
 tests/WinUIDesigner.XamlDom.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.XamlDom.Tests.exe --noresult
 tests/WinUIDesigner.DesignModel.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.DesignModel.Tests.exe --noresult
 tests/WinUIDesigner.Designer.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Designer.Tests.exe --noresult
+tests/WinUIDesigner.Shell.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.Tests.exe --noresult
 ```
 
 Run a single test with NUnitLite's own filter flag, e.g. `... .exe --test=WinUIDesigner.Designer.Tests.MoveTests.SomeMethod`. `dotnet test WinUIDesigner.sln --filter <Name>` still works for IDE discovery and for the subset of tests that touch no live WinUI object, but treat it as a supplement, never a replacement for the `.exe` run.
