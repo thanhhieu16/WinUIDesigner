@@ -77,16 +77,21 @@ namespace WinUIDesigner.Shell.Tests
                 view.SelectForTest(typeof(Button));
                 var first = tools.CurrentTool;
                 Assert.That(first, Is.InstanceOf<WinUIDesigner.Designer.Services.CreateComponentTool>());
+                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)));
 
                 // What the engine does after a placement completes.
                 tools.CurrentTool = pointer;
 
+                // The mechanism under test, asserted directly: the reset must clear the list's
+                // selection. Without this, SelectForTest below is a click on an entry that is
+                // already selected - it raises no SelectionChanged, so nothing re-arms and the
+                // toolbox is stuck after one placement. Spec Decision 12.
+                Assert.That(view.SelectedTypeForTest, Is.Null,
+                    "resetting to the pointer tool must clear the toolbox selection");
+
                 view.SelectForTest(typeof(Button));
                 var second = tools.CurrentTool;
 
-                // The regression this guards: with a ListView whose SelectionChanged arms the
-                // tool, the placed control stays selected, so re-clicking it raises no event and
-                // nothing re-arms. Spec Decision 12.
                 Assert.That(second, Is.InstanceOf<WinUIDesigner.Designer.Services.CreateComponentTool>());
                 Assert.That(second, Is.Not.SameAs(first), "a second placement needs a fresh tool");
             });
@@ -102,9 +107,18 @@ namespace WinUIDesigner.Shell.Tests
                 var view = new ToolboxView();
                 view.Attach(tools);
                 view.SelectForTest(typeof(Button));
+                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)));
 
                 view.Detach();
-                Assert.DoesNotThrow(() => tools.CurrentTool = pointer);
+
+                // While attached, this reset clears the selection (see the test above). After
+                // Detach the handler is gone, so the selection must survive it untouched - the
+                // observable proof that a closed document's tool service can no longer drive
+                // the view.
+                tools.CurrentTool = pointer;
+
+                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)),
+                    "Detach must unsubscribe: a detached tool service still cleared the selection");
             });
         }
     }

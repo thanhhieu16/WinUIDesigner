@@ -69,14 +69,36 @@ namespace WinUIDesigner.Shell
             toolService = null;
         }
 
+        /// <summary>The type the list currently has selected, or null. Test seam.</summary>
+        /// <remarks>
+        /// Exists so a test can assert the Decision 12 reset actually cleared the selection,
+        /// rather than only that a second tool got armed - which arming unconditionally would
+        /// guarantee by construction whether or not the reset works.
+        /// </remarks>
+        internal Type SelectedTypeForTest
+        {
+            get { return (list.SelectedItem as ControlNode)?.Type; }
+        }
+
         /// <summary>Selects a control type as a user click would. Test seam.</summary>
+        /// <remarks>
+        /// Faithful to a click in the one way that matters here: clicking an entry that is
+        /// already selected changes nothing and raises no SelectionChanged, so nothing re-arms.
+        /// That is exactly the Decision 12 regression, and it is only avoided because
+        /// <see cref="OnCurrentToolChanged"/> clears the selection when the engine resets.
+        /// </remarks>
         internal void SelectForTest(Type type)
         {
             var node = nodes.FirstOrDefault(n => n.Type == type);
+            if (ReferenceEquals(list.SelectedItem, node))
+                return;
+
             list.SelectedItem = node;
-            // ListView.SelectedItem does not raise SelectionChanged without a live item
-            // container, so drive the same handler the UI would.
-            Arm(node?.Type);
+            // A ListView with no realized item containers does not reliably raise
+            // SelectionChanged from a programmatic SelectedItem assignment, so drive the same
+            // handler the UI would. If the real event does fire as well, the handler simply
+            // arms an equivalent second tool, which nothing depends on.
+            OnSelectionChanged(list, null);
         }
 
         void OnSelectionChanged(object sender, SelectionChangedEventArgs e)

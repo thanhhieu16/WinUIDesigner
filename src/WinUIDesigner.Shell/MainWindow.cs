@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -47,6 +48,7 @@ namespace WinUIDesigner.Shell
         ISelectionService wiredSelection;
         UndoService wiredUndo;
         bool closingConfirmed;
+        bool dialogOpen;
 
         MenuFlyoutItem undoItem, redoItem, cutItem, copyItem, pasteItem, deleteItem;
 
@@ -99,9 +101,6 @@ namespace WinUIDesigner.Shell
             Grid.SetColumn(toolboxView, 0);
             columns.Children.Add(toolboxView);
 
-            // OutlineViewControl and PropertyGridControl both derive from StackPanel and contain
-            // no ScrollViewer of their own, so without this wrapping they clip on any real
-            // document. Spec Decision 10.
             var surfaceScroll = new ScrollViewer
             {
                 Content = designHost,
@@ -119,6 +118,9 @@ namespace WinUIDesigner.Shell
             Grid.SetRow(outlineFilter, 0);
             right.Children.Add(outlineFilter);
 
+            // OutlineViewControl and PropertyGridControl both derive from StackPanel and contain
+            // no ScrollViewer of their own, so without the two wrappers below they clip on any
+            // real document. Spec Decision 10.
             var outlineScroll = new ScrollViewer
             {
                 Content = outlineView,
@@ -148,10 +150,10 @@ namespace WinUIDesigner.Shell
         MenuBar BuildMenu()
         {
             var file = new MenuBarItem { Title = "File" };
-            file.Items.Add(Item("New", VirtualKey.N, VirtualKeyModifiers.Control, (s, e) => shell.New()));
-            file.Items.Add(Item("Open...", VirtualKey.O, VirtualKeyModifiers.Control, async (s, e) => await OpenAsync()));
-            file.Items.Add(Item("Save", VirtualKey.S, VirtualKeyModifiers.Control, async (s, e) => await SaveAsync(false)));
-            file.Items.Add(Item("Save As...", VirtualKey.None, VirtualKeyModifiers.None, async (s, e) => await SaveAsync(true)));
+            file.Items.Add(Item("New", VirtualKey.N, VirtualKeyModifiers.Control, (s, e) => Fire(NewAsync)));
+            file.Items.Add(Item("Open...", VirtualKey.O, VirtualKeyModifiers.Control, (s, e) => Fire(OpenAsync)));
+            file.Items.Add(Item("Save", VirtualKey.S, VirtualKeyModifiers.Control, (s, e) => Fire(() => SaveAsync(shell.CurrentDocument, false))));
+            file.Items.Add(Item("Save As...", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(() => SaveAsync(shell.CurrentDocument, true))));
             file.Items.Add(new MenuFlyoutSeparator());
             file.Items.Add(Item("Exit", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Close()));
 
@@ -195,9 +197,33 @@ namespace WinUIDesigner.Shell
             RefreshCommands();
         }
 
+        /// <summary>
+        /// Runs a task no caller awaits, logging whatever it throws.
+        /// </summary>
+        /// <remarks>
+        /// An `async Task` discarded with `_ =` parks its exception in an unobserved Task: it
+        /// never reaches Application.UnhandledException and surfaces only at GC finalization, so
+        /// the riskiest paths here (dialogs, window close) would be the silent ones. `async void`
+        /// with a catch is what keeps them audible. Fix per code review.
+        /// </remarks>
+        static async void Fire(Func<Task> operation)
+        {
+            try
+            {
+                await operation();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[MainWindow] unobserved failure: " + ex);
+            }
+        }
+
         void WithClipboard(Action<ICopyPasteService, DesignContext> action)
         {
-            var doc = shell.CurrentDocument;
+            // wiredDocument, not shell.CurrentDocument: RefreshCommands below decides what is
+            // enabled from wiredDocument, so both must read the same document or the enabled
+            // state and the action could disagree.
+            var doc = wiredDocument;
             if (doc == null || doc.DesignContext == null)
                 return;
             var svc = doc.DesignContext.Services.GetService<ICopyPasteService>();
@@ -242,11 +268,21 @@ namespace WinUIDesigner.Shell
 
             wiredSelection = wiredDocument.SelectionService;
             if (wiredSelection != null)
+            {
                 wiredSelection.SelectionChanged += OnSelectionChanged;
+                // Seed the fresh grid from the selection the incoming document already has.
+                // Without this it stays empty until the next selection change. Fix per review.
+                propertyGrid.SelectedItems = wiredSelection.SelectedItems;
+            }
 
             wiredUndo = wiredDocument.UndoService;
             if (wiredUndo != null)
+            {
+                // Subscription order is load-bearing: Document subscribed to this same event in
+                // its constructor, so its IsDirty handler always runs before OnUndoStackChanged
+                // reads Document.Title below. Do not move this earlier.
                 wiredUndo.UndoStackChanged += OnUndoStackChanged;
+            }
 
             if (wiredDocument.DesignContext != null)
             {
@@ -292,7 +328,31 @@ namespace WinUIDesigner.Shell
             deleteItem.IsEnabled = svc != null && svc.CanDelete(ctx);
         }
 
-        async System.Threading.Tasks.Task OpenAsync()
+        /// <summary>
+        /// Replaces the current document with a blank one.
+        /// </summary>
+        /// <remarks>
+        /// The outgoing document is asked about through the async path and closed, so Documents
+        /// never holds more than one. The shell is single-document and has no tab strip, so a
+        /// document left in the collection would be unreachable - still dirty, still holding a
+        /// live DesignSurface, and impossible to make current again. Fix per code review.
+        /// </remarks>
+        async Task NewAsync()
+        {
+            var current = shell.CurrentDocument;
+            if (!await PrepareForCloseAsync(current))
+                return;
+
+            // Create first, close second: if New fails the shell reports it and keeps the
+            // document the user already had, rather than leaving the app with none.
+            if (shell.New() == null)
+                return;
+
+            if (current != null)
+                shell.Close(current);
+        }
+
+        async Task OpenAsync()
         {
             var picker = new Windows.Storage.Pickers.FileOpenPicker();
             // Unpackaged WinUI requires the picker to be associated with a window's HWND;
@@ -304,16 +364,51 @@ namespace WinUIDesigner.Shell
             if (file == null)
                 return;
 
+            // Ask here rather than letting ShellModel.Close raise its synchronous AskSaveChanges:
+            // that event cannot await a dialog, so OnAskSaveChanges answers Cancel and Close
+            // silently fails. Fix per code review.
             var current = shell.CurrentDocument;
-            if (current != null && !shell.Close(current))
+            if (!await PrepareForCloseAsync(current))
                 return;
 
-            shell.Open(file.Path);
+            // Open before closing, so a file that turns out to be unreadable leaves the current
+            // document in place instead of leaving the app with no document at all.
+            if (!shell.Open(file.Path))
+                return;
+
+            if (current != null)
+                shell.Close(current);
         }
 
-        async System.Threading.Tasks.Task SaveAsync(bool forceAsk)
+        /// <summary>
+        /// Asks about a dirty document and acts on the answer, leaving it in a state where a
+        /// later <see cref="ShellModel.Close"/> completes without raising AskSaveChanges.
+        /// Returns false when the user cancelled, or when a requested save did not go through.
+        /// </summary>
+        async Task<bool> PrepareForCloseAsync(Document doc)
         {
-            var doc = shell.CurrentDocument;
+            if (doc == null || !doc.IsDirty)
+                return true;
+
+            var answer = await AskSaveChangesAsync(doc);
+            if (answer == SaveChangesResult.Cancel)
+                return false;
+
+            if (answer == SaveChangesResult.Save)
+            {
+                await SaveAsync(doc, doc.FilePath == null);
+                // Still dirty means the save failed or the Save As picker was dismissed;
+                // abandon rather than discarding the edits the user asked to keep.
+                return !doc.IsDirty;
+            }
+
+            // Discard: clear the flag so the close is silent.
+            doc.MarkSaved();
+            return true;
+        }
+
+        async Task SaveAsync(Document doc, bool forceAsk)
+        {
             if (doc == null)
                 return;
 
@@ -345,24 +440,18 @@ namespace WinUIDesigner.Shell
             // AppWindowClosingEventArgs.Cancel is synchronous; ContentDialog.ShowAsync is not.
             // So cancel this close, ask, and close again once the answer is in. Spec Decision 20.
             args.Cancel = true;
-            _ = ConfirmThenCloseAsync();
+            Fire(ConfirmThenCloseAsync);
         }
 
-        async System.Threading.Tasks.Task ConfirmThenCloseAsync()
+        async Task ConfirmThenCloseAsync()
         {
-            var doc = shell.CurrentDocument;
-            if (doc != null)
+            // Every document, not just CurrentDocument: OnAppWindowClosing gates on
+            // shell.IsSomethingDirty, which scans all of them, so asking about only one could
+            // close the window on another's unsaved edits. Fix per code review.
+            foreach (var doc in shell.Documents.ToList())
             {
-                var answer = await AskSaveChangesAsync(doc);
-                if (answer == SaveChangesResult.Cancel)
+                if (!await PrepareForCloseAsync(doc))
                     return;
-                if (answer == SaveChangesResult.Save)
-                {
-                    await SaveAsync(doc.FilePath == null);
-                    if (doc.IsDirty)
-                        return;
-                }
-                doc.MarkSaved();
             }
 
             closingConfirmed = true;
@@ -371,18 +460,18 @@ namespace WinUIDesigner.Shell
 
         void OnAskSaveChanges(object sender, AskSaveChangesEventArgs e)
         {
-            // ShellModel's synchronous event cannot await a dialog. Everything that can ask the
-            // user does so through the async path (OpenAsync, ConfirmThenCloseAsync) before
-            // calling Close, so reaching here means no one asked: answer Cancel, which is the
+            // ShellModel's synchronous event cannot await a dialog. Every path that closes a
+            // document (NewAsync, OpenAsync, ConfirmThenCloseAsync) runs PrepareForCloseAsync
+            // first, which leaves the document non-dirty, so ShellModel.Close never raises this
+            // for them. Reaching here therefore means no one asked: answer Cancel, which is the
             // safe default and leaves the document open.
             e.Result = SaveChangesResult.Cancel;
         }
 
-        async System.Threading.Tasks.Task<SaveChangesResult> AskSaveChangesAsync(Document doc)
+        async Task<SaveChangesResult> AskSaveChangesAsync(Document doc)
         {
             var dialog = new ContentDialog
             {
-                XamlRoot = Content.XamlRoot,
                 Title = "Unsaved changes",
                 Content = "Save changes to \"" + doc.Name + "\"?",
                 PrimaryButtonText = "Save",
@@ -390,7 +479,11 @@ namespace WinUIDesigner.Shell
                 CloseButtonText = "Cancel"
             };
 
-            var result = await dialog.ShowAsync();
+            var result = await ShowDialogAsync(dialog);
+            // Could not ask - no XamlRoot yet, or another dialog already owns the window.
+            // Cancel is the safe answer: it changes nothing.
+            if (result == null)
+                return SaveChangesResult.Cancel;
             if (result == ContentDialogResult.Primary)
                 return SaveChangesResult.Save;
             if (result == ContentDialogResult.Secondary)
@@ -398,12 +491,40 @@ namespace WinUIDesigner.Shell
             return SaveChangesResult.Cancel;
         }
 
-        void OnReportError(object sender, ShellErrorEventArgs e)
+        /// <summary>
+        /// Shows a dialog, or returns null without showing it when it cannot be shown.
+        /// </summary>
+        /// <remarks>
+        /// Guards the two ways ContentDialog.ShowAsync throws here. A null XamlRoot: the window
+        /// has Content from the constructor but no XamlRoot until it is activated, and
+        /// shell.New() runs in the constructor, so a startup failure would report through a
+        /// dialog that cannot exist yet. And a second dialog: only one ContentDialog may be open
+        /// at a time, so clicking the close box twice while the save prompt is up would throw on
+        /// the second show. Fix per code review.
+        /// </remarks>
+        async Task<ContentDialogResult?> ShowDialogAsync(ContentDialog dialog)
         {
-            _ = ShowErrorAsync(e);
+            if (dialogOpen || Content == null || Content.XamlRoot == null)
+                return null;
+
+            dialog.XamlRoot = Content.XamlRoot;
+            dialogOpen = true;
+            try
+            {
+                return await dialog.ShowAsync();
+            }
+            finally
+            {
+                dialogOpen = false;
+            }
         }
 
-        async System.Threading.Tasks.Task ShowErrorAsync(ShellErrorEventArgs e)
+        void OnReportError(object sender, ShellErrorEventArgs e)
+        {
+            Fire(() => ShowErrorAsync(e));
+        }
+
+        async Task ShowErrorAsync(ShellErrorEventArgs e)
         {
             var text = new StringBuilder();
             text.AppendLine(e.Message);
@@ -419,12 +540,16 @@ namespace WinUIDesigner.Shell
 
             var dialog = new ContentDialog
             {
-                XamlRoot = Content.XamlRoot,
                 Title = "Error",
                 Content = new ScrollViewer { Content = new TextBlock { Text = text.ToString(), TextWrapping = TextWrapping.Wrap } },
                 CloseButtonText = "Close"
             };
-            await dialog.ShowAsync();
+
+            if (await ShowDialogAsync(dialog) == null)
+            {
+                // No window to show it in. Losing the message entirely is worse than a trace.
+                System.Diagnostics.Debug.WriteLine("[MainWindow] could not show error dialog: " + text);
+            }
         }
     }
 }
