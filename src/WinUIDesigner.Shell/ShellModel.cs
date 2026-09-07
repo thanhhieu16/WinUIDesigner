@@ -40,9 +40,9 @@ namespace WinUIDesigner.Shell
     /// MessageBox.Show inline; WinUI's replacement, ContentDialog, is asynchronous and needs an
     /// XamlRoot, which would drag a live window into every test. This class raises
     /// <see cref="AskSaveChanges"/> and <see cref="ReportError"/> instead, and MainWindow answers
-    /// them. Spec Decisions 6 and 7.
+    /// them. Phase 5 Decisions 6 and 7.
     /// <para>
-    /// No method here throws. Spec Decision 17: a throw escaping into the engine's transaction
+    /// No method here throws. Phase 5 Decision 17: a throw escaping into the engine's transaction
     /// machinery strands a ChangeGroup, and there is no handler that would make that survivable.
     /// </para>
     /// </remarks>
@@ -216,7 +216,7 @@ namespace WinUIDesigner.Shell
                 // UpdateXaml drives DesignSurface.SaveDesigner through XamlXmlWriter - engine
                 // serialization code that is not proven exception-free - so it lives inside the
                 // same try as the write. Broad catch for the same reason as Open: no method on
-                // ShellModel may throw (Spec Decision 17), and File.WriteAllText's own exception
+                // ShellModel may throw (Phase 5 Decision 17), and File.WriteAllText's own exception
                 // set (ArgumentException, NotSupportedException, PathTooLongException, ...)
                 // does not share a common base with IOException/UnauthorizedAccessException.
                 // Only when the tree is the source of truth. In XAML mode the user's typing is,

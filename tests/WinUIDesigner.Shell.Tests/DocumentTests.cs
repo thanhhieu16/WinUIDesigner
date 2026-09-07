@@ -266,7 +266,7 @@ namespace WinUIDesigner.Shell.Tests
                 {
                     Assert.That(doc.IsDirty, Is.False, "a freshly loaded document is clean");
 
-                    // Spec Decision 18: after an unhandled exception the tree survives in whatever
+                    // Phase 5 Decision 18: after an unhandled exception the tree survives in whatever
                     // state the failure left it, and only a forced dirty flag makes the close gate
                     // prompt about it. Nothing else on Document can raise IsDirty from the outside.
                     doc.MarkSuspect();

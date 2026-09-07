@@ -14,7 +14,7 @@ namespace WinUIDesigner.Shell
     /// with nothing to return - the latter directly affects the size a click-placed control
     /// gets. This seeds only what the shell's own tests exercise; the rest is a stated gap in
     /// the Phase 5 spec. The reference's equivalent is BasicMetadata, which this port does not
-    /// have. Spec Decision 22.
+    /// have. Phase 5 Decision 22.
     /// <para>
     /// Registering by DependencyProperty rather than by (Type, name): Metadata.IsPopularProperty
     /// checks DesignItemProperty.DependencyProperty first, which is unambiguous, while the name

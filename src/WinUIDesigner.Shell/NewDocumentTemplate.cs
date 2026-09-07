@@ -7,7 +7,7 @@ namespace WinUIDesigner.Shell
     /// A constant rather than the reference's on-disk NewFileTemplate.xaml, and rooted at a
     /// Canvas rather than the reference's Window: Microsoft.UI.Xaml.Window is not a UIElement,
     /// so it cannot be a design root. Canvas rather than Grid because CanvasPlacementSupport
-    /// gives free placement, which is what a blank document wants. Spec Decision 15.
+    /// gives free placement, which is what a blank document wants. Phase 5 Decision 15.
     /// </remarks>
     public static class NewDocumentTemplate
     {

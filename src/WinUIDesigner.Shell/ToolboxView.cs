@@ -19,7 +19,7 @@ namespace WinUIDesigner.Shell
     /// PointerTool once a placement finishes. A ListView whose SelectionChanged arms the tool
     /// would therefore be stuck after one placement, because the placed entry stays selected and
     /// re-clicking it raises no event. Clearing the selection when the engine resets is what
-    /// keeps the same control placeable twice in a row. Spec Decision 12.
+    /// keeps the same control placeable twice in a row. Phase 5 Decision 12.
     /// </para>
     /// </remarks>
     public sealed class ToolboxView : UserControl
@@ -69,7 +69,7 @@ namespace WinUIDesigner.Shell
         /// placed stays selected, and the incoming document's tool service starts at its
         /// PointerTool. Leaving the stale selection behind means clicking that same entry again
         /// raises no SelectionChanged, so nothing re-arms and the toolbox is dead until the user
-        /// picks a different control - Decision 12's regression, reintroduced across the document
+        /// picks a different control - Phase 5 Decision 12's regression, reintroduced across the document
         /// boundary. Cleared under the same suppression guard OnCurrentToolChanged uses, so the
         /// clearing itself cannot arm a tool on the outgoing service.
         /// </remarks>
@@ -92,7 +92,7 @@ namespace WinUIDesigner.Shell
 
         /// <summary>The type the list currently has selected, or null. Test seam.</summary>
         /// <remarks>
-        /// Exists so a test can assert the Decision 12 reset actually cleared the selection,
+        /// Exists so a test can assert the Phase 5 Decision 12 reset actually cleared the selection,
         /// rather than only that a second tool got armed - which arming unconditionally would
         /// guarantee by construction whether or not the reset works.
         /// </remarks>
@@ -105,7 +105,7 @@ namespace WinUIDesigner.Shell
         /// <remarks>
         /// Faithful to a click in the one way that matters here: clicking an entry that is
         /// already selected changes nothing and raises no SelectionChanged, so nothing re-arms.
-        /// That is exactly the Decision 12 regression, and it is only avoided because
+        /// That is exactly the Phase 5 Decision 12 regression, and it is only avoided because
         /// <see cref="OnCurrentToolChanged"/> clears the selection when the engine resets.
         /// </remarks>
         internal void SelectForTest(Type type)

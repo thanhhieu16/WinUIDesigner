@@ -22,7 +22,7 @@ namespace WinUIDesigner.Shell.Tests
 
                 // The reference's NewFileTemplate.xaml is rooted at <Window>, which cannot be a
                 // design root here: Microsoft.UI.Xaml.Window is not a UIElement, and
-                // DesignSurface assigns DesignPanel.Content = RootItem.View. Spec Decision 15.
+                // DesignSurface assigns DesignPanel.Content = RootItem.View. Phase 5 Decision 15.
                 var canvas = surface.DesignContext.RootItem.Component as Canvas;
                 Assert.That(canvas, Is.Not.Null, "the template's root must be a Canvas");
                 Assert.That(canvas.Width, Is.EqualTo(640.0));

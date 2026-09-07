@@ -60,7 +60,7 @@ namespace WinUIDesigner.Shell.Tests
                 // Microsoft.WinUI, exactly one throws TargetInvocationException from
                 // Activator.CreateInstance. The filter exists for it; this test names it so a
                 // future SDK that fixes it shows up as a failure rather than silently widening
-                // the list. Spec Decision 11.
+                // the list. Phase 5 Decision 11.
                 Assert.That(Toolbox.IsControl(typeof(PivotHeaderItem)), Is.True,
                     "PivotHeaderItem still passes IsControl - only activation excludes it");
                 Assert.That(Toolbox.CanActivate(typeof(PivotHeaderItem)), Is.False,

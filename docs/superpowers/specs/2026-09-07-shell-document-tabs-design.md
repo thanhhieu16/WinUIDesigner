@@ -548,6 +548,26 @@ is.
 - **Panes cannot be resized, floated or docked.** Decision 23.
 - **The reference's `XamlElementLineInfo` selection sync is not ported** — selecting an
   element on the surface does not move the caret in the XAML view.
+- **Every mode toggle on the current document allocates a fresh `PropertyGridControl`.**
+  Decision 22 routes a `Mode` change on the current document through the same
+  `WireCurrentDocument()` that Decision 23's per-document grid rebuild lives in, so each
+  Design ↔ XAML switch throws the old grid away and builds another. CLAUDE.md records that
+  constructing any `DependencyObject` permanently commits native memory that is never
+  returned, so a user toggling the two views repeatedly commits memory nothing gives back.
+  Both decisions are implemented as written and this is what they compose to; recorded
+  rather than fixed, because separating the two re-wires is a design change, not a defect
+  fix.
+- **Whether the editor's font is actually monospaced is unverified.** `DocumentView` sets
+  `FontFamily` from the string `"Cascadia Mono, Consolas, Courier New"`, and WinUI's
+  `FontFamily` accepts any string without validating it, so if none of the three resolves the
+  editor falls back to the proportional UI font in silence and Decision 13's "monospace"
+  quietly does not hold. One look during the manual walkthrough settles it.
+- **`JumpToError`'s own body is only half covered.** The refusal branch — selecting nothing
+  once the buffer is no longer the text the coordinates were reported against — has a test,
+  as do the `OffsetOf` and `TokenLength` helpers. The path that matters to the user, a mode
+  switch followed by a selection landing in a live editor, is proven by no automated test:
+  a `TextBox` cannot be root content in this test process, so nothing here lays one out.
+  Manual walkthrough item, with the two — refusal and selection — worth checking together.
 
 ## Out of scope
 

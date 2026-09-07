@@ -10,7 +10,7 @@ namespace WinUIDesigner.Shell
     /// <remarks>
     /// Ported from the reference's MyTypeFinder.cs. XamlTypeFinder.ImportFrom is protected, so
     /// the WinUI seed is imported from inside this type - CreateWinUITypeFinder() returns a
-    /// XamlTypeFinder, not a ShellTypeFinder, so it cannot simply be assigned. Spec Decision 14.
+    /// XamlTypeFinder, not a ShellTypeFinder, so it cannot simply be assigned. Phase 5 Decision 14.
     /// </remarks>
     public sealed class ShellTypeFinder : XamlTypeFinder
     {

@@ -41,7 +41,7 @@ namespace WinUIDesigner.Shell
     /// <remarks>
     /// Ported from the reference's Toolbox.cs, with one addition: a type that passes
     /// <see cref="IsControl"/> but throws from Activator.CreateInstance is skipped. Measured on
-    /// this SDK, exactly one of the 160 candidates does (PivotHeaderItem). Spec Decision 11.
+    /// this SDK, exactly one of the 160 candidates does (PivotHeaderItem). Phase 5 Decision 11.
     /// <para>
     /// Every WinUI type is a WinRT class with thread affinity, so <see cref="CanActivate"/> -
     /// and therefore <see cref="AddAssembly"/> and the first touch of <see cref="Instance"/> -

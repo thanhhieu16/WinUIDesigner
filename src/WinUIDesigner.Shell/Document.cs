@@ -196,7 +196,7 @@ namespace WinUIDesigner.Shell
         /// DesignContext.Services afterwards. That matters: XamlDesignContext calls ReportErrors
         /// on the line before it throws XamlLoadException for a document that is not well-formed
         /// XML, and DesignSurface.LoadDesigner has already unloaded the previous context by then,
-        /// so there is no context left to read the error service from. Spec Decision 16.
+        /// so there is no context left to read the error service from. Phase 5 Decision 16.
         /// </remarks>
         public IReadOnlyList<XamlError> LoadErrors
         {
@@ -287,14 +287,16 @@ namespace WinUIDesigner.Shell
         }
 
         /// <summary>
-        /// Marks the document dirty-but-suspect after an unhandled exception. Spec Decision 18.
+        /// Marks the document dirty-but-suspect after an unhandled exception. Phase 5 Decision 18.
         /// </summary>
         /// <remarks>
         /// The handler that catches an unhandled exception keeps the process alive, which means
         /// the design tree survives in whatever half-mutated state the failure left it. Forcing
         /// the dirty flag is what makes the close gate prompt instead of discarding silently:
         /// without it a document mutated by a behaviour that then threw looks clean, because
-        /// IsDirty is otherwise only ever raised by a committed change reaching the undo stack.
+        /// IsDirty is otherwise only ever raised by a committed change reaching the undo stack or
+        /// by an assignment to <see cref="Text"/> - and a behaviour that threw part-way did
+        /// neither.
         /// </remarks>
         public void MarkSuspect()
         {

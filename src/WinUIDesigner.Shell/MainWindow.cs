@@ -25,7 +25,13 @@ namespace WinUIDesigner.Shell
     /// <remarks>
     /// Written in C# - App.xaml is the only XAML file in this project. ShellModel deliberately
     /// owns none of this: it raises events and this class answers them, so the logic stays
-    /// testable without an XamlRoot. Spec Decisions 6, 7, 10, 19, 20 and 21.
+    /// testable without an XamlRoot. Phase 5 Decisions 6, 7, 10, 19, 20 and 21, and this phase's
+    /// Decisions 1, 3, 4, 5, 6, 8, 9, 18 and 22.
+    /// <para>
+    /// The two decision sets are numbered independently and their numbers collide, so every
+    /// reference in this project names which phase it means: a bare "Spec Decision N" is this
+    /// phase's, "Phase 5 Decision N" is the earlier shell phase's.
+    /// </para>
     /// </remarks>
     public sealed class MainWindow : Window
     {
@@ -154,7 +160,7 @@ namespace WinUIDesigner.Shell
 
             // OutlineViewControl and PropertyGridControl both derive from StackPanel and contain
             // no ScrollViewer of their own, so without the two wrappers below they clip on any
-            // real document. Spec Decision 10.
+            // real document. Phase 5 Decision 10.
             var outlineScroll = new ScrollViewer
             {
                 Content = outlineView,
@@ -248,7 +254,7 @@ namespace WinUIDesigner.Shell
 
         /// <summary>
         /// The Delete command's one implementation, reached from the menu item's Click and from
-        /// its accelerator. Refuses to act while a text-entry control has focus. Spec Decision 21.
+        /// its accelerator. Refuses to act while a text-entry control has focus. Phase 5 Decision 21.
         /// </summary>
         /// <remarks>
         /// The guard lives here rather than only in the accelerator handler because an accelerator
@@ -369,7 +375,7 @@ namespace WinUIDesigner.Shell
             // A fresh PropertyGridControl per document. Phase 4f recorded that its nodeCache and
             // editorHosts are never invalidated across documents and handed the problem to this
             // phase; replacing the control sidesteps both caches without touching Designer code.
-            // Spec Decision 19.
+            // Phase 5 Decision 19.
             propertyGrid = new PropertyGridControl();
             propertyGridHost.Content = propertyGrid;
 
@@ -419,7 +425,7 @@ namespace WinUIDesigner.Shell
 
         /// <summary>
         /// Forces the current document dirty after an unhandled exception, so the close gate
-        /// prompts rather than discarding a half-mutated tree silently. Spec Decision 18.
+        /// prompts rather than discarding a half-mutated tree silently. Phase 5 Decision 18.
         /// </summary>
         /// <remarks>
         /// Called by App's UnhandledException handler. Safe with no document open. UpdateTitle is
@@ -810,7 +816,7 @@ namespace WinUIDesigner.Shell
 
             /// <summary>
             /// True when the user chose Discard and the caller therefore owes the document a
-            /// <see cref="Document.MarkSaved"/> - but only once its replacement exists.
+            /// <see cref="Document.MarkSaved"/>.
             /// </summary>
             public bool ClearDirtyBeforeClose;
         }
@@ -902,7 +908,7 @@ namespace WinUIDesigner.Shell
                 return;
 
             // AppWindowClosingEventArgs.Cancel is synchronous; ContentDialog.ShowAsync is not.
-            // So cancel this close, ask, and close again once the answer is in. Spec Decision 20.
+            // So cancel this close, ask, and close again once the answer is in. Phase 5 Decision 20.
             args.Cancel = true;
             Fire(ConfirmThenCloseAsync);
         }

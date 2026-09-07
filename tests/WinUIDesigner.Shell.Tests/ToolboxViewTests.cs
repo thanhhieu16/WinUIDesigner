@@ -86,7 +86,7 @@ namespace WinUIDesigner.Shell.Tests
                 // The mechanism under test, asserted directly: the reset must clear the list's
                 // selection. Without this, SelectForTest below is a click on an entry that is
                 // already selected - it raises no SelectionChanged, so nothing re-arms and the
-                // toolbox is stuck after one placement. Spec Decision 12.
+                // toolbox is stuck after one placement. Phase 5 Decision 12.
                 Assert.That(view.SelectedTypeForTest, Is.Null,
                     "resetting to the pointer tool must clear the toolbox selection");
 
@@ -121,7 +121,7 @@ namespace WinUIDesigner.Shell.Tests
                 // same entry again must arm it there. With a stale selection left behind, this
                 // click lands on an already-selected row, raises no SelectionChanged, arms
                 // nothing - and the toolbox is dead until the user picks a different control.
-                // Decision 12's regression, across the document boundary this time.
+                // Phase 5 Decision 12's regression, across the document boundary this time.
                 var second = new FakeToolService(new FakePointerTool());
                 view.Attach(second);
                 view.SelectForTest(typeof(Button));
