@@ -219,6 +219,24 @@ namespace WinUIDesigner.TestHost
 			}
 		}
 
+		/// <summary>
+		/// Like <see cref="RunWithWindow"/>, but leaves <c>Window.Content</c> attached afterwards, so a
+		/// fixture can build one tree in its setup and keep driving that same live tree across several
+		/// tests. Callers own the cleanup: whatever they attach stays attached until another call
+		/// replaces it, so a fixture that uses this must not leave a tree behind that a later fixture
+		/// would inherit.
+		/// </summary>
+		/// <remarks>
+		/// Needed because detaching and re-attaching a tree between tests does not reliably re-run
+		/// layout on it: measured on a re-attached MenuBar, ActualHeight stayed 0 for the whole turn
+		/// even after an explicit UpdateLayout().
+		/// </remarks>
+		public static void RunOnWindow(Action<Microsoft.UI.Xaml.Window> action)
+		{
+			var window = EnsureWindow();
+			Run(() => action(window));
+		}
+
 		static readonly object windowGate = new object();
 		static Microsoft.UI.Xaml.Window sharedWindow;
 
