@@ -353,5 +353,123 @@ namespace WinUIDesigner.XamlDom.Tests
                     "the outer levels are still written; only the levels past the cap are not");
             });
         }
+
+        // The registration shape is the one ValueFormattingTests.cs:588-625 already uses: the
+        // sink reaches XamlDocument through XamlParserSettings.ServiceProvider, set before the
+        // parse. There is no way to add a service to a document after the fact.
+        sealed class RecordingSink : IXamlErrorSink
+        {
+            public readonly System.Collections.Generic.List<string> Messages =
+                new System.Collections.Generic.List<string>();
+
+            public void ReportError(string message, int line, int column)
+            {
+                Messages.Add(message);
+            }
+        }
+
+        sealed class SingleServiceProvider : IServiceProvider
+        {
+            readonly Type serviceType;
+            readonly object service;
+
+            public SingleServiceProvider(Type serviceType, object service)
+            {
+                this.serviceType = serviceType;
+                this.service = service;
+            }
+
+            public object GetService(Type type)
+            {
+                return type == serviceType ? service : null;
+            }
+        }
+
+        /// <summary>
+        /// Parses <paramref name="xaml"/> with a recording error sink attached, sets the property,
+        /// and hands back both the sink and the document so the caller can also save it.
+        /// </summary>
+        static RecordingSink SetWithASink(string xaml, string propertyName, object value, out XamlDocument document)
+        {
+            var sink = new RecordingSink();
+            var settings = new XamlParserSettings();
+            settings.ServiceProvider = new SingleServiceProvider(typeof(IXamlErrorSink), sink);
+            document = XamlParser.Parse(new System.IO.StringReader(xaml), settings);
+            var property = document.RootElement.FindOrCreateProperty(propertyName);
+            property.PropertyValue = document.CreatePropertyValue(value, property);
+            return sink;
+        }
+
+        [Test]
+        public void AnUnlistedBrushStillSavesAsAnEmptyElementAndIsReported()
+        {
+            WinUITestHost.Run(() => {
+                XamlDocument document;
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>",
+                    "Background", new ImageBrush(), out document);
+                var saved = SaveToString(document);
+
+                StringAssert.Contains("<ImageBrush", saved,
+                    "an unlisted type must keep today's behaviour, not meet untested code");
+                Assert.That(sink.Messages.Count, Is.EqualTo(1), "saved as: " + saved);
+                StringAssert.Contains("ImageBrush", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void AnUnlistedTransformIsNowReportedWhereItUsedToBeSilent()
+        {
+            WinUITestHost.Run(() => {
+                XamlDocument document;
+                // A CompositeTransform is a Transform this phase does not list. Before Phase C
+                // the gate was HasFormatter(declared type), and Transform is not one of the
+                // formatter's sixteen - so a lost transform produced no diagnostic at all.
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>",
+                    "RenderTransform", new CompositeTransform { Rotation = 45 }, out document);
+
+                Assert.That(sink.Messages.Count, Is.EqualTo(1),
+                    "a transform the writer cannot handle must say so");
+                StringAssert.Contains("CompositeTransform", sink.Messages[0]);
+            });
+        }
+
+        [Test]
+        public void AWrittenValueIsNotReported()
+        {
+            WinUITestHost.Run(() => {
+                XamlDocument document;
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>",
+                    "RenderTransform", new SkewTransform { AngleX = 30 }, out document);
+
+                Assert.That(sink.Messages, Is.Empty,
+                    "the writer handled this one; reporting it would train users to ignore the " +
+                    "diagnostic");
+            });
+        }
+
+        [Test]
+        public void ABindingOnAListedPropertyTypeIsNeitherWrittenNorReported()
+        {
+            WinUITestHost.Run(() => {
+                XamlDocument document;
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>", "Background",
+                    new Microsoft.UI.Xaml.Data.Binding { Path = new Microsoft.UI.Xaml.PropertyPath("Fill") },
+                    out document);
+                var saved = SaveToString(document);
+
+                // SetWithASink assigns property.PropertyValue, which also runs
+                // UpdateValueOnInstance - that reflects the raw Binding onto the live
+                // Brush-typed CLR property and fails for its own, unrelated, pre-existing reason
+                // (WinUI's DependencyProperty.SetValue does not resolve a Binding the way real
+                // binding application does; see ValueFormattingTests.DoesNotReportABindingMarkupExtension,
+                // which isolates around exactly this). This assertion is only about
+                // CreatePropertyValue's own gate, so it checks for that gate's message text
+                // rather than requiring the sink to be silent altogether.
+                Assert.That(sink.Messages, Has.None.Contains("Cannot save"),
+                    "a Binding round-trips through XamlObject's own markup-extension path; " +
+                    "reporting it as unwritable would fire on every bound document");
+                StringAssert.Contains("Binding", saved);
+            });
+        }
     }
 }

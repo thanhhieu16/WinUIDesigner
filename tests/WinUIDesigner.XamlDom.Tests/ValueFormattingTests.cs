@@ -519,7 +519,9 @@ namespace WinUIDesigner.XamlDom.Tests
                 SetThroughTheDocument(document, "Background", new LinearGradientBrush());
                 var saved = SaveToString(document);
                 StringAssert.Contains("<LinearGradientBrush", saved,
-                    "A gradient brush has no attribute form and must keep the element form");
+                    "A gradient brush has no attribute form and must keep the element form. " +
+                    "Phase C fills that element in when the brush has stops; an empty brush " +
+                    "still writes an empty element.");
             });
         }
 

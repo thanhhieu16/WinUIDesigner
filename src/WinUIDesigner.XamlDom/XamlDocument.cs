@@ -328,18 +328,6 @@ namespace WinUIDesigner.XamlDom
 			// would still misfire on the exact case this finding names.
 			bool isMarkupExtensionValue = instance is MarkupExtension || instance is Microsoft.UI.Xaml.Data.BindingBase;
 
-			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue &&
-			    XamlValueFormatter.HasFormatter(forProperty.ReturnType)) {
-				var sink = ServiceProvider == null
-					? null
-					: ServiceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
-				if (sink != null)
-					sink.ReportError(
-						"Cannot save " + forProperty.PropertyName + " as attribute text: " +
-						elementType.FullName + " has no XAML attribute form, so it is written as an " +
-						"element and will not survive a reload.", 0, 0);
-			}
-
 			string ns = GetNamespaceFor(elementType);
 			string prefix = GetPrefixForNamespace(ns);
 			if (parent != null)
@@ -371,8 +359,28 @@ namespace WinUIDesigner.XamlDom
 
 			// Phase C: give the element its instance's own properties. A refusal - an unlisted
 			// type, a cycle, a depth cap - leaves the empty element Phases A and B emitted.
-			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue)
-				XamlInstanceWriter.TryWrite(result);
+			bool written = forProperty != null && !hasStringConverter && !isMarkupExtensionValue
+				&& XamlInstanceWriter.TryWrite(result);
+
+			// Phase B reported a value with no attribute text form. That gate read
+			// HasFormatter(declared type), so it never fired for a property declared Transform -
+			// and the transform losses were silent. The accurate condition is "this value is
+			// about to be written as an element that will not survive a reload", which is now
+			// exactly "the writer refused". ShouldWarnFor keeps it off properties declared
+			// object, where a nested control is normal and not this phase's business.
+			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue && !written
+			    && xml.InnerText.Length == 0
+			    && (XamlValueFormatter.HasFormatter(forProperty.ReturnType)
+			        || XamlInstanceWriter.ShouldWarnFor(forProperty.ReturnType))) {
+				var sink = ServiceProvider == null
+					? null
+					: ServiceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
+				if (sink != null)
+					sink.ReportError(
+						"Cannot save " + forProperty.PropertyName + " as attribute text: " +
+						elementType.FullName + " has no XAML attribute form, so it is written as an " +
+						"element and will not survive a reload.", 0, 0);
+			}
 
 			return result;
 		}
