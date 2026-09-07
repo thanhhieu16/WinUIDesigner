@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -110,12 +110,22 @@ namespace WinUIDesigner.XamlDom
 			if (target == null || target.Instance == null || !HasEntry(target.ElementType))
 				return false;
 
+			// Both guards below refuse to write an element this writer has an entry for, which
+			// means the value is saved truncated. CreatePropertyValue's own "cannot save as
+			// attribute text" report is suppressed for every listed type (it asks HasEntry), so
+			// without these two calls the truncation is completely silent - the same silence
+			// Phase C exists to end. Reachable: ADeeplyNestedGraphStopsAtTheDepthCapWithoutThrowing
+			// drives the depth cap with a 20-deep TransformGroup nest.
 			var stack = InProgress ?? (InProgress = new List<object>());
-			if (stack.Count >= MaxDepth)
+			if (stack.Count >= MaxDepth) {
+				ReportTruncated(target, "the writer's depth limit of " + MaxDepth + " nested values was reached");
 				return false;
+			}
 			for (int i = 0; i < stack.Count; i++) {
-				if (ReferenceEquals(stack[i], target.Instance))
+				if (ReferenceEquals(stack[i], target.Instance)) {
+					ReportTruncated(target, "the value contains itself, and writing it would not terminate");
 					return false;
+				}
 			}
 
 			stack.Add(target.Instance);
@@ -144,6 +154,32 @@ namespace WinUIDesigner.XamlDom
 		static void ReportWriteFailure(XamlObject target, Exception ex)
 		{
 			Debug.WriteLine("XamlInstanceWriter.TryWrite() failed - Exception:" + ex.Message);
+			var typeName = target != null && target.ElementType != null ? target.ElementType.FullName : "value";
+			ReportToSink(target,
+				"Failed to write " + typeName + "'s properties into the saved element: " +
+				ex.Message + ". The element was saved without them and will not survive a reload.");
+		}
+
+		/// <summary>
+		/// Reports that a guard refused to write <paramref name="target"/>, so the element is
+		/// saved empty. Distinct wording from <see cref="ReportWriteFailure"/>: nothing went
+		/// wrong here, the writer declined on purpose, and the user still loses the value.
+		/// </summary>
+		static void ReportTruncated(XamlObject target, string reason)
+		{
+			var typeName = target != null && target.ElementType != null ? target.ElementType.FullName : "value";
+			ReportToSink(target,
+				"Did not write " + typeName + "'s properties into the saved element because " +
+				reason + ". The element was saved empty and will not survive a reload.");
+		}
+
+		/// <summary>
+		/// Sends <paramref name="message"/> to the document's <see cref="IXamlErrorSink"/> if it
+		/// has one. Never throws - a failure while reporting a failure must still leave the write
+		/// path's "never throw" rule intact.
+		/// </summary>
+		static void ReportToSink(XamlObject target, string message)
+		{
 			try {
 				var serviceProvider = target != null && target.OwnerDocument != null
 					? target.OwnerDocument.ServiceProvider
@@ -153,11 +189,7 @@ namespace WinUIDesigner.XamlDom
 				var sink = serviceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
 				if (sink == null)
 					return;
-				var typeName = target.ElementType != null ? target.ElementType.FullName : "value";
-				sink.ReportError(
-					"Failed to write " + typeName + "'s properties into the saved element: " +
-					ex.Message + ". The element was saved without them and will not survive a reload.",
-					0, 0);
+				sink.ReportError(message, 0, 0);
 			} catch {
 				// Reporting must never throw either.
 			}
@@ -183,8 +215,12 @@ namespace WinUIDesigner.XamlDom
 				// DoubleCollection - see XamlValueFormatter's host table) must not be routed
 				// through the child-element path below: it already round-trips as text, and no
 				// listed type has such a property today, so this guard is currently unreachable
-				// but keeps Write correct if one is ever added. Falling through lets the scalar
-				// branch below hand it to CreatePropertyValue, which resolves the formatter.
+				// but keeps Write correct if one is ever added. What the fall-through actually
+				// does is hand such a property to the scalar branch below - which gates on
+				// ReadLocalValue, and a lazily-created collection reads UnsetValue there even
+				// when populated (Decision 3), so it would `continue` and write nothing. The
+				// guard exists to keep an untested path from silently taking the child-element
+				// route, not because the fall-through is known to produce attribute text.
 				if (CollectionSupport.IsCollectionType(descriptor.PropertyType)
 					&& !XamlValueFormatter.HasFormatter(descriptor.PropertyType)) {
 					if (WriteCollection(target, descriptor, descriptor.GetValue(instance)))

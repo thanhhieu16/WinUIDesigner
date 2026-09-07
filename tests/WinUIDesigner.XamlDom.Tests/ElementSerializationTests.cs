@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.UI.Xaml.Media;
 using NUnit.Framework;
 using Windows.Foundation;
@@ -507,5 +507,39 @@ namespace WinUIDesigner.XamlDom.Tests
                 StringAssert.Contains("Binding", saved);
             });
         }
+
+        // The depth cap used to truncate in complete silence: CreatePropertyValue suppresses its
+        // own "cannot save as attribute text" report for every listed type, and the guard itself
+        // said nothing, so a value the writer refused was saved empty with no diagnostic anywhere.
+        // The refusal is deliberate, not a failure - hence its own wording, distinct from the
+        // exception path's "Failed to write".
+        [Test]
+        public void AValueRefusedByTheDepthCapIsReported()
+        {
+            WinUITestHost.Run(() => {
+                var outermost = new TransformGroup();
+                var current = outermost;
+                for (int i = 0; i < 19; i++) {
+                    var next = new TransformGroup();
+                    current.Children.Add(next);
+                    current = next;
+                }
+                current.Children.Add(new RotateTransform { Angle = 45 });
+
+                XamlDocument document;
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>",
+                    "RenderTransform", outermost, out document);
+                var saved = SaveToString(document);
+
+                Assert.That(sink.Messages, Is.Not.Empty,
+                    "a listed value the writer refuses must not be lost silently; saved as: " + saved);
+                Assert.That(sink.Messages, Has.Some.Contains("depth limit of 12"),
+                    "the report must name the guard that bit; got: " + string.Join(" | ", sink.Messages));
+                Assert.That(sink.Messages, Has.None.Contains("Failed to write"),
+                    "nothing threw here - the refusal must not be reported as an exception; got: "
+                    + string.Join(" | ", sink.Messages));
+            });
+        }
+
     }
 }
