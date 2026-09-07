@@ -104,22 +104,48 @@ namespace WinUIDesigner.Shell
 
         public bool Open(string path)
         {
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex)
+            {
+                // Path.GetFullPath throws for a null, empty, or malformed path. No method on
+                // ShellModel may throw - Phase 5 Decision 17 - so report and refuse.
+                RaiseError(ex.Message, null);
+                return false;
+            }
+
+            // A path already open becomes current rather than opening a second live tree over the
+            // same file, which is what the reference does (XamlDesigner/Shell.cs:141-146). Without
+            // tabs this could not arise; with them, two copies means saving from either silently
+            // clobbers the other. Spec Decision 6.
+            foreach (var alreadyOpen in Documents)
+            {
+                if (alreadyOpen.FilePath != null
+                    && string.Equals(alreadyOpen.FilePath, fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    CurrentDocument = alreadyOpen;
+                    return true;
+                }
+            }
+
             string text;
             try
             {
-                text = File.ReadAllText(path);
+                text = File.ReadAllText(fullPath);
             }
             catch (Exception ex)
             {
                 // Broad on purpose: File.ReadAllText can throw ArgumentNullException,
                 // ArgumentException, NotSupportedException, PathTooLongException and more,
-                // none of which derive from a common I/O base. No method on ShellModel may
-                // throw - Spec Decision 17 - so every failure here is reported, not thrown.
+                // none of which derive from a common I/O base.
                 RaiseError(ex.Message, null);
                 return false;
             }
 
-            var doc = new Document(Path.GetFullPath(path), text);
+            var doc = new Document(fullPath, text);
 
             if (doc.LoadFailed)
             {
@@ -193,7 +219,12 @@ namespace WinUIDesigner.Shell
                 // ShellModel may throw (Spec Decision 17), and File.WriteAllText's own exception
                 // set (ArgumentException, NotSupportedException, PathTooLongException, ...)
                 // does not share a common base with IOException/UnauthorizedAccessException.
-                doc.UpdateXaml();
+                // Only when the tree is the source of truth. In XAML mode the user's typing is,
+                // and re-serializing here would overwrite it with the tree they typed it instead
+                // of. The reference guards the same call the same way
+                // (XamlDesigner/Document.cs:196-203). Spec Decision 12.
+                if (doc.InDesignMode)
+                    doc.UpdateXaml();
                 File.WriteAllText(path, doc.Text);
             }
             catch (Exception ex)

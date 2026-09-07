@@ -276,5 +276,95 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(shell.Documents, Is.Empty);
             });
         }
+
+        [Test]
+        public void SavingInXamlModeWritesWhatTheUserTypedNotAReSerialization()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "wd-xamlmode-" + System.Guid.NewGuid().ToString("N") + ".xaml");
+                try
+                {
+                    var doc = shell.New();
+                    Assert.That(doc, Is.Not.Null);
+
+                    doc.Mode = DocumentMode.Xaml;
+                    doc.Text = doc.Text + System.Environment.NewLine + "<!-- typed by hand -->";
+
+                    Assert.That(shell.SaveAs(doc, path), Is.True);
+
+                    var onDisk = System.IO.File.ReadAllText(path);
+                    StringAssert.Contains("typed by hand", onDisk,
+                        "WriteToDisk used to call UpdateXaml unconditionally, which replaced the " +
+                        "user's typing with a serialization of the tree they typed it instead of");
+                }
+                finally
+                {
+                    if (System.IO.File.Exists(path))
+                        System.IO.File.Delete(path);
+                }
+            });
+        }
+
+        [Test]
+        public void SavingInDesignModeStillSerializesTheLiveTree()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "wd-designmode-" + System.Guid.NewGuid().ToString("N") + ".xaml");
+                try
+                {
+                    var doc = shell.New();
+                    var root = doc.DesignContext.RootItem;
+                    root.Properties["Width"].SetValue(777.0);
+
+                    Assert.That(shell.SaveAs(doc, path), Is.True);
+
+                    StringAssert.Contains("777", System.IO.File.ReadAllText(path),
+                        "in design mode the tree is still the source of truth");
+                }
+                finally
+                {
+                    if (System.IO.File.Exists(path))
+                        System.IO.File.Delete(path);
+                }
+            });
+        }
+
+        [Test]
+        public void OpeningAPathThatIsAlreadyOpenMakesItCurrentInsteadOfAddingASecondCopy()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "wd-dedupe-" + System.Guid.NewGuid().ToString("N") + ".xaml");
+                try
+                {
+                    System.IO.File.WriteAllText(path, NewDocumentTemplate.Xaml);
+
+                    Assert.That(shell.Open(path), Is.True);
+                    Assert.That(shell.Documents.Count, Is.EqualTo(1));
+                    var first = shell.Documents[0];
+
+                    var other = shell.New();
+                    Assert.That(shell.CurrentDocument, Is.SameAs(other));
+
+                    Assert.That(shell.Open(path), Is.True);
+                    Assert.That(shell.Documents.Count, Is.EqualTo(2),
+                        "two live trees over one file means saving from either clobbers the other");
+                    Assert.That(shell.CurrentDocument, Is.SameAs(first));
+                }
+                finally
+                {
+                    if (System.IO.File.Exists(path))
+                        System.IO.File.Delete(path);
+                }
+            });
+        }
     }
 }
