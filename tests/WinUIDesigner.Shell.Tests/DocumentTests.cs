@@ -21,6 +21,10 @@ namespace WinUIDesigner.Shell.Tests
             "<Polyline x:Name=\"Line\" Points=\"10,10 40,25 70,5\" Stroke=\"Red\" StrokeThickness=\"2\" />" +
             "</Canvas>";
 
+        const string MalformedXaml =
+            "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
+            "<Button Width=\"75\"";
+
         [Test]
         public void ALoadedDocumentExposesItsContextRootAndOutline()
         {
@@ -104,7 +108,124 @@ namespace WinUIDesigner.Shell.Tests
         }
 
         [Test]
-        public void DirtyTracksTheUndoStackAndNotTheTextSetter()
+        public void SwitchingToXamlModeFillsTextFromTheLiveTree()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+                    button.Properties["Width"].SetValue(123.0);
+
+                    doc.Mode = DocumentMode.Xaml;
+
+                    Assert.That(doc.InXamlMode, Is.True);
+                    Assert.That(doc.InDesignMode, Is.False);
+                    StringAssert.Contains("123", doc.Text, "the live edit should be in the text");
+                }
+            });
+        }
+
+        [Test]
+        public void AnEditMadeInXamlModeIsInTheTreeAfterSwitchingBack()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    doc.Mode = DocumentMode.Xaml;
+                    doc.Text = doc.Text.Replace("Width=\"75\"", "Width=\"200\"");
+                    doc.Mode = DocumentMode.Design;
+
+                    Assert.That(doc.LoadFailed, Is.False, "the edited text should still parse");
+                    var button = (Button)doc.DesignContext.RootItem.ContentProperty
+                        .CollectionElements[0].Component;
+                    Assert.That(button.Width, Is.EqualTo(200.0));
+                }
+            });
+        }
+
+        [Test]
+        public void ReAssertingTheCurrentModeIsANoOpAndKeepsUnsavedText()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    doc.Mode = DocumentMode.Xaml;
+                    var typed = doc.Text + "<!-- typed -->";
+                    doc.Text = typed;
+
+                    // Decision 10: without the equality guard this re-runs UpdateXaml and
+                    // silently replaces the typing with a serialization of the untouched tree.
+                    doc.Mode = DocumentMode.Xaml;
+
+                    Assert.That(doc.Text, Is.EqualTo(typed));
+                }
+            });
+        }
+
+        [Test]
+        public void MalformedTextSwitchedToDesignModeReportsAndKeepsTheText()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    doc.Mode = DocumentMode.Xaml;
+                    doc.Text = MalformedXaml;
+
+                    Assert.DoesNotThrow(() => doc.Mode = DocumentMode.Design,
+                        "the write path must never throw - a throw here kills the app mid-edit");
+                    Assert.That(doc.LoadFailed, Is.True);
+                    Assert.That(doc.LoadErrors, Is.Not.Empty);
+                    Assert.That(doc.Text, Is.EqualTo(Document.NormaliseLineEndings(MalformedXaml)),
+                        "UpdateXaml early-returns on a null context, so the bad text survives");
+                }
+            });
+        }
+
+        [Test]
+        public void TheSelectionServiceIsClosedOffInXamlMode()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    Assert.That(doc.SelectionService, Is.Not.Null, "design mode exposes it");
+                    doc.Mode = DocumentMode.Xaml;
+                    Assert.That(doc.SelectionService, Is.Null,
+                        "Decision 15: the right column must have nothing to edit through while " +
+                        "the text is the source of truth");
+                    doc.Mode = DocumentMode.Design;
+                    Assert.That(doc.SelectionService, Is.Not.Null);
+                }
+            });
+        }
+
+        [Test]
+        public void AChangeThatLandsWhileInXamlModeIsReflectedIntoTheText()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    doc.Mode = DocumentMode.Xaml;
+                    var before = doc.Text;
+
+                    var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+                    button.Properties["Width"].SetValue(321.0);
+
+                    Assert.That(doc.Text, Is.Not.EqualTo(before));
+                    StringAssert.Contains("321", doc.Text,
+                        "Decision 15: a mutation that reaches the tree in XAML mode must be " +
+                        "serialized into the text, not silently reverted on the next switch");
+                }
+            });
+        }
+
+        [Test]
+        public void DirtyTracksTheUndoStackAndARealTextEditButNotSerializationOrLineEndings()
         {
             WinUITestHost.Run(() =>
             {
@@ -114,16 +235,24 @@ namespace WinUIDesigner.Shell.Tests
 
                     doc.UpdateXaml();
                     Assert.That(doc.IsDirty, Is.False,
-                        "serializing the document is not an edit - the reference's Text setter " +
-                        "marks it dirty here, which is the behaviour Decision 5 of the spec drops");
+                        "serializing the tree is not a user edit and writes the backing field");
+
+                    // Decision 14: TextBox hands back lone CR where XamlFormatter emitted CRLF
+                    // (measured). Assigning that back must not dirty a document nobody touched.
+                    doc.Text = doc.Text.Replace("\r\n", "\r");
+                    Assert.That(doc.IsDirty, Is.False,
+                        "a line-ending-only difference is not an edit");
+
+                    doc.Text = doc.Text + "<!-- real edit -->";
+                    Assert.That(doc.IsDirty, Is.True, "a real text change marks the document dirty");
+
+                    doc.MarkSaved();
+                    Assert.That(doc.IsDirty, Is.False);
 
                     var canvas = doc.DesignContext.RootItem;
                     var button = canvas.ContentProperty.CollectionElements[0];
                     button.Properties["Width"].SetValue(120.0);
                     Assert.That(doc.IsDirty, Is.True, "a committed change marks the document dirty");
-
-                    doc.MarkSaved();
-                    Assert.That(doc.IsDirty, Is.False);
                 }
             });
         }

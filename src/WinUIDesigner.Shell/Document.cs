@@ -13,14 +13,22 @@ using WinUIDesigner.XamlDom;
 namespace WinUIDesigner.Shell
 {
     /// <summary>
-    /// One open document: the text, the design surface built from it, and the dirty flag.
+    /// One open document: the text, the design surface built from it, the mode the user is
+    /// viewing it in, and the dirty flag.
     /// </summary>
     /// <remarks>
-    /// Ported from the reference's Document.cs with five deliberate deviations, all recorded in
-    /// the Phase 5 spec: no DocumentMode (there is no XAML text view); Dispose unsubscribes and
-    /// unloads (the reference does neither, and the soak test depends on both); the constructor
-    /// does not assign FilePath through a side-effecting property; the file write lives in
-    /// ShellModel, not here; and IsDirty is set only by the undo stack, never by the Text setter.
+    /// Ported from the reference's Document.cs with four deliberate deviations: Dispose
+    /// unsubscribes and unloads (the reference does neither, and the soak test depends on both);
+    /// the constructor does not assign FilePath through a side-effecting property; the file write
+    /// lives in ShellModel, not here; and <see cref="Mode"/>'s setter has an equality guard the
+    /// reference's does not, because this shell re-asserts the current mode from JumpToError and
+    /// from its mode buttons, and an unguarded setter would re-serialize over unsaved typing.
+    /// <para>
+    /// IsDirty is raised by the undo stack and by a real assignment to <see cref="Text"/>. It is
+    /// NOT raised by <see cref="UpdateXaml"/>, which writes the backing field directly because
+    /// serializing the tree is not a user edit, nor by a change that only differs in line
+    /// endings - WinUI's TextBox hands back lone CR where XamlFormatter emitted CRLF, measured.
+    /// </para>
     /// </remarks>
     public sealed class Document : IDisposable, INotifyPropertyChanged
     {
@@ -32,6 +40,7 @@ namespace WinUIDesigner.Shell
         string tempName;
         bool isDirty;
         bool disposed;
+        DocumentMode mode;
         UndoService subscribedUndoService;
 
         public Document(string filePath, string text)
@@ -44,9 +53,94 @@ namespace WinUIDesigner.Shell
 
         public event PropertyChangedEventHandler PropertyChanged;
 
+        /// <summary>
+        /// The document's XAML text. Assigning a value that differs by more than line endings is
+        /// a user edit and marks the document dirty; <see cref="UpdateXaml"/> bypasses this
+        /// setter deliberately.
+        /// </summary>
         public string Text
         {
             get { return text; }
+            set
+            {
+                var normalised = NormaliseLineEndings(value);
+                if (text == normalised)
+                    return;
+                text = normalised;
+                IsDirty = true;
+                RaisePropertyChanged("Text");
+            }
+        }
+
+        /// <summary>
+        /// Rewrites every CR, LF and CRLF in <paramref name="value"/> as
+        /// <see cref="Environment.NewLine"/>.
+        /// </summary>
+        /// <remarks>
+        /// Measured: assigning "a\r\nb\r\nc" to a WinUI TextBox reads back as "a\rb\rc" - seven
+        /// characters in, five out, and the two strings are not equal. XamlFormatter emits
+        /// Environment.NewLine. Without this, merely opening a document's XAML view would mark it
+        /// dirty and put lone-CR line endings on disk. Spec Decision 14.
+        /// </remarks>
+        internal static string NormaliseLineEndings(string value)
+        {
+            if (value == null)
+                return null;
+            if (value.IndexOf('\r') < 0 && value.IndexOf('\n') < 0)
+                return value;
+
+            var sb = new StringBuilder(value.Length);
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (c == '\r')
+                {
+                    sb.Append(Environment.NewLine);
+                    if (i + 1 < value.Length && value[i + 1] == '\n')
+                        i++;
+                }
+                else if (c == '\n')
+                {
+                    sb.Append(Environment.NewLine);
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>Which view the user is looking at. Spec Decision 10.</summary>
+        public DocumentMode Mode
+        {
+            get { return mode; }
+            set
+            {
+                if (mode == value)
+                    return;
+                mode = value;
+
+                if (mode == DocumentMode.Design)
+                    UpdateDesign();
+                else
+                    UpdateXaml();
+
+                RaisePropertyChanged("Mode");
+                RaisePropertyChanged("InXamlMode");
+                RaisePropertyChanged("InDesignMode");
+                RaisePropertyChanged("SelectionService");
+            }
+        }
+
+        public bool InXamlMode
+        {
+            get { return mode == DocumentMode.Xaml; }
+        }
+
+        public bool InDesignMode
+        {
+            get { return mode == DocumentMode.Design; }
         }
 
         public string FilePath
@@ -131,9 +225,22 @@ namespace WinUIDesigner.Shell
             get { return DesignContext == null ? null : DesignContext.Services.GetService<UndoService>(); }
         }
 
+        /// <summary>
+        /// The live selection service, or null while in XAML mode.
+        /// </summary>
+        /// <remarks>
+        /// Null in XAML mode on purpose, ported from the reference (XamlDesigner/Document.cs:159-166).
+        /// The text is the source of truth there, so a property-grid or outline edit that reached
+        /// the tree would be thrown away by the next switch back to Design. Spec Decision 15.
+        /// </remarks>
         public ISelectionService SelectionService
         {
-            get { return DesignContext == null ? null : DesignContext.Services.Selection; }
+            get
+            {
+                if (InXamlMode)
+                    return null;
+                return DesignContext == null ? null : DesignContext.Services.Selection;
+            }
         }
 
         public IOutlineNode OutlineRoot { get; private set; }
@@ -253,6 +360,13 @@ namespace WinUIDesigner.Shell
         void OnUndoStackChanged(object sender, EventArgs e)
         {
             IsDirty = true;
+
+            // A change that reaches the tree while the user is looking at the text must be
+            // serialized into that text, or the next switch to Design reloads from stale text and
+            // discards it. Ported from the reference (XamlDesigner/Document.cs:257-263).
+            // Spec Decision 15.
+            if (InXamlMode)
+                UpdateXaml();
         }
 
         void RaisePropertyChanged(string name)
