@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A port of SharpDevelop's `WpfDesign` (a runtime WYSIWYG XAML designer engine) from WPF to **WinUI 3**. Read-only reference source for the port lives at `F:\ReferencesCode\CSharp\WpfDesigner` — never edit it, only read from it. The port is being built in five sequential phases (XamlDom → DesignModel core engine → DesignPanel/DesignSurface → concrete design-time behaviors → shell app); phases 1–4b are done. Each phase has a spec and a plan under `docs/superpowers/specs/` and `docs/superpowers/plans/` — read the relevant one for exact rationale, verified WinUI API facts, and file:line history before making non-trivial changes in an area you haven't touched before.
 
-`src/` contains exactly one `.xaml` file: `src/WinUIDesigner.Shell/App.xaml`. That is not a
+`src/` contains exactly one `.xaml` file: `src/WinUIDesigner.Shell.App/App.xaml`. That is not a
 style choice. A WinUI 3 project containing no compiled XAML produces no app-level merged
 `resources.pri`, so `ms-appx:///` cannot be resolved, `XamlControlsResources` fails to load
 `themeresources.xaml`, and every control whose default template references a theme brush
