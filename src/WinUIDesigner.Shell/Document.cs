@@ -105,7 +105,7 @@ namespace WinUIDesigner.Shell
         /// </remarks>
         public IReadOnlyList<XamlError> LoadErrors
         {
-            get { return loadErrors; }
+            get { return loadErrors.AsReadOnly(); }
         }
 
         public DesignSurface DesignSurface
@@ -160,7 +160,7 @@ namespace WinUIDesigner.Shell
             designSurface.UnloadDesigner();
         }
 
-        internal void Name_ForTest_SetTempName(string name)
+        internal void SetTempName(string name)
         {
             tempName = name;
             RaisePropertyChanged("Name");

@@ -140,7 +140,7 @@ namespace WinUIDesigner.Shell.Tests
             {
                 using (var doc = new Document(null, CanvasWithButton))
                 {
-                    doc.Name_ForTest_SetTempName("New1");
+                    doc.SetTempName("New1");
                     Assert.That(doc.Title, Is.EqualTo("New1"));
 
                     var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
