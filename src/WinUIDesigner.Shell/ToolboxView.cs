@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -24,16 +25,24 @@ namespace WinUIDesigner.Shell
     public sealed class ToolboxView : UserControl
     {
         readonly ListView list = new ListView();
+        readonly List<ControlNode> nodes;
         IToolService toolService;
         bool suppressSelectionChanged;
 
         public ToolboxView()
         {
-            list.SelectionMode = ListViewSelectionMode.Single;
-            list.ItemsSource = Toolbox.Instance.AssemblyNodes
+            // ItemsSource holds the ControlNodes themselves, not their Type, because typeof(X)
+            // is an instance of System.RuntimeType (non-public) rather than System.Type, and
+            // WinUI's binding engine reflects against the object's actual runtime type - a
+            // DisplayMemberPath of "Name" against a RuntimeType instance never resolves, so
+            // every row rendered as an empty band. ControlNode (Task 2) is public and has a
+            // public Name, so the same DisplayMemberPath now works. Fix per code review.
+            nodes = Toolbox.Instance.AssemblyNodes
                 .SelectMany(n => n.Controls)
-                .Select(c => c.Type)
                 .ToList();
+
+            list.SelectionMode = ListViewSelectionMode.Single;
+            list.ItemsSource = nodes;
             list.ItemTemplate = null;
             list.DisplayMemberPath = "Name";
             list.SelectionChanged += OnSelectionChanged;
@@ -63,17 +72,18 @@ namespace WinUIDesigner.Shell
         /// <summary>Selects a control type as a user click would. Test seam.</summary>
         internal void SelectForTest(Type type)
         {
-            list.SelectedItem = type;
+            var node = nodes.FirstOrDefault(n => n.Type == type);
+            list.SelectedItem = node;
             // ListView.SelectedItem does not raise SelectionChanged without a live item
             // container, so drive the same handler the UI would.
-            Arm(type);
+            Arm(node?.Type);
         }
 
         void OnSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (suppressSelectionChanged)
                 return;
-            Arm(list.SelectedItem as Type);
+            Arm((list.SelectedItem as ControlNode)?.Type);
         }
 
         void Arm(Type type)
