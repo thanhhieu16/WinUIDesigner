@@ -105,6 +105,50 @@ namespace WinUIDesigner.Shell.Tests
         }
 
         [Test]
+        public void OpeningANullPathReportsRatherThanThrowing()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                ShellErrorEventArgs reported = null;
+                shell.ReportError += (s, e) => reported = e;
+
+                bool opened = true;
+                Assert.DoesNotThrow(() => opened = shell.Open(null));
+
+                Assert.That(opened, Is.False);
+                Assert.That(reported, Is.Not.Null, "File.ReadAllText(null) throws " +
+                    "ArgumentNullException, which the read must catch and report");
+                Assert.That(shell.Documents, Is.Empty);
+            });
+        }
+
+        [Test]
+        public void OpeningAPathWithInvalidCharactersReportsRatherThanThrowing()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                ShellErrorEventArgs reported = null;
+                shell.ReportError += (s, e) => reported = e;
+
+                // A NUL character is rejected by File.ReadAllText with ArgumentException
+                // ("Null character in path"), verified empirically on this runtime: unlike
+                // "<" or ">" - which surface as IOException here and so were already caught
+                // by the narrower catch this test exists to replace - ArgumentException does
+                // not derive from IOException or UnauthorizedAccessException, so it actually
+                // escaped the old two-catch code.
+                var path = "a\0b.xaml";
+                bool opened = true;
+                Assert.DoesNotThrow(() => opened = shell.Open(path));
+
+                Assert.That(opened, Is.False);
+                Assert.That(reported, Is.Not.Null);
+                Assert.That(shell.Documents, Is.Empty);
+            });
+        }
+
+        [Test]
         public void ANonFatalParseErrorOpensTheDocumentAndStillReports()
         {
             WinUITestHost.Run(() =>

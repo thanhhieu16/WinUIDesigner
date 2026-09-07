@@ -109,13 +109,12 @@ namespace WinUIDesigner.Shell
             {
                 text = File.ReadAllText(path);
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                RaiseError(ex.Message, null);
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
+                // Broad on purpose: File.ReadAllText can throw ArgumentNullException,
+                // ArgumentException, NotSupportedException, PathTooLongException and more,
+                // none of which derive from a common I/O base. No method on ShellModel may
+                // throw - Spec Decision 17 - so every failure here is reported, not thrown.
                 RaiseError(ex.Message, null);
                 return false;
             }
@@ -196,17 +195,18 @@ namespace WinUIDesigner.Shell
 
         bool WriteToDisk(Document doc, string path)
         {
-            doc.UpdateXaml();
             try
             {
+                // UpdateXaml drives DesignSurface.SaveDesigner through XamlXmlWriter - engine
+                // serialization code that is not proven exception-free - so it lives inside the
+                // same try as the write. Broad catch for the same reason as Open: no method on
+                // ShellModel may throw (Spec Decision 17), and File.WriteAllText's own exception
+                // set (ArgumentException, NotSupportedException, PathTooLongException, ...)
+                // does not share a common base with IOException/UnauthorizedAccessException.
+                doc.UpdateXaml();
                 File.WriteAllText(path, doc.Text);
             }
-            catch (IOException ex)
-            {
-                RaiseError(ex.Message, null);
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
+            catch (Exception ex)
             {
                 RaiseError(ex.Message, null);
                 return false;
