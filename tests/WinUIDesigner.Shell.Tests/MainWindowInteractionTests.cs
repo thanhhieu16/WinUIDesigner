@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation.Peers;
@@ -422,6 +423,115 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.AreEqual(123.0, element.ActualWidth, 0.5, "and a layout pass should have honoured it");
 
                 surface.DesignContext.RootItem.ContentProperty.CollectionElements.Remove(added);
+            });
+        }
+
+        // ---- tabs -----------------------------------------------------------
+
+        /// <summary>
+        /// Amendment A: asserts relative to the count found on entry, not an absolute number, and
+        /// restores the document set and current document in a finally - this fixture builds one
+        /// MainWindow in OneTimeSetUp and shares it across every test in the fixture, run in an
+        /// order NUnit does not guarantee.
+        /// </summary>
+        [Test]
+        public void OpeningASecondDocumentLeavesBothOpenWithATabEach()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var first = shell.CurrentDocument;
+                Assert.That(first, Is.Not.Null);
+                var before = shell.Documents.Count;
+
+                var second = shell.New();
+                try
+                {
+                    Assert.That(shell.Documents.Count, Is.EqualTo(before + 1),
+                        "New must add, not replace - the tab strip is what makes both reachable");
+                    Assert.That(shell.CurrentDocument, Is.SameAs(second));
+                    Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before + 1));
+                    Assert.That(window.ViewFor(first), Is.Not.Null);
+                    Assert.That(window.ViewFor(second), Is.Not.Null);
+                    Assert.That(window.ViewFor(first), Is.Not.SameAs(window.ViewFor(second)));
+                }
+                finally
+                {
+                    second.MarkSaved();
+                    shell.Close(second);
+                    window.ActivateDocument(first);
+                }
+            });
+        }
+
+        /// <summary>Amendment A: restores the document set and current document in a finally.</summary>
+        [Test]
+        public void ActivatingADocumentMakesItCurrentAndShowsItsView()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var first = shell.CurrentDocument;
+                var second = shell.New();
+
+                try
+                {
+                    window.ActivateDocument(first);
+
+                    Assert.That(shell.CurrentDocument, Is.SameAs(first));
+                    Assert.That(window.ContentHostForTest.Content, Is.SameAs(window.ViewFor(first)));
+
+                    window.ActivateDocument(second);
+                    Assert.That(window.ContentHostForTest.Content, Is.SameAs(window.ViewFor(second)));
+                }
+                finally
+                {
+                    second.MarkSaved();
+                    shell.Close(second);
+                    window.ActivateDocument(first);
+                }
+            });
+        }
+
+        [Test]
+        public void ACancelledTabCloseLeavesTheTabAndTheDocumentInPlace()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var doc = shell.CurrentDocument;
+                var before = shell.Documents.Count;
+
+                window.RequestCloseAsync(doc,
+                    d => Task.FromResult(new MainWindow.CloseDecision { Proceed = false })).Wait();
+
+                Assert.That(shell.Documents.Count, Is.EqualTo(before));
+                Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before));
+                Assert.That(window.ViewFor(doc), Is.Not.Null);
+            });
+        }
+
+        [Test]
+        public void ADiscardedTabCloseRemovesBothTheTabAndTheDocument()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var doomed = shell.New();
+                var before = shell.Documents.Count;
+
+                window.RequestCloseAsync(doomed,
+                    d => Task.FromResult(new MainWindow.CloseDecision
+                    {
+                        Proceed = true,
+                        ClearDirtyBeforeClose = true
+                    })).Wait();
+
+                Assert.That(shell.Documents.Count, Is.EqualTo(before - 1));
+                Assert.That(shell.Documents.Contains(doomed), Is.False);
+                Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before - 1));
+                Assert.That(window.ViewFor(doomed), Is.Null,
+                    "the view must be detached and forgotten with its document");
             });
         }
     }

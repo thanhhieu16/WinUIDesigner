@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -36,11 +38,19 @@ namespace WinUIDesigner.Shell
         readonly ToolboxView toolboxView = new ToolboxView();
         readonly OutlineViewControl outlineView = new OutlineViewControl();
         readonly TextBox outlineFilter = new TextBox { PlaceholderText = "Filter", Margin = new Thickness(4) };
-        readonly ContentControl designHost = new ContentControl
+        readonly TabView tabStrip = new TabView
+        {
+            IsAddTabButtonVisible = false,
+            CanDragTabs = false
+        };
+        readonly ContentControl contentHost = new ContentControl
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch
         };
+        readonly Dictionary<Document, DocumentView> views = new Dictionary<Document, DocumentView>();
+        readonly Dictionary<Document, TabViewItem> tabs = new Dictionary<Document, TabViewItem>();
+        bool syncingSelection;
         readonly ContentControl propertyGridHost = new ContentControl
         {
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
@@ -81,6 +91,12 @@ namespace WinUIDesigner.Shell
 
             AppWindow.Closing += OnAppWindowClosing;
 
+            // Before shell.New() below: New does Documents.Add then sets CurrentDocument, so
+            // subscribing after it means the first document never gets a tab. Spec Decision 4.
+            shell.Documents.CollectionChanged += OnDocumentsChanged;
+            tabStrip.SelectionChanged += OnTabSelectionChanged;
+            tabStrip.TabCloseRequested += OnTabCloseRequested;
+
             shell.New();
         }
 
@@ -111,14 +127,19 @@ namespace WinUIDesigner.Shell
             Grid.SetColumn(toolboxView, 0);
             columns.Children.Add(toolboxView);
 
-            var surfaceScroll = new ScrollViewer
-            {
-                Content = designHost,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
-            };
-            Grid.SetColumn(surfaceScroll, 1);
-            columns.Children.Add(surfaceScroll);
+            // TabView is a header strip only. Measured: its template never applies in the test
+            // process - zero visual children, a selected item's Content never enters the visual
+            // tree - so anything hosted inside a tab is invisible to every test, including the
+            // DesignSurface that MainWindowInteractionTests asserts it can find. Spec Decision 1.
+            var centre = new Grid();
+            centre.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            centre.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(tabStrip, 0);
+            Grid.SetRow(contentHost, 1);
+            centre.Children.Add(tabStrip);
+            centre.Children.Add(contentHost);
+            Grid.SetColumn(centre, 1);
+            columns.Children.Add(centre);
 
             var right = new Grid();
             right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -334,14 +355,14 @@ namespace WinUIDesigner.Shell
 
             if (wiredDocument == null)
             {
-                designHost.Content = null;
+                contentHost.Content = null;
                 outlineView.Root = null;
                 Title = ApplicationTitle;
                 RefreshCommands();
                 return;
             }
 
-            designHost.Content = wiredDocument.DesignSurface;
+            contentHost.Content = ViewFor(wiredDocument);
             outlineView.Root = wiredDocument.OutlineRoot;
 
             wiredSelection = wiredDocument.SelectionService;
@@ -369,6 +390,7 @@ namespace WinUIDesigner.Shell
                     toolboxView.Attach(tools);
             }
 
+            SyncSelectedTab();
             UpdateTitle();
             RefreshCommands();
         }
@@ -426,15 +448,210 @@ namespace WinUIDesigner.Shell
             deleteItem.IsEnabled = svc != null && svc.CanDelete(ctx);
         }
 
+        /// <summary>Test seam: the tab strip.</summary>
+        internal TabView TabStripForTest { get { return tabStrip; } }
+
+        /// <summary>Test seam: the host that shows the current document's view.</summary>
+        internal ContentControl ContentHostForTest { get { return contentHost; } }
+
+        /// <summary>The view built for <paramref name="doc"/>, or null once it has closed.</summary>
+        internal DocumentView ViewFor(Document doc)
+        {
+            DocumentView view;
+            return doc != null && views.TryGetValue(doc, out view) ? view : null;
+        }
+
+        void OnDocumentsChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+            {
+                foreach (Document doc in e.OldItems)
+                    ForgetDocument(doc);
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (Document doc in e.NewItems)
+                    RememberDocument(doc);
+            }
+
+            if (e.Action == NotifyCollectionChangedAction.Reset)
+            {
+                foreach (var doc in new List<Document>(views.Keys))
+                    ForgetDocument(doc);
+            }
+
+            SyncSelectedTab();
+            RefreshCommands();
+        }
+
+        void RememberDocument(Document doc)
+        {
+            if (doc == null || views.ContainsKey(doc))
+                return;
+
+            var view = new DocumentView(doc);
+            views.Add(doc, view);
+
+            var tab = new TabViewItem { Header = doc.Title, IsClosable = true, Content = null };
+            tabs.Add(doc, tab);
+            tabStrip.TabItems.Add(tab);
+
+            // Every document, not only the current one: a background document's Title changes
+            // through MarkSaved (Save All), FilePath (Save As) and SetTempName, and its tab
+            // header has to follow. Spec Decision 22.
+            doc.PropertyChanged += OnDocumentPropertyChanged;
+        }
+
+        void ForgetDocument(Document doc)
+        {
+            if (doc == null)
+                return;
+
+            doc.PropertyChanged -= OnDocumentPropertyChanged;
+
+            DocumentView view;
+            if (views.TryGetValue(doc, out view))
+            {
+                if (ReferenceEquals(contentHost.Content, view))
+                    contentHost.Content = null;
+                view.Detach();
+                views.Remove(doc);
+            }
+
+            TabViewItem tab;
+            if (tabs.TryGetValue(doc, out tab))
+            {
+                tabStrip.TabItems.Remove(tab);
+                tabs.Remove(doc);
+            }
+        }
+
+        void OnDocumentPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            var doc = sender as Document;
+            if (doc == null)
+                return;
+
+            if (e.PropertyName == "Title" || e.PropertyName == "Name")
+            {
+                TabViewItem tab;
+                if (tabs.TryGetValue(doc, out tab))
+                    tab.Header = doc.Title;
+                if (ReferenceEquals(doc, shell.CurrentDocument))
+                    UpdateTitle();
+            }
+            else if (e.PropertyName == "Mode")
+            {
+                // Only the current document. A background tab changing mode must not take the
+                // outline, property grid and toolbox away from the visible one. Spec Decision 22.
+                if (ReferenceEquals(doc, shell.CurrentDocument))
+                    WireCurrentDocument();
+            }
+        }
+
         /// <summary>
-        /// Replaces the current document with a blank one.
+        /// Makes <paramref name="doc"/> the current document. Every route into this - a tab
+        /// click, a test - goes through here.
         /// </summary>
         /// <remarks>
-        /// The outgoing document is asked about through the async path and closed, so Documents
-        /// never holds more than one. The shell is single-document and has no tab strip, so a
-        /// document left in the collection would be unreachable - still dirty, still holding a
-        /// live DesignSurface, and impossible to make current again. Fix per code review.
+        /// The logic lives in a method rather than in the TabView's SelectionChanged handler
+        /// because that event never fires in the test process (measured), so anything left inside
+        /// it would ship unverified. Spec Decision 3.
         /// </remarks>
+        internal void ActivateDocument(Document doc)
+        {
+            if (doc == null || !shell.Documents.Contains(doc))
+                return;
+            shell.CurrentDocument = doc;
+        }
+
+        /// <summary>
+        /// Asks about <paramref name="doc"/> and closes it if the answer allows.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="decideClose"/> is a parameter for the reason the deleted
+        /// ReplaceCurrentDocumentAsync had one: in production it is PrepareForCloseAsync, which
+        /// shows a ContentDialog and so cannot run in a test process.
+        /// <para>
+        /// This never touches TabItems. The tab is removed by OnDocumentsChanged when
+        /// ShellModel.Close actually removes the document, so a cancelled gate leaves the strip
+        /// and the model in agreement by construction. Spec Decision 4.
+        /// </para>
+        /// </remarks>
+        internal async Task RequestCloseAsync(Document doc, Func<Document, Task<CloseDecision>> decideClose)
+        {
+            if (doc == null)
+                return;
+
+            var decision = await decideClose(doc);
+            if (!decision.Proceed)
+                return;
+
+            if (decision.ClearDirtyBeforeClose)
+                doc.MarkSaved();
+
+            // ShellModel.Close removes, re-points CurrentDocument, and disposes. Do not dispose
+            // here as well: Close returns false when it refuses (it consults its own
+            // AskSaveChanges, which this window answers Cancel), and a document it kept must stay
+            // usable. Close owns the document's lifetime; this method only decides.
+            shell.Close(doc);
+        }
+
+        void OnTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (syncingSelection)
+                return;
+
+            var tab = tabStrip.SelectedItem as TabViewItem;
+            if (tab == null)
+                return;
+
+            foreach (var pair in tabs)
+            {
+                if (ReferenceEquals(pair.Value, tab))
+                {
+                    ActivateDocument(pair.Key);
+                    return;
+                }
+            }
+        }
+
+        void OnTabCloseRequested(TabView sender, TabViewTabCloseRequestedEventArgs args)
+        {
+            foreach (var pair in tabs)
+            {
+                if (ReferenceEquals(pair.Value, args.Tab))
+                {
+                    var doc = pair.Key;
+                    Fire(() => RequestCloseAsync(doc, PrepareForCloseAsync));
+                    return;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Points the strip at whatever ShellModel says is current, one direction at a time.
+        /// </summary>
+        /// <remarks>
+        /// ShellModel.Close re-points CurrentDocument while the TabView is reacting to the same
+        /// removal, so without the flag the two pushes re-enter each other. Spec Decision 5.
+        /// </remarks>
+        void SyncSelectedTab()
+        {
+            syncingSelection = true;
+            try
+            {
+                var doc = shell.CurrentDocument;
+                TabViewItem tab;
+                tabStrip.SelectedItem = doc != null && tabs.TryGetValue(doc, out tab) ? tab : null;
+            }
+            finally
+            {
+                syncingSelection = false;
+            }
+        }
+
         /// <summary>
         /// What <see cref="PrepareForCloseAsync"/> decided about an outgoing document.
         /// </summary>
@@ -454,63 +671,12 @@ namespace WinUIDesigner.Shell
             public bool ClearDirtyBeforeClose;
         }
 
-        /// <summary>
-        /// Replaces the current document: ask about the outgoing one, build the replacement, and
-        /// only then discharge the answer and close the outgoing one.
-        /// </summary>
-        /// <remarks>
-        /// The ordering is the whole point, and New and Open share this method so it cannot drift
-        /// between them. Clearing the dirty flag before the replacement is known to exist loses
-        /// unsaved work outright: <paramref name="createReplacement"/> can fail (an unreadable
-        /// file, a template that will not load), both callers then keep the outgoing document,
-        /// and a document left in front of the user with IsDirty already false never trips
-        /// ShellModel.IsSomethingDirty again - so the close gate stays quiet and the edits go
-        /// over the side with no prompt. Fix per final review.
-        /// </remarks>
-        Task ReplaceCurrentDocumentAsync(Func<bool> createReplacement)
+        Task NewAsync()
         {
-            return ReplaceCurrentDocumentAsync(createReplacement, PrepareForCloseAsync);
-        }
-
-        /// <summary>
-        /// The ordering above, with the close decision supplied rather than asked for.
-        /// </summary>
-        /// <remarks>
-        /// <paramref name="decideClose"/> is a parameter for the same reason
-        /// <paramref name="createReplacement"/> is: in production it is
-        /// <see cref="PrepareForCloseAsync"/>, which shows a <c>ContentDialog</c> and so cannot
-        /// run in a test process. Injecting it lets the decide/create/discharge/close ordering -
-        /// which a final-review fix rewrote, and which loses unsaved work when it is wrong - be
-        /// driven directly. Nothing else calls this overload; the parameterless one above is what
-        /// New and Open share.
-        /// </remarks>
-        internal async Task ReplaceCurrentDocumentAsync(
-            Func<bool> createReplacement,
-            Func<Document, Task<CloseDecision>> decideClose)
-        {
-            var current = shell.CurrentDocument;
-
-            var decision = await decideClose(current);
-            if (!decision.Proceed)
-                return;
-
-            // Create first, close second: if this fails the shell reports it and keeps the
-            // document the user already had, rather than leaving the app with none.
-            if (!createReplacement())
-                return;
-
-            if (current != null)
-            {
-                // Only here, with the replacement known to exist, is a Discard answer discharged.
-                if (decision.ClearDirtyBeforeClose)
-                    current.MarkSaved();
-                shell.Close(current);
-            }
-        }
-
-        async Task NewAsync()
-        {
-            await ReplaceCurrentDocumentAsync(() => shell.New() != null);
+            // Additive. The replacement path existed only because the shell had no tab strip;
+            // with one, a document left in the collection is reachable. Spec Decision 6.
+            shell.New();
+            return Task.CompletedTask;
         }
 
         async Task OpenAsync()
@@ -525,10 +691,7 @@ namespace WinUIDesigner.Shell
             if (file == null)
                 return;
 
-            // The ask happens inside ReplaceCurrentDocumentAsync rather than by letting
-            // ShellModel.Close raise its synchronous AskSaveChanges: that event cannot await a
-            // dialog, so OnAskSaveChanges answers Cancel and Close silently fails.
-            await ReplaceCurrentDocumentAsync(() => shell.Open(file.Path));
+            shell.Open(file.Path);
         }
 
         /// <summary>
