@@ -42,7 +42,7 @@ Run a single test with NUnitLite's own filter flag, e.g. `... .exe --test=WinUID
 
 ## Architecture
 
-Three layered library projects, each with a `.Tests` counterpart of the same name:
+Three layered library projects, each with a `.Tests` counterpart of the same name, plus the shell application that hosts them:
 
 ```
 WinUIDesigner.XamlDom         — WPF→WinUI XAML DOM: parse/serialize XAML into an object model, no UI.
@@ -54,7 +54,19 @@ WinUIDesigner.Designer        — DesignPanel/DesignSurface: live visual-tree ho
                                  selection, and the ~56 concrete design-time behaviors (resize/rotate/
                                  skew thumbs, snaplines, per-container placement, drag-move/reparent,
                                  Grid row/column editing).
+        ↑
+WinUIDesigner.Shell           — the shell app's logic and UI, all in C#: Document, ShellModel,
+                                 Toolbox, ShellTypeFinder, ShellMetadata, ToolboxView, MainWindow.
+                                 A class library, and deliberately free of XAML.
+        ↑
+WinUIDesigner.Shell.App       — the executable. Holds App.xaml and App.xaml.cs and nothing else.
 ```
+
+`Shell` and `Shell.App` are two projects rather than one for a measured reason: any `ProjectReference`
+from a WinUI-hosting test `.exe` to a project carrying an `ApplicationDefinition` fail-fasts that test
+host with `0xC0000409` before a single test body runs. Keeping the classes in a XAML-free library lets
+`WinUIDesigner.Shell.Tests` reference them the same way the other three test projects reference
+`WinUIDesigner.Designer`.
 
 Each project only depends on the ones above it in this list (`ProjectReference`s in the `.csproj`s make this explicit). `tests/WinUIDesigner.TestHost` is referenced by all three `.Tests` projects.
 
