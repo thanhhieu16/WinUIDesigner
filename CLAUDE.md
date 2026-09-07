@@ -40,6 +40,8 @@ Run a single test with NUnitLite's own filter flag, e.g. `... .exe --test=WinUID
 
 `WinUITestHost.RunOnWindow(...)` is `RunWithWindow` without the trailing `Content = null`, for a fixture that builds one tree in its setup and drives that same live tree across several tests; its caller owns the cleanup.
 
+Two reporting artifacts of running test bodies on the shared dispatcher thread, both measured, neither a real failure: an assertion that fails inside `WinUITestHost.Run` is listed **twice** — once against the test that actually failed and once against a different test in the same fixture — so read the stack trace, which names the real one, rather than the count. And `Console.WriteLine` from inside a `Run` body only reaches the output of the *first* test in a process to start the dispatcher thread; later tests' output vanishes. Write diagnostics to a file, or run one test per process, when it matters.
+
 `tests/WinUIDesigner.TestHost` is shared test infrastructure (not a test project itself): `WinUITestHost.Run(...)`/`RunWithWindow(...)` marshal a test body onto the process-wide WinUI dispatcher thread (started lazily, one shared `Window` reused and never closed — closing the last window ends the dispatcher's message loop and kills every later test). `ReflectionXamlMetadataProvider` backs the `TestApplication`'s `IXamlMetadataProvider` so `XamlReader.Load` can resolve test fixture types.
 
 ## Architecture

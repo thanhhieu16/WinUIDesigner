@@ -30,6 +30,9 @@ namespace WinUIDesigner.Shell
         const string ApplicationTitle = "WinUI Designer";
 
         readonly ShellModel shell = new ShellModel();
+
+        /// <summary>Test seam: the model this window drives. Not for production callers.</summary>
+        internal ShellModel ShellForTest { get { return shell; } }
         readonly ToolboxView toolboxView = new ToolboxView();
         readonly OutlineViewControl outlineView = new OutlineViewControl();
         readonly TextBox outlineFilter = new TextBox { PlaceholderText = "Filter", Margin = new Thickness(4) };
@@ -439,7 +442,7 @@ namespace WinUIDesigner.Shell
         /// Two fields rather than a bare bool because "the user said Discard" and "the document's
         /// dirty flag has been cleared" must stay separate facts. See PrepareForCloseAsync.
         /// </remarks>
-        struct CloseDecision
+        internal struct CloseDecision
         {
             /// <summary>False only when the user cancelled, or a requested save did not happen.</summary>
             public bool Proceed;
@@ -464,11 +467,30 @@ namespace WinUIDesigner.Shell
         /// ShellModel.IsSomethingDirty again - so the close gate stays quiet and the edits go
         /// over the side with no prompt. Fix per final review.
         /// </remarks>
-        async Task ReplaceCurrentDocumentAsync(Func<bool> createReplacement)
+        Task ReplaceCurrentDocumentAsync(Func<bool> createReplacement)
+        {
+            return ReplaceCurrentDocumentAsync(createReplacement, PrepareForCloseAsync);
+        }
+
+        /// <summary>
+        /// The ordering above, with the close decision supplied rather than asked for.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="decideClose"/> is a parameter for the same reason
+        /// <paramref name="createReplacement"/> is: in production it is
+        /// <see cref="PrepareForCloseAsync"/>, which shows a <c>ContentDialog</c> and so cannot
+        /// run in a test process. Injecting it lets the decide/create/discharge/close ordering -
+        /// which a final-review fix rewrote, and which loses unsaved work when it is wrong - be
+        /// driven directly. Nothing else calls this overload; the parameterless one above is what
+        /// New and Open share.
+        /// </remarks>
+        internal async Task ReplaceCurrentDocumentAsync(
+            Func<bool> createReplacement,
+            Func<Document, Task<CloseDecision>> decideClose)
         {
             var current = shell.CurrentDocument;
 
-            var decision = await PrepareForCloseAsync(current);
+            var decision = await decideClose(current);
             if (!decision.Proceed)
                 return;
 
