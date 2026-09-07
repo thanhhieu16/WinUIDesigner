@@ -1623,13 +1623,12 @@ namespace WinUIDesigner.Shell
             {
                 text = File.ReadAllText(path);
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                RaiseError(ex.Message, null);
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
-            {
+                // Deliberately broad. Spec Decision 17 makes the no-throw guarantee
+                // unconditional, and File.ReadAllText throws ArgumentNullException,
+                // ArgumentException and NotSupportedException as well as the IO ones. Nothing is
+                // swallowed: the message reaches the user through ReportError.
                 RaiseError(ex.Message, null);
                 return false;
             }
@@ -1710,17 +1709,15 @@ namespace WinUIDesigner.Shell
 
         bool WriteToDisk(Document doc, string path)
         {
-            doc.UpdateXaml();
             try
             {
+                // UpdateXaml is inside the try on purpose: it drives DesignSurface.SaveDesigner
+                // through XamlXmlWriter, engine serialization that is not proven exception-free,
+                // and Spec Decision 17 forbids a throw escaping ShellModel.
+                doc.UpdateXaml();
                 File.WriteAllText(path, doc.Text);
             }
-            catch (IOException ex)
-            {
-                RaiseError(ex.Message, null);
-                return false;
-            }
-            catch (UnauthorizedAccessException ex)
+            catch (Exception ex)
             {
                 RaiseError(ex.Message, null);
                 return false;
