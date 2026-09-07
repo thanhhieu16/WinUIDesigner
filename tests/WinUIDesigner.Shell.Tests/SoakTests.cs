@@ -31,13 +31,31 @@ namespace WinUIDesigner.Shell.Tests
             return process.PrivateMemorySize64;
         }
 
+        // Read alongside SettledPrivateBytes, at the same two sampling points, so the report can
+        // tell apart a genuine rooted-object leak from committed-segment retention: private bytes
+        // includes GC segments the runtime keeps committed for reuse even after a full blocking
+        // collection, so a private-bytes climb alone is consistent with either story. If this
+        // slope tracks the private-bytes slope, objects are actually being retained; if this
+        // stays flat while private bytes climbs, it is segment retention, not a leak.
+        static long SettledManagedHeapBytes()
+        {
+            return GC.GetTotalMemory(true);
+        }
+
         [Test]
         [Explicit("Long-running: 2000 document loads. Run deliberately, not on every build.")]
         public void OpeningAndDisposingADocumentDoesNotGrowMemoryPerIteration()
         {
+            // Note for whoever root-causes this later: WinUITestHost.Run enqueues this entire
+            // loop as a single dispatcher callback, so the dispatcher's message queue is never
+            // pumped between iterations. Probably moot here - DesignSurface is never attached to
+            // a live Window/XamlRoot in this test, so the parsed subtree likely never realizes
+            // native composition visuals at all - but exactly the kind of confound that would
+            // otherwise be rediscovered from scratch.
             WinUITestHost.Run(() =>
             {
                 long baseline = 0;
+                long managedBaseline = 0;
 
                 for (int i = 0; i < TotalIterations; i++)
                 {
@@ -47,20 +65,34 @@ namespace WinUIDesigner.Shell.Tests
                     }
 
                     if (i == BaselineIteration)
+                    {
                         baseline = SettledPrivateBytes();
+                        managedBaseline = SettledManagedHeapBytes();
+                    }
                 }
 
                 long final = SettledPrivateBytes();
+                long managedFinal = SettledManagedHeapBytes();
                 long span = TotalIterations - BaselineIteration;
                 double bytesPerIteration = (double)(final - baseline) / span;
+                double managedBytesPerIteration = (double)(managedFinal - managedBaseline) / span;
 
                 Console.WriteLine("SOAK baseline@" + BaselineIteration + " = " + baseline);
                 Console.WriteLine("SOAK final@" + TotalIterations + " = " + final);
                 Console.WriteLine("SOAK bytes/iteration = " + bytesPerIteration.ToString("F1"));
+                Console.WriteLine("SOAK managed-heap baseline@" + BaselineIteration + " = " + managedBaseline);
+                Console.WriteLine("SOAK managed-heap final@" + TotalIterations + " = " + managedFinal);
+                Console.WriteLine("SOAK managed-heap bytes/iteration = " + managedBytesPerIteration.ToString("F1"));
 
                 // The first 500 iterations are excluded from the measurement on purpose: JIT,
                 // the WinUI type cache and the toolbox's one-time assembly scan all inflate the
                 // early numbers, and none of them recurs.
+                //
+                // The assertion below is deliberately on private bytes, not the managed-heap
+                // figure logged above: private bytes is the number this test exists to bound
+                // (total process footprint), the managed-heap slope is diagnostic evidence for
+                // telling a rooted-object leak apart from committed-segment retention, logged for
+                // whoever reads the report - see SettledManagedHeapBytes.
                 Assert.That(bytesPerIteration, Is.LessThan(SoakCeilingBytesPerIteration),
                     "memory grew " + bytesPerIteration.ToString("F1") + " bytes per open/dispose cycle");
             });
