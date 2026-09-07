@@ -4,7 +4,7 @@
 
 **Goal:** Build `WinUIDesigner.Shell`, the first application that hosts the designer engine — open a XAML file, place controls from a toolbox, edit properties, undo, and save.
 
-**Architecture:** A WinUI 3 unpackaged executable with exactly one `.xaml` file (`App.xaml`, which exists so the build emits an app-level merged PRI — without it `ms-appx:///` cannot resolve and every templated control fail-fasts at layout). All other UI is written in C#. Logic (`ShellModel`, `Document`, `Toolbox`, `ShellTypeFinder`, `ShellMetadata`) touches no `Window` and no `XamlRoot`, so it is driven by an NUnitLite suite exactly like the three existing ones; `MainWindow` owns every wire into an engine service.
+**Architecture:** Two projects — `WinUIDesigner.Shell`, a library holding every class, and `WinUIDesigner.Shell.App`, an unpackaged executable holding only `App.xaml` and `App.xaml.cs`. The split is forced, not stylistic: any `ProjectReference` from a WinUI-hosting test `.exe` to a project carrying an `ApplicationDefinition` fail-fasts that test host with `0xC0000409` before a single test runs (isolated during Task 1 by reproducing it against `WinUIDesigner.Designer.Tests`). There is still exactly one `.xaml` file under `src/` (`App.xaml`, which exists so the build emits an app-level merged PRI — without it `ms-appx:///` cannot resolve and every templated control fail-fasts at layout). All other UI is written in C#. Logic (`ShellModel`, `Document`, `Toolbox`, `ShellTypeFinder`, `ShellMetadata`) touches no `Window` and no `XamlRoot`, so it is driven by an NUnitLite suite exactly like the three existing ones; `MainWindow` owns every wire into an engine service.
 
 **Tech Stack:** .NET `net10.0-windows10.0.19041.0`, WinUI 3 via `Microsoft.WindowsAppSDK 1.7.250606001`, NUnit 3.14 + NUnitLite, `win-x64`, unpackaged and self-contained.
 
@@ -18,7 +18,7 @@
 - `WindowsPackageType=None`. This is what makes an unpackaged WinUI 3 app initialize the Windows App Runtime bootstrapper.
 - **Tests are run through each test project's built `.exe` with `--noresult`, never `dotnet test`.** `dotnet test`'s `testhost.exe` cannot activate `Microsoft.UI.Xaml` classes; every WinUI-dependent test reports as *ignored*, so a large skip count is not a green run.
 - Dependency direction is `Shell → Designer → DesignModel → XamlDom`. Never reference in the other direction.
-- **Exactly one `.xaml` file may exist under `src/`: `src/WinUIDesigner.Shell/App.xaml`.** No other XAML file, in any project, for any reason.
+- **Exactly one `.xaml` file may exist under `src/`: `src/WinUIDesigner.Shell.App/App.xaml`.** No other XAML file, in any project, for any reason. `src/WinUIDesigner.Shell` is a library and must stay free of XAML — a test project cannot reference a project that carries an `ApplicationDefinition` without fail-fasting.
 - Do **not** add a hand-written `app.manifest`. It replaces the generated registration-free WinRT activation manifest and the app fail-fasts at startup.
 - Do **not** define `Main` and do **not** set `DISABLE_XAML_GENERATED_MAIN` in the shell. The XamlCompiler-generated `Main` calls `WinRT.ComWrappersSupport.InitializeComWrappers()` and installs a `DispatcherQueueSynchronizationContext`; a hand-written `Main` missing either fail-fasts before any managed line runs.
 - New files carry **no** SharpDevelop MIT header (that header belongs only to files ported from `WpfDesign`). All new files in this plan are newly written.
@@ -31,13 +31,13 @@
 
 ## File Structure
 
-**New project `src/WinUIDesigner.Shell/`** (references `WinUIDesigner.Designer`, `WinUIDesigner.DesignModel`, `WinUIDesigner.XamlDom`):
+**New project `src/WinUIDesigner.Shell.App/`** (`OutputType=Exe`, `RootNamespace=WinUIDesigner.Shell`, references `WinUIDesigner.Shell`): holds `App.xaml` and `App.xaml.cs`, and nothing else.
+
+**New project `src/WinUIDesigner.Shell/`** (`OutputType=Library`, shaped like `WinUIDesigner.Designer`; references `WinUIDesigner.Designer`, `WinUIDesigner.DesignModel`, `WinUIDesigner.XamlDom`):
 
 | File | Responsibility |
 |---|---|
 | `WinUIDesigner.Shell.csproj` | Project properties per Decision 5. |
-| `App.xaml` | The only XAML file. Merges `XamlControlsResources`. |
-| `App.xaml.cs` | `Application` subclass; installs `UnhandledException`; creates the window. |
 | `AssemblyInfo.cs` | Title, description, `InternalsVisibleTo("WinUIDesigner.Shell.Tests")`. |
 | `NewDocumentTemplate.cs` | The blank-document XAML as a `const string`. |
 | `Toolbox.cs` | `Toolbox`, `AssemblyNode`, `ControlNode`. Assembly scan and filters. |
@@ -61,9 +61,9 @@
 | `ToolboxViewTests.cs` | DoD 14. |
 | `SoakTests.cs` | DoD 16. |
 
-**Modified:** `WinUIDesigner.sln` (both projects added), `CLAUDE.md` (the `.xaml` exception, and the shell's test command).
+**Modified:** `WinUIDesigner.sln` (all three projects added), `CLAUDE.md` (the `.xaml` exception, and the shell's test command).
 
-`MainWindow.cs` is the only file with no unit test of its own; DoD 18 covers it by hand. Everything else has a test in the same task that creates it.
+`App.xaml.cs` and `MainWindow.cs` are the only files with no unit test of their own; DoD 18 covers it by hand. Everything else has a test in the same task that creates it.
 
 ---
 
@@ -73,8 +73,9 @@ The riskiest task, so it is first. Nothing else in this plan can be verified unt
 
 **Files:**
 - Create: `src/WinUIDesigner.Shell/WinUIDesigner.Shell.csproj`
-- Create: `src/WinUIDesigner.Shell/App.xaml`
-- Create: `src/WinUIDesigner.Shell/App.xaml.cs`
+- Create: `src/WinUIDesigner.Shell.App/WinUIDesigner.Shell.App.csproj`
+- Create: `src/WinUIDesigner.Shell.App/App.xaml`
+- Create: `src/WinUIDesigner.Shell.App/App.xaml.cs`
 - Create: `src/WinUIDesigner.Shell/AssemblyInfo.cs`
 - Create: `src/WinUIDesigner.Shell/NewDocumentTemplate.cs`
 - Create: `tests/WinUIDesigner.Shell.Tests/WinUIDesigner.Shell.Tests.csproj`
@@ -133,7 +134,7 @@ Do not add an `<ApplicationDefinition>` item and do not set `EnableDefaultXamlIt
 
 - [ ] **Step 2: Create `App.xaml`**
 
-`src/WinUIDesigner.Shell/App.xaml`:
+`src/WinUIDesigner.Shell.App/App.xaml`:
 
 ```xml
 <Application
@@ -154,7 +155,7 @@ Do not add an `<ApplicationDefinition>` item and do not set `EnableDefaultXamlIt
 
 The window body here exists to prove the app launches and templates a control. Task 6 replaces `OnLaunched`'s body with `new MainWindow()`.
 
-`src/WinUIDesigner.Shell/App.xaml.cs`:
+`src/WinUIDesigner.Shell.App/App.xaml.cs`:
 
 ```csharp
 using System;
@@ -386,7 +387,7 @@ Expected: 1 test, 1 passed, 0 failed.
 - [ ] **Step 12: Launch the shell by hand and confirm it does not fail-fast**
 
 ```bash
-src/WinUIDesigner.Shell/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.exe
+src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
 ```
 
 Expected: a window appears containing a `TextBox` reading "WinUIDesigner shell". Close it; the process exits 0.
@@ -2656,7 +2657,7 @@ namespace WinUIDesigner.Shell
 
 - [ ] **Step 5: Point `App` at `MainWindow`**
 
-In `src/WinUIDesigner.Shell/App.xaml.cs`, replace `OnLaunched`'s body and the `OnUnhandledException` body:
+In `src/WinUIDesigner.Shell.App/App.xaml.cs`, replace `OnLaunched`'s body and the `OnUnhandledException` body:
 
 ```csharp
         protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -2704,7 +2705,7 @@ Expected: 28 tests, 28 passed.
 - [ ] **Step 7: Walk DoD 18 by hand**
 
 ```bash
-src/WinUIDesigner.Shell/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.exe
+src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
 ```
 
 Confirm, in order, and write down what happened for each:

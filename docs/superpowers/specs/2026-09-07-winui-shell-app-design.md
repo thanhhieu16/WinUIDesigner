@@ -148,7 +148,7 @@ Each was confirmed by compiling against it in this tree, not from memory:
 Two kinds of note follow each decision. *Cost if wrong* is the failure mode if the decision is mistaken. *Cost of the cut* is what a deliberate scope reduction denies the user; it is not a claim of error.
 
 **1. One `.xaml` file in `src/`, and it is `App.xaml`.**
-The project convention has been zero `.xaml` files in `src/`. It is relaxed by exactly one file, in the shell only, because the launch measurements show the application cannot run without it. Every other piece of shell UI is written in C#, matching `OutlineViewControl` and `PropertyGridControl`. `CLAUDE.md` is updated to state the exception, its scope, and the reason.
+The project convention has been zero `.xaml` files in `src/`. It is relaxed by exactly one file — `src/WinUIDesigner.Shell.App/App.xaml`, see Decision 5 for why it lives in its own project — because the launch measurements show the application cannot run without it. Every other piece of shell UI is written in C#, matching `OutlineViewControl` and `PropertyGridControl`. `CLAUDE.md` is updated to state the exception, its scope, and the reason.
 *Cost if wrong:* a `.xaml` file in `src/` reads as licence for more of them, and the codebase drifts into two UI idioms. Mitigated by stating the exception narrowly in `CLAUDE.md`.
 
 **2. The entry point is the generated one.**
@@ -163,9 +163,15 @@ The generated apphost manifest carries the registration-free WinRT activation en
 Both forms were measured to work; the declarative form matches the platform template and keeps the code path free of a startup ordering constraint.
 *Cost if wrong:* none measured; the code form remains available.
 
-**5. The shell's project properties are stated, not inherited by accident.**
-`WinUIDesigner.Shell.csproj`: `OutputType=Exe`, `TargetFramework=net10.0-windows10.0.19041.0`, `Nullable=disable`, `UseWinUI=true`, `RuntimeIdentifier=win-x64`, `SelfContained=false`, `WindowsPackageType=None`, `EnableMsixTooling=true`, `GenerateAppxPackageOnBuild=false`, `WindowsAppSDKSelfContained=true`, `PackageReference Microsoft.WindowsAppSDK 1.7.250606001`, `PackageReference Microsoft.Windows.SDK.BuildTools 10.0.26100.4188`. `WinUIDesigner.Shell.Tests.csproj` matches the existing test projects, adding `GenerateProgramFile=false`, `IsPackable=false`, NUnit/NUnitLite/NUnit3TestAdapter/Microsoft.NET.Test.Sdk, and its own `Program.cs` NUnitLite entry point. `EnableMsixTooling=true` is chosen over `false` only because it produces the merged `resources.pri` as a visible build output, which makes a future regression in the PRI pipeline obvious rather than silent.
-*Cost if wrong:* omitting `WindowsPackageType=None` breaks unpackaged bootstrapping; omitting `WindowsAppSDKSelfContained=true` reproduces the `REGDB_E_CLASSNOTREG` failure the test projects document, because this machine lacks the DDLM packages.
+**5. The shell is two projects: a library of everything, and an executable that is only the application object.**
+Found during implementation, not design: **any `ProjectReference` from a WinUI-hosting test `.exe` to a project carrying an `ApplicationDefinition` fail-fasts that test host with `0xC0000409` before a single test body runs.** Isolated by adding the same reference to the already-green `WinUIDesigner.Designer.Tests` and watching it break identically, then reverting. The failure follows the compiled-XAML application definition, not the code.
+
+So `src/WinUIDesigner.Shell` is `OutputType=Library` and holds every class in this spec — `Document`, `ShellModel`, `Toolbox`, `ShellTypeFinder`, `ShellMetadata`, `NewDocumentTemplate`, `ToolboxView`, `MainWindow` — with no `.xaml` file at all, shaped exactly like `WinUIDesigner.Designer`, which three test projects already reference without trouble. `src/WinUIDesigner.Shell.App` is `OutputType=Exe` and holds `App.xaml` and `App.xaml.cs` and nothing else, with `RootNamespace=WinUIDesigner.Shell` so `x:Class="WinUIDesigner.Shell.App"` resolves. The test project references the library only.
+
+`WinUIDesigner.Shell.App.csproj` carries: `OutputType=Exe`, `TargetFramework=net10.0-windows10.0.19041.0`, `RootNamespace=WinUIDesigner.Shell`, `Nullable=disable`, `UseWinUI=true`, `RuntimeIdentifier=win-x64`, `SelfContained=false`, `WindowsPackageType=None`, `EnableMsixTooling=true`, `GenerateAppxPackageOnBuild=false`, `WindowsAppSDKSelfContained=true`, and the two pinned `PackageReference`s. `EnableMsixTooling=true` is chosen over `false` only because it produces the merged `resources.pri` as a visible build output, which makes a future regression in the PRI pipeline obvious rather than silent. `WinUIDesigner.Shell.csproj` matches `WinUIDesigner.Designer.csproj`, adding a `ProjectReference` to it. `WinUIDesigner.Shell.Tests.csproj` matches the existing test projects, adding `GenerateProgramFile=false`, `IsPackable=false`, NUnit/NUnitLite/NUnit3TestAdapter/Microsoft.NET.Test.Sdk, and its own `Program.cs` NUnitLite entry point.
+
+Decision 1 is unchanged in substance: there is still exactly one `.xaml` file under `src/`. Its path is `src/WinUIDesigner.Shell.App/App.xaml`.
+*Cost if wrong:* omitting `WindowsPackageType=None` breaks unpackaged bootstrapping; omitting `WindowsAppSDKSelfContained=true` reproduces the `REGDB_E_CLASSNOTREG` failure the test projects document, because this machine lacks the DDLM packages. If the split itself proved insufficient, the fallback is linking the library's sources into the test project with a `Compile Include` glob — it works, but it compiles the same code twice.
 
 **6. Logic is split from UI so the logic is testable.**
 `ShellModel` and `Document` touch no `Window`, no `XamlRoot`, and no `MainWindow`. They are constructible on the test dispatcher thread and are what the test suite drives.
@@ -285,7 +291,7 @@ Phase A measured roughly 4.7 KB of native memory retained per `XamlReader.Load` 
 
 | Unit | Responsibility | Ported from |
 |---|---|---|
-| `App` + `App.xaml` | Application object; merges `XamlControlsResources`; installs the `UnhandledException` handler; creates `MainWindow`. | `App.xaml`, `App.xaml.cs` |
+| `App` + `App.xaml` (in `WinUIDesigner.Shell.App`) | Application object; merges `XamlControlsResources`; installs the `UnhandledException` handler; creates `MainWindow`. Nothing else lives in this project. | `App.xaml`, `App.xaml.cs` |
 | `MainWindow` | Layout and `ScrollViewer` wrapping, menu, accelerators, command enablement, dialogs, file pickers, window title, close gate, per-document `PropertyGridControl`, outline filter box. | `MainWindow.xaml`, `MainWindow_Commands.cs` |
 | `ShellModel` | Document collection, current document, `New`/`Open`/`Save`/`SaveAs`/`Close`, dirty aggregation, `AskSaveChanges` and `ReportError` events. | `Shell.cs` |
 | `Document` | Owns one `DesignSurface`; `Text` ⇄ design; dirty flag; captured load errors; exposes `DesignContext`, `UndoService`, `SelectionService`, `OutlineRoot`; `Dispose` unsubscribes then unloads. | `Document.cs` |
@@ -339,7 +345,7 @@ matching the three existing suites. `dotnet test` is not a substitute.
 15. `ShellMetadata.Register()` makes `ModelTools.GetDefaultSize` return the seeded size for a seeded control type, and the property grid's Popular category non-empty for a `Button`.
 16. **Soak:** 2000 open/dispose cycles of one small named fixture; `Process.PrivateMemorySize64` sampled after a forced collection at iteration 500 and 2000; the per-iteration slope over that span is below a stated ceiling in bytes per iteration, with the first measured value recorded in a comment.
 17. All three existing suites stay green: XamlDom 144 (140 passed, 4 pre-existing ignores), DesignModel 77/77, Designer 245/245.
-18. **Manual, and labelled as manual:** the shell launches; New produces a blank canvas; a control is selected in the toolbox and placed by clicking the surface; a property is edited in the grid; Ctrl+Z undoes it; Delete removes the control; Ctrl+S saves; the saved file reopens with the same content; closing with unsaved changes prompts.
+18. **Manual, and labelled as manual:** `WinUIDesigner.Shell.App.exe` launches; New produces a blank canvas; a control is selected in the toolbox and placed by clicking the surface; a property is edited in the grid; Ctrl+Z undoes it; Delete removes the control; Ctrl+S saves; the saved file reopens with the same content; closing with unsaved changes prompts.
 
 ## Known gaps
 
