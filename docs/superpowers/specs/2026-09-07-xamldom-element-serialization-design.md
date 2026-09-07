@@ -1,6 +1,6 @@
 # XamlDom Element-Form Serialization — Phase C
 
-**Status:** designed, not implemented.
+**Status:** implemented, `bcd570d..11d1f69` plus the Task 4 regression test.
 **Phase A (read side):** `docs/superpowers/specs/2026-09-06-winui-xamldom-value-conversion-design.md`, shipped as `23abc32..ab5221b`.
 **Phase B (write side, attribute form):** `docs/superpowers/specs/2026-09-06-winui-xamldom-value-conversion-phase-b-design.md`, shipped as `0d5f6b4..451cac0`.
 
@@ -350,11 +350,12 @@ project's `.exe` as CLAUDE.md requires. Every test runs inside `WinUITestHost.Ru
   `XamlCompositionBrushBase`, `BitmapImage` and every `Storyboard`/animation type stay lost.
 - Attached properties on a nested element are not written; no listed type has one.
 - `x:Name` on a nested element is not preserved.
-- A property whose value is a nested object *outside* the table refuses the whole parent, so a
-  `TransformGroup` containing an unlisted transform saves as an empty `<TransformGroup />`
-  rather than partially.
 - The writer runs on every save of an affected property, walking the live object each time; no
   caching, and no measurement of its cost has been made.
+- A genuine exception mid-write (not the depth/cycle guard, an actual thrown error) leaves a
+  partially written element rather than rolling it back — Decision 5 forbids buffering the
+  whole subtree just to discard it on failure, so `TryWrite`'s `catch` reports and stops where
+  it stands.
 - `SkewThumbExtension` still does not write its angles through the model the way
   `ModelTools.ApplyTransform` writes `Angle`. This phase makes that unnecessary for saving; it
   remains a difference between the two code paths.

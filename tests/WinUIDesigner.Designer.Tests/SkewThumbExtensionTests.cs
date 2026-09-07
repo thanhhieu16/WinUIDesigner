@@ -110,5 +110,39 @@ namespace WinUIDesigner.Designer.Tests
                     "a single Undo should revert the whole skew drag back to its pre-drag state (no RenderTransform), not just the last tick");
             });
         }
+
+        [Test]
+        public void ASkewSurvivesASaveAndReload()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadSelected(window, out var buttonItem, out var button);
+                var extension = buttonItem.Extensions.OfType<SkewThumbExtension>().Single();
+                var drag = extension.DragListenerX;
+
+                drag.SimulateDown(new Windows.Foundation.Point(0, 0));
+                drag.SimulateMove(new Windows.Foundation.Point(-20, 0)); // -0.5 * -20 = +10 degrees
+                drag.SimulateUp(new Windows.Foundation.Point(-20, 0));
+                surface.UpdateLayout();
+
+                var text = new StringWriter();
+                var settings = new XmlWriterSettings();
+                settings.OmitXmlDeclaration = true;
+                using (var writer = XmlWriter.Create(text, settings))
+                    surface.DesignContext.Save(writer);
+                var saved = text.ToString();
+
+                // ApplySkew sets RenderTransform to a live SkewTransform and stops there - unlike
+                // ModelTools.ApplyTransform, which writes the angle through the model afterwards.
+                // Before Phase C the element written for that transform was empty, so dragging the
+                // skew thumb and saving lost the gesture with no error anywhere.
+                var reloaded = WinUIDesigner.XamlDom.XamlParser.Parse(new StringReader(saved));
+                var reloadedButton = (Microsoft.UI.Xaml.Controls.Button)
+                    ((Microsoft.UI.Xaml.Controls.Grid)reloaded.RootInstance).Children[0];
+
+                var skew = reloadedButton.RenderTransform as Microsoft.UI.Xaml.Media.SkewTransform;
+                Assert.IsNotNull(skew, "the skew did not survive the save; saved as: " + saved);
+                Assert.AreEqual(10, skew.AngleX, 0.5, "saved as: " + saved);
+            });
+        }
     }
 }
