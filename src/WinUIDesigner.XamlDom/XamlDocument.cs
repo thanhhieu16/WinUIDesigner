@@ -359,7 +359,13 @@ namespace WinUIDesigner.XamlDom
 
 			// Phase C: give the element its instance's own properties. A refusal - an unlisted
 			// type, a cycle, a depth cap - leaves the empty element Phases A and B emitted.
-			bool written = forProperty != null && !hasStringConverter && !isMarkupExtensionValue
+			// forProperty is intentionally NOT part of this gate: CreateObject(parent, instance)
+			// (used by XamlComponentService.RegisterComponentForDesigner, among others) calls
+			// through with forProperty == null, and that path must still get its instance's
+			// properties written or a component registered that way - e.g. a RotateTransform
+			// added to a TransformGroup mid-edit - saves as an empty element. The sink-report
+			// condition below still needs forProperty, so it keeps its own null check.
+			bool written = !hasStringConverter && !isMarkupExtensionValue
 				&& XamlInstanceWriter.TryWrite(result);
 
 			// Phase B reported a value with no attribute text form. That gate read
@@ -368,8 +374,11 @@ namespace WinUIDesigner.XamlDom
 			// about to be written as an element that will not survive a reload", which is now
 			// exactly "the writer refused". ShouldWarnFor keeps it off properties declared
 			// object, where a nested control is normal and not this phase's business.
+			// !HasEntry(elementType) keeps it off a listed type with nothing to write - an empty
+			// TransformGroup makes TryWrite refuse (nothing to write, not a failure) and round-
+			// trips perfectly on its own; "has no XAML attribute form" would be a false positive.
 			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue && !written
-			    && xml.InnerText.Length == 0
+			    && xml.InnerText.Length == 0 && !XamlInstanceWriter.HasEntry(elementType)
 			    && (XamlValueFormatter.HasFormatter(forProperty.ReturnType)
 			        || XamlInstanceWriter.ShouldWarnFor(forProperty.ReturnType))) {
 				var sink = ServiceProvider == null

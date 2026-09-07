@@ -335,7 +335,11 @@ project's `.exe` as CLAUDE.md requires. Every test runs inside `WinUITestHost.Ru
    through `IXamlErrorSink`.
 8. A `{Binding}` on a property whose declared type is listed still round-trips as a markup
    extension and produces no sink report (Decision 9's regression).
-9. A self-referencing `TransformGroup` refuses without throwing and without recursing.
+9. A graph of nested `TransformGroup`s deeper than `MaxDepth` refuses to recurse past the cap
+   without throwing, and the truncation is asserted, not just the absence of a throw - a
+   self-referencing `TransformGroup` could not be built to test with, since no WinUI collection
+   API accepts an ancestor as a child the way WPF's would; see Known gaps for the `InProgress`
+   guard this leaves unexercised.
 10. `ModelToolsTests.ApplyingASecondTransformKindWrapsBothInATransformGroup` and the rest of the
     Designer suite stay green — `ApplyTransform` now writes `Angle` on top of an element that
     already carries it.
@@ -350,8 +354,25 @@ project's `.exe` as CLAUDE.md requires. Every test runs inside `WinUITestHost.Ru
   `XamlCompositionBrushBase`, `BitmapImage` and every `Storyboard`/animation type stay lost.
 - Attached properties on a nested element are not written; no listed type has one.
 - `x:Name` on a nested element is not preserved.
-- The writer runs on every save of an affected property, walking the live object each time; no
-  caching, and no measurement of its cost has been made.
+- The writer runs on every `SetValue` of an affected property (`XamlDocument.CreatePropertyValue`
+  is reached from `XamlModelProperty`'s write path, not from `XamlDocument.Save` -
+  `XamlParser` never calls `CreatePropertyValue`), walking the live object each time; no
+  caching, and no measurement of its cost has been made. The phase's final review counted the
+  order of thirty uncached reflection lookups per pointer move during a skew drag. Deferred
+  rather than fixed - it changes no behaviour, and this codebase's rule is that performance
+  claims are measured before being acted on; the review's count is not that measurement, and
+  none exists yet.
+- The `InProgress` reference-cycle guard (Decision 7, `XamlInstanceWriter.cs`) is unexercised by
+  any test. A `TransformGroup` cannot be made its own descendant through WinUI's public API - no
+  `Children.Add` accepts an ancestor as an argument the way WPF's collection would - so the only
+  reachable way to drive the guard is depth, which is what
+  `ADeeplyNestedGraphStopsAtTheDepthCapWithoutThrowing` exercises instead. The reference check
+  stays as the belt to that test's braces.
+- `XamlProperty`'s raw-`Binding`-to-`SetValue` path fails for its own, unrelated, pre-existing
+  reason: WinUI's `DependencyProperty.SetValue` does not resolve a `Binding` the way real binding
+  application does. `ABindingOnAListedPropertyTypeIsNeitherWrittenNorReported` and
+  `ValueFormattingTests.DoesNotReportABindingMarkupExtension` are both shaped around working
+  past this rather than fixing it.
 - A genuine exception mid-write (not the depth/cycle guard, an actual thrown error) leaves a
   partially written element rather than rolling it back — Decision 5 forbids buffering the
   whole subtree just to discard it on failure, so `TryWrite`'s `catch` reports and stops where

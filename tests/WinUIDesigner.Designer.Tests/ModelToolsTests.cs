@@ -212,6 +212,32 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.IsNotNull(group, "a second transform kind should wrap both in a TransformGroup");
                 Assert.AreEqual(1, group.Children.OfType<Microsoft.UI.Xaml.Media.SkewTransform>().Count());
                 Assert.AreEqual(1, group.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().Count());
+
+                // Finding 1: the RotateTransform-into-TransformGroup branch above registers the
+                // new child through RegisterComponentForDesigner, which goes through
+                // XamlDocument.CreateObject - CreatePropertyValue with forProperty == null. Before
+                // this phase's fix that meant XamlInstanceWriter never ran on this path, so the
+                // child saved as an empty <RotateTransform /> and the angle was gone on reload.
+                // The assertions above only ever look at the live object tree, which is correct
+                // either way (the model write happens whether or not the child gets its own
+                // DesignItem) - a save-and-reparse is the only way this test can see the bug.
+                var text = new StringWriter();
+                var xmlSettings = new XmlWriterSettings();
+                xmlSettings.OmitXmlDeclaration = true;
+                using (var writer = XmlWriter.Create(text, xmlSettings))
+                    context.Save(writer);
+                var saved = text.ToString();
+
+                var reloaded = WinUIDesigner.XamlDom.XamlParser.Parse(new StringReader(saved));
+                var reloadedButton = (Microsoft.UI.Xaml.Controls.Button)
+                    ((Microsoft.UI.Xaml.Controls.Grid)reloaded.RootInstance).Children[0];
+                var reloadedGroup = reloadedButton.RenderTransform as Microsoft.UI.Xaml.Media.TransformGroup;
+                Assert.IsNotNull(reloadedGroup,
+                    "the TransformGroup itself did not survive the save; saved as: " + saved);
+                var reloadedRotate = reloadedGroup.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().FirstOrDefault();
+                Assert.IsNotNull(reloadedRotate,
+                    "the RotateTransform child did not survive the save; saved as: " + saved);
+                Assert.AreEqual(20, reloadedRotate.Angle, 0.5, "saved as: " + saved);
             });
         }
     }

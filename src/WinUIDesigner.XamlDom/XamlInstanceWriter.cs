@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 
 namespace WinUIDesigner.XamlDom
@@ -120,13 +121,45 @@ namespace WinUIDesigner.XamlDom
 			stack.Add(target.Instance);
 			try {
 				return Write(target);
-			} catch (Exception) {
+			} catch (Exception ex) {
 				// Rule: never throw from the write path. A partially written element is a
 				// degraded save; an exception here is a lost document and, mid-drag, a dead
-				// process.
+				// process. But "never throw" is not "never say anything" - this used to be a
+				// bare `return false`, which meant the failure reached the user (if at all) as
+				// CreatePropertyValue's "has no XAML attribute form" sink message, a wrong
+				// diagnosis of a thrown error. Report it properly instead, the same way
+				// XamlProperty.ReportValueFailure does for the equivalent read-path failure.
+				ReportWriteFailure(target, ex);
 				return false;
 			} finally {
 				stack.RemoveAt(stack.Count - 1);
+			}
+		}
+
+		/// <summary>
+		/// Reports an exception thrown while writing <paramref name="target"/>'s properties.
+		/// Never throws itself - a failure while reporting a failure must still leave the write
+		/// path's "never throw" rule intact.
+		/// </summary>
+		static void ReportWriteFailure(XamlObject target, Exception ex)
+		{
+			Debug.WriteLine("XamlInstanceWriter.TryWrite() failed - Exception:" + ex.Message);
+			try {
+				var serviceProvider = target != null && target.OwnerDocument != null
+					? target.OwnerDocument.ServiceProvider
+					: null;
+				if (serviceProvider == null)
+					return;
+				var sink = serviceProvider.GetService(typeof(IXamlErrorSink)) as IXamlErrorSink;
+				if (sink == null)
+					return;
+				var typeName = target.ElementType != null ? target.ElementType.FullName : "value";
+				sink.ReportError(
+					"Failed to write " + typeName + "'s properties into the saved element: " +
+					ex.Message + ". The element was saved without them and will not survive a reload.",
+					0, 0);
+			} catch {
+				// Reporting must never throw either.
 			}
 		}
 
@@ -146,7 +179,14 @@ namespace WinUIDesigner.XamlDom
 				var dependencyProperty = WinUIStaticMemberLocator.FindDependencyProperty(type, descriptor.Name);
 				if (dependencyProperty == null)
 					continue;
-				if (CollectionSupport.IsCollectionType(descriptor.PropertyType)) {
+				// A collection type with a working attribute text form (PointCollection,
+				// DoubleCollection - see XamlValueFormatter's host table) must not be routed
+				// through the child-element path below: it already round-trips as text, and no
+				// listed type has such a property today, so this guard is currently unreachable
+				// but keeps Write correct if one is ever added. Falling through lets the scalar
+				// branch below hand it to CreatePropertyValue, which resolves the formatter.
+				if (CollectionSupport.IsCollectionType(descriptor.PropertyType)
+					&& !XamlValueFormatter.HasFormatter(descriptor.PropertyType)) {
 					if (WriteCollection(target, descriptor, descriptor.GetValue(instance)))
 						wroteSomething = true;
 					continue;
@@ -225,6 +265,12 @@ namespace WinUIDesigner.XamlDom
 				property.ParserAddCollectionElement(propertyElement, child);
 				wroteSomething = true;
 			}
+			// Contract: a false return leaves the element as it was found. The property
+			// element was appended optimistically, before any child was known to write
+			// successfully - if every item's CreatePropertyValue came back non-XamlObject,
+			// remove it rather than leaving an orphaned empty <Owner.Property/>.
+			if (!wroteSomething)
+				element.RemoveChild(propertyElement);
 			return wroteSomething;
 		}
 	}

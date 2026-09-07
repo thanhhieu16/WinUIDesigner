@@ -630,11 +630,19 @@ namespace WinUIDesigner.XamlDom.Tests
         public void ReportsAValueItCannotWriteAsAttributeText()
         {
             WinUITestHost.Run(() => {
+                // LinearGradientBrush used to be this test's value: it has no attribute text
+                // form, which was enough on its own to be reported under Phase B. Phase C listed
+                // LinearGradientBrush in XamlInstanceWriter (see the XamlDom element-serialization
+                // spec's Decision 8), so it now round-trips through the element form - reporting
+                // it would be exactly the false positive Finding 5 of the phase's final review
+                // fixed (XamlDocument.cs's sink condition gained a !HasEntry(elementType) term).
+                // ImageBrush stays off that list (Known gaps), so it is still genuinely lost and
+                // still belongs in this test.
                 var sink = SetCollectingErrors(
-                    "<Grid xmlns='" + PresentationNs + "'/>", "Background", new LinearGradientBrush());
+                    "<Grid xmlns='" + PresentationNs + "'/>", "Background", new ImageBrush());
                 Assert.AreEqual(1, sink.Messages.Count, "The unwritable value was not reported");
                 StringAssert.Contains("Background", sink.Messages[0]);
-                StringAssert.Contains("LinearGradientBrush", sink.Messages[0]);
+                StringAssert.Contains("ImageBrush", sink.Messages[0]);
             });
         }
 
@@ -642,10 +650,19 @@ namespace WinUIDesigner.XamlDom.Tests
         public void ReportsAGeometryTheMiniLanguageCannotExpress()
         {
             WinUITestHost.Run(() => {
+                // RectangleGeometry used to be this test's value: GeometryMiniLanguageWriter.
+                // CanWrite refuses anything that is not a PathGeometry, unconditionally, so a
+                // bare RectangleGeometry always took this branch under Phase B. Phase C listed
+                // RectangleGeometry (same spec, same decision), so an empty one now round-trips
+                // losslessly through the element form and reporting it is the same false
+                // positive fixed above. A PathGeometry with a non-null Transform still fails
+                // CanWrite (GeometryMiniLanguageWriter.cs:38) and PathGeometry is not on
+                // XamlInstanceWriter's list, so it is still genuinely lost and still belongs here.
                 var sink = SetCollectingErrors(
-                    "<Path xmlns='" + PresentationNs + "'/>", "Data", new RectangleGeometry());
+                    "<Path xmlns='" + PresentationNs + "'/>", "Data",
+                    new PathGeometry { Transform = new RotateTransform { Angle = 5 } });
                 Assert.AreEqual(1, sink.Messages.Count);
-                StringAssert.Contains("RectangleGeometry", sink.Messages[0]);
+                StringAssert.Contains("PathGeometry", sink.Messages[0]);
             });
         }
 

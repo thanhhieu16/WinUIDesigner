@@ -142,6 +142,7 @@ namespace WinUIDesigner.Designer.Tests
                 var skew = reloadedButton.RenderTransform as Microsoft.UI.Xaml.Media.SkewTransform;
                 Assert.IsNotNull(skew, "the skew did not survive the save; saved as: " + saved);
                 Assert.AreEqual(10, skew.AngleX, 0.5, "saved as: " + saved);
+                Assert.AreEqual(0, skew.AngleY, 0.5, "saved as: " + saved);
             });
         }
     }

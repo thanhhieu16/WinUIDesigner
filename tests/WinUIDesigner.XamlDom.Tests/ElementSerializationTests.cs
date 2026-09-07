@@ -311,12 +311,21 @@ namespace WinUIDesigner.XamlDom.Tests
         public void AnEmptyCollectionWritesNoPropertyElement()
         {
             WinUITestHost.Run(() => {
-                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
-                SetThroughTheDocument(document, "RenderTransform", new TransformGroup());
+                XamlDocument document;
+                var sink = SetWithASink("<Grid xmlns='" + PresentationNs + "'/>",
+                    "RenderTransform", new TransformGroup(), out document);
                 var saved = SaveToString(document);
 
                 StringAssert.DoesNotContain("TransformGroup.Children", saved,
                     "an empty collection must not produce a property element");
+
+                // An empty TransformGroup round-trips perfectly - TryWrite refusing (nothing to
+                // write) is not the same failure as "this type has no XAML attribute form", and
+                // must not be reported as one. Before the HasEntry(elementType) guard on
+                // CreatePropertyValue's sink condition, this listed-but-empty case produced
+                // exactly that false positive.
+                Assert.That(sink.Messages, Is.Empty,
+                    "an empty listed value round-trips fine and must not be reported; saved as: " + saved);
             });
         }
 
@@ -351,6 +360,33 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.That(saved, Is.Not.Null);
                 Assert.That(saved, Does.Contain("TransformGroup"),
                     "the outer levels are still written; only the levels past the cap are not");
+
+                // The three assertions above pass unchanged whether MaxDepth is 12 or 1000, or
+                // even with the cap removed outright - twenty levels cannot overflow a stack
+                // either way, so none of them can detect the guard's removal. The innermost
+                // RotateTransform sits at depth 20, past the cap, so its Angle must never reach
+                // the saved text; that is the guard actually biting.
+                StringAssert.DoesNotContain("Angle", saved,
+                    "the innermost RotateTransform is past the depth cap and must not be reached; " +
+                    "saved as: " + saved);
+
+                // Stronger form, tied to the cap's exact value rather than just "some truncation
+                // happened": twelve levels write their own element and recurse into the next;
+                // the thirteenth is created (CreatePropertyValue always emits an element) but its
+                // own TryWrite refuses before it can recurse into a fourteenth, so it is embedded
+                // as a bare, childless shell and the chain stops there - thirteen <TransformGroup>
+                // elements in total. "<TransformGroup" alone over-counts: it also matches the
+                // twelve "<TransformGroup.Children>" property elements, so the character right
+                // after the match is checked to exclude those.
+                int transformGroupCount = 0;
+                for (int index = saved.IndexOf("<TransformGroup", 0);
+                     index >= 0;
+                     index = saved.IndexOf("<TransformGroup", index + 1)) {
+                    char afterMatch = saved[index + "<TransformGroup".Length];
+                    if (afterMatch == '>' || afterMatch == ' ' || afterMatch == '/')
+                        transformGroupCount++;
+                }
+                Assert.That(transformGroupCount, Is.EqualTo(13), "saved as: " + saved);
             });
         }
 
