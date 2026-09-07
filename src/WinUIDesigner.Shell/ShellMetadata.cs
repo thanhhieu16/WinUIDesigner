@@ -24,6 +24,11 @@ namespace WinUIDesigner.Shell
     public static class ShellMetadata
     {
         static readonly object gate = new object();
+
+        // Note for tests: Metadata's tables are static and process-wide, and nothing here can
+        // unseed them. Once any test calls Register(), every later test in that process sees the
+        // seeding - so no test may assert an unseeded baseline (an empty Popular category, a
+        // missing default size), because whether it holds depends only on execution order.
         static bool registered;
 
         public static void Register()

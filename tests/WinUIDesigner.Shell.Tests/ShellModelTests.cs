@@ -214,15 +214,21 @@ namespace WinUIDesigner.Shell.Tests
                 doc.DesignContext.RootItem.Properties["Width"].SetValue(123.0);
                 Assert.That(doc.IsDirty, Is.True);
 
+                // One handler reading a variable, not two handlers racing. Registering a second
+                // handler with += and relying on it to overwrite the first's answer makes the
+                // test depend on multicast invocation order, which is an implementation detail of
+                // the delegate rather than anything ShellModel promises.
                 int asked = 0;
-                shell.AskSaveChanges += (s, e) => { asked++; e.Result = SaveChangesResult.Cancel; };
+                var answer = SaveChangesResult.Cancel;
+                shell.AskSaveChanges += (s, e) => { asked++; e.Result = answer; };
 
                 Assert.That(shell.Close(doc), Is.False);
                 Assert.That(asked, Is.EqualTo(1));
                 Assert.That(shell.Documents, Has.Count.EqualTo(1), "Cancel keeps the document open");
 
-                shell.AskSaveChanges += (s, e) => { e.Result = SaveChangesResult.Discard; };
+                answer = SaveChangesResult.Discard;
                 Assert.That(shell.Close(doc), Is.True);
+                Assert.That(asked, Is.EqualTo(2));
                 Assert.That(shell.Documents, Is.Empty);
             });
         }

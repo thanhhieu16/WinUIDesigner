@@ -43,7 +43,6 @@ namespace WinUIDesigner.Shell
 
             list.SelectionMode = ListViewSelectionMode.Single;
             list.ItemsSource = nodes;
-            list.ItemTemplate = null;
             list.DisplayMemberPath = "Name";
             list.SelectionChanged += OnSelectionChanged;
 
@@ -62,11 +61,33 @@ namespace WinUIDesigner.Shell
                 toolService.CurrentToolChanged += OnCurrentToolChanged;
         }
 
+        /// <summary>
+        /// Stops driving, and being driven by, the tool service handed to <see cref="Attach"/>.
+        /// </summary>
+        /// <remarks>
+        /// Clearing the selection is part of the contract, not tidying: an entry armed but never
+        /// placed stays selected, and the incoming document's tool service starts at its
+        /// PointerTool. Leaving the stale selection behind means clicking that same entry again
+        /// raises no SelectionChanged, so nothing re-arms and the toolbox is dead until the user
+        /// picks a different control - Decision 12's regression, reintroduced across the document
+        /// boundary. Cleared under the same suppression guard OnCurrentToolChanged uses, so the
+        /// clearing itself cannot arm a tool on the outgoing service.
+        /// </remarks>
         public void Detach()
         {
             if (toolService != null)
                 toolService.CurrentToolChanged -= OnCurrentToolChanged;
             toolService = null;
+
+            suppressSelectionChanged = true;
+            try
+            {
+                list.SelectedItem = null;
+            }
+            finally
+            {
+                suppressSelectionChanged = false;
+            }
         }
 
         /// <summary>The type the list currently has selected, or null. Test seam.</summary>

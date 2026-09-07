@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Windows.Foundation;
 using Windows.System;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.DesignModel.Services;
@@ -57,6 +58,12 @@ namespace WinUIDesigner.Shell
             ShellMetadata.Register();
 
             Title = ApplicationTitle;
+
+            // Before shell.New() below, and not merely for tidiness: BuildLayout builds the menu,
+            // which is what creates undoItem/redoItem/cutItem/copyItem/pasteItem/deleteItem.
+            // shell.New() raises CurrentDocument, which lands in WireCurrentDocument, which calls
+            // RefreshCommands, which dereferences every one of them. Moving this line after
+            // shell.New() is a NullReferenceException in the constructor.
             Content = BuildLayout();
 
             shell.ReportError += OnReportError;
@@ -162,7 +169,8 @@ namespace WinUIDesigner.Shell
             cutItem = Item("Cut", VirtualKey.X, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); }));
             copyItem = Item("Copy", VirtualKey.C, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); }));
             pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); }));
-            deleteItem = Item("Delete", VirtualKey.Delete, VirtualKeyModifiers.None, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanDelete(ctx)) svc.Delete(ctx); }));
+            deleteItem = Item("Delete", VirtualKey.Delete, VirtualKeyModifiers.None,
+                (s, e) => DeleteSelection(), OnDeleteAcceleratorInvoked);
 
             var edit = new MenuBarItem { Title = "Edit" };
             edit.Items.Add(undoItem);
@@ -179,15 +187,82 @@ namespace WinUIDesigner.Shell
             return bar;
         }
 
-        MenuFlyoutItem Item(string text, VirtualKey key, VirtualKeyModifiers modifiers, RoutedEventHandler onClick)
+        MenuFlyoutItem Item(string text, VirtualKey key, VirtualKeyModifiers modifiers, RoutedEventHandler onClick,
+            TypedEventHandler<KeyboardAccelerator, KeyboardAcceleratorInvokedEventArgs> onInvoked = null)
         {
             var item = new MenuFlyoutItem { Text = text };
             item.Click += onClick;
             if (key != VirtualKey.None)
             {
-                item.KeyboardAccelerators.Add(new KeyboardAccelerator { Key = key, Modifiers = modifiers });
+                var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
+                if (onInvoked != null)
+                    accelerator.Invoked += onInvoked;
+                item.KeyboardAccelerators.Add(accelerator);
             }
             return item;
+        }
+
+        /// <summary>
+        /// The Delete command's one implementation, reached from the menu item's Click and from
+        /// its accelerator. Refuses to act while a text-entry control has focus. Spec Decision 21.
+        /// </summary>
+        /// <remarks>
+        /// The guard lives here rather than only in the accelerator handler because an accelerator
+        /// this handler declines does NOT stop there: leaving KeyboardAcceleratorInvokedEventArgs.
+        /// Handled false (its default) lets the framework go on to activate the owning
+        /// MenuFlyoutItem's UIA Invoke pattern, which raises Click - so the guard has to sit on the
+        /// action both routes share. Clicking Delete in the menu is unaffected: opening the flyout
+        /// moves focus off the text box and onto the menu.
+        /// </remarks>
+        void DeleteSelection()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanDelete(ctx)) svc.Delete(ctx); });
+        }
+
+        /// <summary>
+        /// The Delete accelerator. Unlike the Ctrl-modified ones this is modifier-less and
+        /// window-scoped, so it competes with every text caret in the window.
+        /// </summary>
+        /// <remarks>
+        /// Handled is set only on the branch that acts, and that asymmetry is deliberate.
+        /// Documented XAML input order is: preview key events, then app accelerators, then the
+        /// KeyDown event - and "when the accelerator event is handled, the KeyDown event is also
+        /// marked as handled". So setting Handled on the text-entry branch would eat the very
+        /// keystroke the user meant for their text box. Declining instead lets Delete reach the
+        /// caret; the framework's fallback Invoke of the menu item is what
+        /// <see cref="DeleteSelection"/>'s own guard absorbs. On the acting branch Handled must be
+        /// set, or that same fallback Invoke would delete a second time into a second undo group.
+        /// </remarks>
+        void OnDeleteAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextEntryFocused())
+                return;
+
+            DeleteSelection();
+            args.Handled = true;
+        }
+
+        /// <summary>True when keyboard focus is inside a control that edits text.</summary>
+        /// <remarks>
+        /// The window hosts the outline filter (a TextBox) and a property grid whose editors are,
+        /// as of Phase 4f, a TextBox (TextBoxEditor), a NumberBox (NumberEditor), a ComboBox
+        /// (ComboBoxEditor) and a CheckBox (BoolEditor). Only the first two take typed text: a
+        /// NumberBox's focusable part is its own inner TextBox, so `is TextBox` already covers it
+        /// in practice and NumberBox is named as well only so a template change cannot silently
+        /// reopen the hole. The two non-text editors are left out on purpose - Delete on a
+        /// ComboBox or CheckBox is not a text edit, and swallowing it there would be the same
+        /// class of bug in reverse. RichEditBox appears nowhere in this window today and is
+        /// listed for the same defensive reason as NumberBox.
+        /// </remarks>
+        bool IsTextEntryFocused()
+        {
+            if (Content == null || Content.XamlRoot == null)
+                return false;
+
+            var focused = FocusManager.GetFocusedElement(Content.XamlRoot);
+            return focused is TextBox || focused is RichEditBox || focused is NumberBox;
         }
 
         void WithUndo(Action<UndoService> action)
@@ -295,6 +370,26 @@ namespace WinUIDesigner.Shell
             RefreshCommands();
         }
 
+        /// <summary>
+        /// Forces the current document dirty after an unhandled exception, so the close gate
+        /// prompts rather than discarding a half-mutated tree silently. Spec Decision 18.
+        /// </summary>
+        /// <remarks>
+        /// Called by App's UnhandledException handler. Safe with no document open. UpdateTitle is
+        /// called explicitly because nothing here subscribes to Document.PropertyChanged - the
+        /// title normally re-reads through OnUndoStackChanged, and this path does not touch the
+        /// undo stack.
+        /// </remarks>
+        public void MarkCurrentDocumentSuspect()
+        {
+            var doc = shell.CurrentDocument;
+            if (doc == null)
+                return;
+
+            doc.MarkSuspect();
+            UpdateTitle();
+        }
+
         void OnSelectionChanged(object sender, DesignItemCollectionEventArgs e)
         {
             if (propertyGrid != null && wiredSelection != null)
@@ -337,19 +432,63 @@ namespace WinUIDesigner.Shell
         /// document left in the collection would be unreachable - still dirty, still holding a
         /// live DesignSurface, and impossible to make current again. Fix per code review.
         /// </remarks>
-        async Task NewAsync()
+        /// <summary>
+        /// What <see cref="PrepareForCloseAsync"/> decided about an outgoing document.
+        /// </summary>
+        /// <remarks>
+        /// Two fields rather than a bare bool because "the user said Discard" and "the document's
+        /// dirty flag has been cleared" must stay separate facts. See PrepareForCloseAsync.
+        /// </remarks>
+        struct CloseDecision
+        {
+            /// <summary>False only when the user cancelled, or a requested save did not happen.</summary>
+            public bool Proceed;
+
+            /// <summary>
+            /// True when the user chose Discard and the caller therefore owes the document a
+            /// <see cref="Document.MarkSaved"/> - but only once its replacement exists.
+            /// </summary>
+            public bool ClearDirtyBeforeClose;
+        }
+
+        /// <summary>
+        /// Replaces the current document: ask about the outgoing one, build the replacement, and
+        /// only then discharge the answer and close the outgoing one.
+        /// </summary>
+        /// <remarks>
+        /// The ordering is the whole point, and New and Open share this method so it cannot drift
+        /// between them. Clearing the dirty flag before the replacement is known to exist loses
+        /// unsaved work outright: <paramref name="createReplacement"/> can fail (an unreadable
+        /// file, a template that will not load), both callers then keep the outgoing document,
+        /// and a document left in front of the user with IsDirty already false never trips
+        /// ShellModel.IsSomethingDirty again - so the close gate stays quiet and the edits go
+        /// over the side with no prompt. Fix per final review.
+        /// </remarks>
+        async Task ReplaceCurrentDocumentAsync(Func<bool> createReplacement)
         {
             var current = shell.CurrentDocument;
-            if (!await PrepareForCloseAsync(current))
+
+            var decision = await PrepareForCloseAsync(current);
+            if (!decision.Proceed)
                 return;
 
-            // Create first, close second: if New fails the shell reports it and keeps the
+            // Create first, close second: if this fails the shell reports it and keeps the
             // document the user already had, rather than leaving the app with none.
-            if (shell.New() == null)
+            if (!createReplacement())
                 return;
 
             if (current != null)
+            {
+                // Only here, with the replacement known to exist, is a Discard answer discharged.
+                if (decision.ClearDirtyBeforeClose)
+                    current.MarkSaved();
                 shell.Close(current);
+            }
+        }
+
+        async Task NewAsync()
+        {
+            await ReplaceCurrentDocumentAsync(() => shell.New() != null);
         }
 
         async Task OpenAsync()
@@ -364,47 +503,43 @@ namespace WinUIDesigner.Shell
             if (file == null)
                 return;
 
-            // Ask here rather than letting ShellModel.Close raise its synchronous AskSaveChanges:
-            // that event cannot await a dialog, so OnAskSaveChanges answers Cancel and Close
-            // silently fails. Fix per code review.
-            var current = shell.CurrentDocument;
-            if (!await PrepareForCloseAsync(current))
-                return;
-
-            // Open before closing, so a file that turns out to be unreadable leaves the current
-            // document in place instead of leaving the app with no document at all.
-            if (!shell.Open(file.Path))
-                return;
-
-            if (current != null)
-                shell.Close(current);
+            // The ask happens inside ReplaceCurrentDocumentAsync rather than by letting
+            // ShellModel.Close raise its synchronous AskSaveChanges: that event cannot await a
+            // dialog, so OnAskSaveChanges answers Cancel and Close silently fails.
+            await ReplaceCurrentDocumentAsync(() => shell.Open(file.Path));
         }
 
         /// <summary>
-        /// Asks about a dirty document and acts on the answer, leaving it in a state where a
-        /// later <see cref="ShellModel.Close"/> completes without raising AskSaveChanges.
-        /// Returns false when the user cancelled, or when a requested save did not go through.
+        /// Asks about a dirty document and acts on the answer, reporting what the caller must do
+        /// next. A Save is carried out here; a Discard is only decided here.
         /// </summary>
-        async Task<bool> PrepareForCloseAsync(Document doc)
+        /// <remarks>
+        /// This method does not mutate <paramref name="doc"/> on the Discard path, deliberately.
+        /// It used to call MarkSaved itself, which meant the dirty flag was gone before the
+        /// caller had a replacement document in hand - and a caller that then failed left the
+        /// user in their original document with unsaved edits nothing would ever prompt about
+        /// again. The flag is cleared by the caller, immediately before its own close. Fix per
+        /// final review.
+        /// </remarks>
+        async Task<CloseDecision> PrepareForCloseAsync(Document doc)
         {
             if (doc == null || !doc.IsDirty)
-                return true;
+                return new CloseDecision { Proceed = true, ClearDirtyBeforeClose = false };
 
             var answer = await AskSaveChangesAsync(doc);
             if (answer == SaveChangesResult.Cancel)
-                return false;
+                return new CloseDecision { Proceed = false, ClearDirtyBeforeClose = false };
 
             if (answer == SaveChangesResult.Save)
             {
                 await SaveAsync(doc, doc.FilePath == null);
                 // Still dirty means the save failed or the Save As picker was dismissed;
-                // abandon rather than discarding the edits the user asked to keep.
-                return !doc.IsDirty;
+                // abandon rather than discarding the edits the user asked to keep. A save that
+                // did go through has already cleared the flag, so the caller owes nothing.
+                return new CloseDecision { Proceed = !doc.IsDirty, ClearDirtyBeforeClose = false };
             }
 
-            // Discard: clear the flag so the close is silent.
-            doc.MarkSaved();
-            return true;
+            return new CloseDecision { Proceed = true, ClearDirtyBeforeClose = true };
         }
 
         async Task SaveAsync(Document doc, bool forceAsk)
@@ -448,11 +583,21 @@ namespace WinUIDesigner.Shell
             // Every document, not just CurrentDocument: OnAppWindowClosing gates on
             // shell.IsSomethingDirty, which scans all of them, so asking about only one could
             // close the window on another's unsaved edits. Fix per code review.
+            var discarded = new List<Document>();
             foreach (var doc in shell.Documents.ToList())
             {
-                if (!await PrepareForCloseAsync(doc))
+                var decision = await PrepareForCloseAsync(doc);
+                if (!decision.Proceed)
                     return;
+                if (decision.ClearDirtyBeforeClose)
+                    discarded.Add(doc);
             }
+
+            // Only after every document has answered. Clearing inside the loop would leave the
+            // documents already asked about looking clean if a later one answers Cancel - the
+            // same defect this ordering exists to prevent, one scope up.
+            foreach (var doc in discarded)
+                doc.MarkSaved();
 
             closingConfirmed = true;
             Close();

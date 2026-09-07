@@ -40,6 +40,17 @@ namespace WinUIDesigner.Shell
             e.Handled = true;
 
             var window = this.window;
+
+            // The third of Decision 18's three obligations, and the one that outlives the dialog:
+            // Handled=true keeps the process alive, so the design tree survives in whatever
+            // half-mutated state the failure left it. Forcing the document dirty is what makes
+            // MainWindow's close gate prompt about that tree instead of discarding it silently -
+            // IsDirty is otherwise raised only by a change that reached the undo stack, and a
+            // behaviour that threw mid-gesture never got that far. Done before the dialog, and
+            // ahead of the early return below, so it still happens when no dialog can be shown.
+            var main = window as MainWindow;
+            if (main != null)
+                main.MarkCurrentDocumentSuspect();
             // The dialog needs a live XamlRoot, and only one ContentDialog may be open at a time
             // - a second show throws, which from inside the unhandled-exception handler is the
             // worst possible place to throw. When it cannot be shown, trace it: returning mute

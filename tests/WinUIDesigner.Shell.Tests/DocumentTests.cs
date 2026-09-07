@@ -59,6 +59,15 @@ namespace WinUIDesigner.Shell.Tests
                     second = doc.Text;
                 }
 
+                // Checked before the fixed-point comparison below, and load-bearing: UpdateXaml
+                // returns early when DesignContext is null, leaving Text at the constructor's
+                // value. Without this assertion an UpdateXaml that did nothing at all would still
+                // pass, because `first` would just be the input constant and the second document
+                // would be built from that same string. The formatter guarantees the difference -
+                // CanvasWithButton is one unindented line and a round trip is never that.
+                Assert.That(first, Is.Not.EqualTo(CanvasWithButton).Using((System.Collections.Generic.IComparer<string>)System.StringComparer.Ordinal),
+                    "UpdateXaml must actually re-serialize the tree, or the fixed point below is vacuous");
+
                 // Ordinal string equality, deliberately: "re-parses into an equivalent tree" can
                 // be satisfied by a null check, this cannot. Save/load/save must be stable, or
                 // every save churns the file.
@@ -115,6 +124,26 @@ namespace WinUIDesigner.Shell.Tests
 
                     doc.MarkSaved();
                     Assert.That(doc.IsDirty, Is.False);
+                }
+            });
+        }
+
+        [Test]
+        public void MarkSuspectMakesACleanDocumentDirty()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    Assert.That(doc.IsDirty, Is.False, "a freshly loaded document is clean");
+
+                    // Spec Decision 18: after an unhandled exception the tree survives in whatever
+                    // state the failure left it, and only a forced dirty flag makes the close gate
+                    // prompt about it. Nothing else on Document can raise IsDirty from the outside.
+                    doc.MarkSuspect();
+
+                    Assert.That(doc.IsDirty, Is.True);
+                    Assert.That(doc.Title, Does.EndWith("*"), "a suspect document reads as unsaved");
                 }
             });
         }

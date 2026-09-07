@@ -108,6 +108,14 @@ namespace WinUIDesigner.Shell
             get { return loadErrors.AsReadOnly(); }
         }
 
+        /// <summary>The live design surface this document owns.</summary>
+        /// <remarks>
+        /// Callers must not call <c>LoadDesigner</c> on it directly. Every load installs a fresh
+        /// UndoService, and this class caches the one it subscribed to in order to unsubscribe
+        /// later; a load it did not drive strands that cached service on the old context, so the
+        /// document keeps listening to a dead undo stack and silently stops tracking dirty state
+        /// on the live one. Go through the constructor - or Dispose and build a new Document.
+        /// </remarks>
         public DesignSurface DesignSurface
         {
             get { return designSurface; }
@@ -150,6 +158,21 @@ namespace WinUIDesigner.Shell
             IsDirty = false;
         }
 
+        /// <summary>
+        /// Marks the document dirty-but-suspect after an unhandled exception. Spec Decision 18.
+        /// </summary>
+        /// <remarks>
+        /// The handler that catches an unhandled exception keeps the process alive, which means
+        /// the design tree survives in whatever half-mutated state the failure left it. Forcing
+        /// the dirty flag is what makes the close gate prompt instead of discarding silently:
+        /// without it a document mutated by a behaviour that then threw looks clean, because
+        /// IsDirty is otherwise only ever raised by a committed change reaching the undo stack.
+        /// </remarks>
+        public void MarkSuspect()
+        {
+            IsDirty = true;
+        }
+
         public void Dispose()
         {
             if (disposed)
@@ -175,8 +198,16 @@ namespace WinUIDesigner.Shell
             LoadFailed = false;
 
             var settings = new XamlLoadSettings();
-            foreach (var node in Toolbox.Instance.AssemblyNodes)
-                settings.DesignerAssemblies.Add(node.Assembly);
+
+            // Deliberately NOT registering the toolbox's assemblies as DesignerAssemblies, even
+            // though the reference implementation does. XamlDesignContext hands every entry to
+            // ExtensionManager.RegisterAssembly, whose de-dupe set lives on the ExtensionManager
+            // and so is per-DesignContext - meaning every document open would re-reflect over all
+            // ~2400 types of Microsoft.WinUI hunting for [ExtensionFor] attributes that assembly
+            // does not carry. Measured on the soak test: 85065.7 bytes per open/dispose cycle
+            // with the loop, 73285.6 without, for no behavioural difference at all. The design-
+            // time extensions all live in WinUIDesigner.Designer, which the engine registers
+            // itself. Do not restore this from the reference.
             settings.TypeFinder = ShellTypeFinder.Instance;
             settings.ReportErrors = errorService =>
             {

@@ -183,16 +183,6 @@ namespace WinUIDesigner.Shell
             return true;
         }
 
-        /// <summary>Closes every document, honouring a Cancel. Returns false if the user cancelled.</summary>
-        public bool PrepareExit()
-        {
-            var snapshot = new List<Document>(Documents);
-            foreach (var doc in snapshot)
-                if (!Close(doc))
-                    return false;
-            return true;
-        }
-
         bool WriteToDisk(Document doc, string path)
         {
             try
