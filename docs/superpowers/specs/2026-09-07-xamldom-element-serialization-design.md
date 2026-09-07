@@ -380,6 +380,22 @@ project's `.exe` as CLAUDE.md requires. Every test runs inside `WinUITestHost.Ru
 - `SkewThumbExtension` still does not write its angles through the model the way
   `ModelTools.ApplyTransform` writes `Angle`. This phase makes that unnecessary for saving; it
   remains a difference between the two code paths.
+- `XamlComponentService.RegisterComponentForDesigner` registers only the object handed to it,
+  while `XamlModelProperty.SetValue`'s fallback registers recursively
+  (`RegisterXamlComponentRecursive`, which walks both `Properties` and `CollectionElements`).
+  Phase C gave that asymmetry teeth: `CreateObject` now populates a listed type's child
+  elements, and children created that way get no `DesignItem`. Measured after the fact and
+  found **not reachable from any production path** - the consumer of such children,
+  `ModelTools.ApplyTransform`'s `oldTransform is TransformGroup` branch (`ModelTools.cs:158-161`),
+  is now pinned by `ModelToolsTests.AThirdTransformApplicationReplacesTheRotateAlreadyInTheGroup`
+  and `.ARotateAppliedToAGroupLoadedFromXamlReplacesTheExistingRotate`, both green: the wrap path
+  registers each child as it adds it, and the parse path registers the whole tree recursively.
+  It stays reachable only for a consumer that calls `RegisterComponentForDesigner` with an
+  already-populated listed object and then sets that `DesignItem` as a property value; nothing
+  in this repo does. Were it reached, `CollectionElements.Remove(null)` is a silent no-op
+  (`CheckItemNoException` is a bare `item as XamlDesignItem`, so `IndexOf` returns -1), giving an
+  accumulated duplicate rather than a throw; a null `tgItem` would be a `NullReferenceException`.
+  No guard was added - it would be untestable code guarding an unreachable state.
 
 ## Out of scope
 

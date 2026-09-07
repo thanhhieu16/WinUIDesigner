@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Linq;
 using System.Xml;
 using NUnit.Framework;
@@ -29,6 +29,16 @@ namespace WinUIDesigner.Designer.Tests
             "<Button x:Name=\"Target\" />" +
             "</Grid>";
 
+        const string GroupTransformXaml =
+            "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
+            "xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">" +
+            "<Button x:Name=\"Target\" Width=\"40\" Height=\"20\">" +
+            "<Button.RenderTransform><TransformGroup>" +
+            "<SkewTransform AngleX=\"10\" /><RotateTransform Angle=\"20\" />" +
+            "</TransformGroup></Button.RenderTransform>" +
+            "</Button>" +
+            "</Grid>";
+
         // Width-only Grid (no Height) - empirically probed (see
         // AGetDefaultSizeOverrideAppliesIndependentlyPerAxis) to measure DesiredSize (40, 0): the
         // explicit Width comes out above the method's >5 threshold while the unset Height comes
@@ -42,7 +52,7 @@ namespace WinUIDesigner.Designer.Tests
             "<Grid x:Name=\"Target\" Width=\"40\" />" +
             "</Grid>";
 
-        static (XamlDesignContext context, Microsoft.UI.Xaml.Controls.Button button, WinUIDesigner.DesignModel.DesignItem buttonItem) Load(Microsoft.UI.Xaml.Window window)
+        static (XamlDesignContext context, Microsoft.UI.Xaml.Controls.Button button, WinUIDesigner.DesignModel.DesignItem buttonItem) Load(Microsoft.UI.Xaml.Window window, string xaml = null)
         {
             var settings = new XamlLoadSettings();
             settings.DesignerAssemblies.Add(typeof(DefaultPlacementBehavior).Assembly);
@@ -58,7 +68,7 @@ namespace WinUIDesigner.Designer.Tests
             // no-ops for an element with no registered adorners (see AdornerLayer.GetExistingAdornerInfo).
             settings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.ISelectionService), new WinUIDesigner.Designer.Services.DefaultSelectionService()));
             settings.CustomServiceRegisterFunctions.Add(ctx => ctx.Services.AddService(typeof(WinUIDesigner.DesignModel.IDesignPanel), new WinUIDesigner.Designer.DesignPanel()));
-            using var reader = XmlReader.Create(new StringReader(ButtonXaml));
+            using var reader = XmlReader.Create(new StringReader(xaml ?? ButtonXaml));
             var context = new XamlDesignContext(reader, settings);
             window.Content = (Microsoft.UI.Xaml.UIElement)context.RootItem.View;
             ((Microsoft.UI.Xaml.FrameworkElement)window.Content).UpdateLayout();
@@ -240,5 +250,73 @@ namespace WinUIDesigner.Designer.Tests
                 Assert.AreEqual(20, reloadedRotate.Angle, 0.5, "saved as: " + saved);
             });
         }
+
+        // A third application, when the RenderTransform is already a TransformGroup that already
+        // holds a RotateTransform, is the one branch of ApplyTransform no test reached: it takes
+        // the group's existing rotate back out through
+        // Services.Component.GetDesignItem(existingRotate) before adding the new one. Nothing
+        // guarantees that lookup finds a DesignItem - GetDesignItem returns null for any instance
+        // that was never registered - so this pins the sequence end to end.
+        [Test]
+        public void AThirdTransformApplicationReplacesTheRotateAlreadyInTheGroup()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (context, button, buttonItem) = Load(window);
+                WinUIDesigner.Designer.ModelTools.ApplyTransform(buttonItem, new Microsoft.UI.Xaml.Media.SkewTransform { AngleX = 10 }, false);
+                WinUIDesigner.Designer.ModelTools.ApplyTransform(buttonItem, new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 20 }, false);
+
+                Assert.DoesNotThrow(() =>
+                    WinUIDesigner.Designer.ModelTools.ApplyTransform(buttonItem, new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 35 }, false));
+
+                var group = button.RenderTransform as Microsoft.UI.Xaml.Media.TransformGroup;
+                Assert.IsNotNull(group, "the TransformGroup should still be the RenderTransform");
+                Assert.AreEqual(1, group.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().Count(),
+                    "the old rotate should have been replaced, not accumulated");
+                Assert.AreEqual(35, group.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().First().Angle, 0.5);
+
+                var text = new StringWriter();
+                var xmlSettings = new XmlWriterSettings();
+                xmlSettings.OmitXmlDeclaration = true;
+                using (var writer = XmlWriter.Create(text, xmlSettings))
+                    context.Save(writer);
+                var saved = text.ToString();
+
+                var reloaded = WinUIDesigner.XamlDom.XamlParser.Parse(new StringReader(saved));
+                var reloadedButton = (Microsoft.UI.Xaml.Controls.Button)
+                    ((Microsoft.UI.Xaml.Controls.Grid)reloaded.RootInstance).Children[0];
+                var reloadedGroup = reloadedButton.RenderTransform as Microsoft.UI.Xaml.Media.TransformGroup;
+                Assert.IsNotNull(reloadedGroup, "saved as: " + saved);
+                var rotates = reloadedGroup.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().ToList();
+                Assert.AreEqual(1, rotates.Count, "saved as: " + saved);
+                Assert.AreEqual(35, rotates[0].Angle, 0.5, "saved as: " + saved);
+            });
+        }
+
+
+        // The same branch reached the other way: a document that already carries a
+        // <TransformGroup> with a <RotateTransform> in it, opened from disk rather than built by
+        // ApplyTransform. This is the path a user actually meets - the group's children come from
+        // the parse, not from RegisterComponentForDesigner - so it is the one that decides whether
+        // GetDesignItem(existingRotate) can be null in practice.
+        [Test]
+        public void ARotateAppliedToAGroupLoadedFromXamlReplacesTheExistingRotate()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var (context, button, buttonItem) = Load(window, GroupTransformXaml);
+
+                Assert.DoesNotThrow(() =>
+                    WinUIDesigner.Designer.ModelTools.ApplyTransform(buttonItem, new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 35 }, false));
+
+                var group = button.RenderTransform as Microsoft.UI.Xaml.Media.TransformGroup;
+                Assert.IsNotNull(group, "the parsed TransformGroup should still be the RenderTransform");
+                var rotates = group.Children.OfType<Microsoft.UI.Xaml.Media.RotateTransform>().ToList();
+                Assert.AreEqual(1, rotates.Count,
+                    "the parsed rotate should have been replaced, not accumulated alongside the new one");
+                Assert.AreEqual(35, rotates[0].Angle, 0.5);
+                Assert.AreEqual(1, group.Children.OfType<Microsoft.UI.Xaml.Media.SkewTransform>().Count(),
+                    "the sibling skew should be untouched");
+            });
+        }
+
     }
 }
