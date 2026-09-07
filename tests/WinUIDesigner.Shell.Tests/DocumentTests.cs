@@ -127,9 +127,19 @@ namespace WinUIDesigner.Shell.Tests
                 var doc = new Document(null, CanvasWithButton);
                 Assert.That(doc.DesignSurface.DesignContext, Is.Not.Null);
 
+                // Captured before Dispose so it survives to prove the handler was detached: a
+                // leaked Document.OnUndoStackChanged subscription would otherwise mark a disposed
+                // document dirty in response to activity it should no longer be watching, and the
+                // soak test would end up blaming the engine for a leak that lives here instead.
+                var undoService = doc.UndoService;
+
                 doc.Dispose();
                 Assert.That(doc.DesignSurface.DesignContext, Is.Null);
                 Assert.DoesNotThrow(() => doc.Dispose());
+
+                undoService.Clear();
+                Assert.That(doc.IsDirty, Is.False,
+                    "Dispose must have detached UndoStackChanged, or this raise would mark the disposed document dirty");
             });
         }
 
