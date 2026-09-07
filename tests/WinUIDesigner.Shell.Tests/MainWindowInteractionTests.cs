@@ -442,70 +442,110 @@ namespace WinUIDesigner.Shell.Tests
         // ---- tabs -----------------------------------------------------------
 
         /// <summary>
-        /// Amendment A: asserts relative to the count found on entry, not an absolute number, and
-        /// restores the document set and current document in a finally - this fixture builds one
-        /// MainWindow in OneTimeSetUp and shares it across every test in the fixture, run in an
-        /// order NUnit does not guarantee.
+        /// Runs against its own freshly constructed <see cref="MainWindow"/> rather than the
+        /// fixture's shared one, following the fix <c>CloseAllAsksEveryDocumentBeforeClosingAny</c>
+        /// proved (see task-6-report.md's fix report and this task's own fix report): the shared
+        /// window's original document has been through many real layout passes by the time an
+        /// arbitrary test runs, and a probe there found that briefly displacing it from
+        /// <c>contentHost</c> - which opening a second document here does - measurably destabilizes
+        /// the host, while the identical churn against a freshly built <see cref="MainWindow"/>'s
+        /// own barely-laid-out original did not. <c>fresh</c> is abandoned once the shared host's
+        /// content is restored: nothing else in the fixture ever looks at it again, so there is
+        /// nothing here to close or restore beyond the shared <c>host.Content</c> itself.
         /// </summary>
         [Test]
         public void OpeningASecondDocumentLeavesBothOpenWithATabEach()
         {
-            WithShell(() =>
+            WinUITestHost.RunOnWindow(host =>
             {
-                var shell = window.ShellForTest;
-                var first = shell.CurrentDocument;
-                Assert.That(first, Is.Not.Null);
-                var before = shell.Documents.Count;
-
-                var second = shell.New();
+                var fresh = new MainWindow();
+                var freshContent = (FrameworkElement)fresh.Content;
+                fresh.Content = null;
+                host.Content = freshContent;
                 try
                 {
+                    SeedingMissingThemeKeys(() => freshContent.UpdateLayout());
+
+                    var shell = fresh.ShellForTest;
+                    var first = shell.CurrentDocument;
+                    Assert.That(first, Is.Not.Null);
+                    var before = shell.Documents.Count;
+
+                    var second = shell.New();
+
                     Assert.That(shell.Documents.Count, Is.EqualTo(before + 1),
                         "New must add, not replace - the tab strip is what makes both reachable");
                     Assert.That(shell.CurrentDocument, Is.SameAs(second));
-                    Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before + 1));
-                    Assert.That(window.ViewFor(first), Is.Not.Null);
-                    Assert.That(window.ViewFor(second), Is.Not.Null);
-                    Assert.That(window.ViewFor(first), Is.Not.SameAs(window.ViewFor(second)));
+                    Assert.That(fresh.TabStripForTest.TabItems.Count, Is.EqualTo(before + 1));
+                    Assert.That(fresh.ViewFor(first), Is.Not.Null);
+                    Assert.That(fresh.ViewFor(second), Is.Not.Null);
+                    Assert.That(fresh.ViewFor(first), Is.Not.SameAs(fresh.ViewFor(second)));
                 }
                 finally
                 {
-                    second.MarkSaved();
-                    shell.Close(second);
-                    window.ActivateDocument(first);
+                    host.Content = shellContent;
                 }
             });
+
+            // See CloseAllAsksEveryDocumentBeforeClosingAny's remarks: forcing collection of the
+            // abandoned fresh window's whole visual tree here, while nothing else runs on the
+            // dispatcher, measurably improved full-suite stability over repeated runs.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
-        /// <summary>Amendment A: restores the document set and current document in a finally.</summary>
+        /// <summary>
+        /// Runs against its own freshly constructed <see cref="MainWindow"/>, for the same reason
+        /// as <see cref="OpeningASecondDocumentLeavesBothOpenWithATabEach"/> - activating between
+        /// two documents displaces the current one from <c>contentHost</c> exactly the way that
+        /// proved unsafe against the shared fixture window. <c>fresh</c> is abandoned afterward;
+        /// nothing else in the fixture references it.
+        /// </summary>
         [Test]
         public void ActivatingADocumentMakesItCurrentAndShowsItsView()
         {
-            WithShell(() =>
+            WinUITestHost.RunOnWindow(host =>
             {
-                var shell = window.ShellForTest;
-                var first = shell.CurrentDocument;
-                var second = shell.New();
-
+                var fresh = new MainWindow();
+                var freshContent = (FrameworkElement)fresh.Content;
+                fresh.Content = null;
+                host.Content = freshContent;
                 try
                 {
-                    window.ActivateDocument(first);
+                    SeedingMissingThemeKeys(() => freshContent.UpdateLayout());
+
+                    var shell = fresh.ShellForTest;
+                    var first = shell.CurrentDocument;
+                    var second = shell.New();
+
+                    fresh.ActivateDocument(first);
 
                     Assert.That(shell.CurrentDocument, Is.SameAs(first));
-                    Assert.That(window.ContentHostForTest.Content, Is.SameAs(window.ViewFor(first)));
+                    Assert.That(fresh.ContentHostForTest.Content, Is.SameAs(fresh.ViewFor(first)));
 
-                    window.ActivateDocument(second);
-                    Assert.That(window.ContentHostForTest.Content, Is.SameAs(window.ViewFor(second)));
+                    fresh.ActivateDocument(second);
+                    Assert.That(fresh.ContentHostForTest.Content, Is.SameAs(fresh.ViewFor(second)));
                 }
                 finally
                 {
-                    second.MarkSaved();
-                    shell.Close(second);
-                    window.ActivateDocument(first);
+                    host.Content = shellContent;
                 }
             });
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
+        /// <summary>
+        /// Left running against the fixture's shared <see cref="MainWindow"/>, unlike its three
+        /// siblings above and below: this test neither creates nor closes any document - a
+        /// cancelled decision means <see cref="MainWindow.RequestCloseAsync"/> returns before ever
+        /// calling <c>shell.Close</c>, so nothing is disposed and no document is ever displaced
+        /// from <c>contentHost</c>. Neither of the two conditions the fresh-window fix exists for
+        /// applies here, so there is nothing for that fix to protect against.
+        /// </summary>
         [Test]
         public void ACancelledTabCloseLeavesTheTabAndTheDocumentInPlace()
         {
@@ -524,28 +564,53 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// Runs against its own freshly constructed <see cref="MainWindow"/>, for the same reason
+        /// as its two siblings above: creating <c>doomed</c> briefly displaces the fresh window's
+        /// own original document from <c>contentHost</c>, and closing <c>doomed</c> disposes it -
+        /// both of which are exactly the shape task-6-report.md's fix report measured stable
+        /// against a freshly built <see cref="MainWindow"/>'s barely-laid-out original, and
+        /// measured unsafe against the shared fixture window's heavily-relaid-out one.
+        /// </summary>
         [Test]
         public void ADiscardedTabCloseRemovesBothTheTabAndTheDocument()
         {
-            WithShell(() =>
+            WinUITestHost.RunOnWindow(host =>
             {
-                var shell = window.ShellForTest;
-                var doomed = shell.New();
-                var before = shell.Documents.Count;
+                var fresh = new MainWindow();
+                var freshContent = (FrameworkElement)fresh.Content;
+                fresh.Content = null;
+                host.Content = freshContent;
+                try
+                {
+                    SeedingMissingThemeKeys(() => freshContent.UpdateLayout());
 
-                window.RequestCloseAsync(doomed,
-                    d => Task.FromResult(new MainWindow.CloseDecision
-                    {
-                        Proceed = true,
-                        ClearDirtyBeforeClose = true
-                    })).Wait();
+                    var shell = fresh.ShellForTest;
+                    var doomed = shell.New();
+                    var before = shell.Documents.Count;
 
-                Assert.That(shell.Documents.Count, Is.EqualTo(before - 1));
-                Assert.That(shell.Documents.Contains(doomed), Is.False);
-                Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before - 1));
-                Assert.That(window.ViewFor(doomed), Is.Null,
-                    "the view must be detached and forgotten with its document");
+                    fresh.RequestCloseAsync(doomed,
+                        d => Task.FromResult(new MainWindow.CloseDecision
+                        {
+                            Proceed = true,
+                            ClearDirtyBeforeClose = true
+                        })).Wait();
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(before - 1));
+                    Assert.That(shell.Documents.Contains(doomed), Is.False);
+                    Assert.That(fresh.TabStripForTest.TabItems.Count, Is.EqualTo(before - 1));
+                    Assert.That(fresh.ViewFor(doomed), Is.Null,
+                        "the view must be detached and forgotten with its document");
+                }
+                finally
+                {
+                    host.Content = shellContent;
+                }
             });
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
         // ---- Close All / Save All -------------------------------------------
