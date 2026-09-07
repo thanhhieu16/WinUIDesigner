@@ -150,6 +150,19 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// The document is dirtied first so the Discard decision has something to discharge.
+        /// </summary>
+        /// <remarks>
+        /// <c>shell.New()</c> produces a clean document, and against a clean one
+        /// <c>RequestCloseAsync</c>'s <c>MarkSaved()</c> is a no-op: the whole guard could be
+        /// deleted and this test would still pass. Dirty, deleting it means
+        /// <c>ShellModel.Close</c> sees <c>IsDirty</c>, raises <c>AskSaveChanges</c>,
+        /// <c>OnAskSaveChanges</c> answers Cancel, and <c>Close</c> returns false - so the user
+        /// who clicked the tab's x and chose Discard gets a tab that does not close and no
+        /// explanation. Verified by mutation: with <c>doc.MarkSaved()</c> removed from
+        /// <c>RequestCloseAsync</c> this test fails on the document count.
+        /// </remarks>
         [Test]
         public void ADiscardedTabCloseRemovesBothTheTabAndTheDocument()
         {
@@ -158,6 +171,8 @@ namespace WinUIDesigner.Shell.Tests
                 var window = NewWindow();
                 var shell = window.ShellForTest;
                 var doomed = shell.New();
+                doomed.MarkSuspect();
+                Assert.That(doomed.IsDirty, Is.True, "a Discard decision needs something to discard");
                 var before = shell.Documents.Count;
 
                 Finished(window.RequestCloseAsync(doomed,
@@ -171,8 +186,80 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// DoD 1's "including for the document that is not current": <c>MainWindow</c> subscribes
+        /// to every document's <c>PropertyChanged</c> on add, not only the current one's, so a
+        /// background document's dirty marker reaches its own tab header.
+        /// </summary>
+        /// <remarks>
+        /// Reads <c>TabViewItem.Header</c>, which is an ordinary property assignment - it needs no
+        /// applied template and so survives this fixture's unhosted window. What the strip does
+        /// with that header is the part no test here can see.
+        /// </remarks>
+        [Test]
+        public void ABackgroundDocumentsTitleChangeUpdatesItsOwnTabHeader()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+                var background = shell.CurrentDocument;
+                var current = shell.New();
+                Assert.That(shell.CurrentDocument, Is.SameAs(current),
+                    "the second document is current, so the first is a background one");
+
+                var backgroundTab = window.TabFor(background);
+                var currentTab = window.TabFor(current);
+                Assert.That(backgroundTab, Is.Not.Null);
+                Assert.That(currentTab, Is.Not.Null);
+
+                var cleanHeader = (string)backgroundTab.Header;
+                var currentHeader = (string)currentTab.Header;
+
+                background.MarkSuspect();
+                Assert.That((string)backgroundTab.Header, Is.EqualTo(background.Title));
+                Assert.That((string)backgroundTab.Header, Is.EqualTo(cleanHeader + "*"),
+                    "the dirty marker has to reach the tab of a document nobody is looking at");
+                Assert.That((string)currentTab.Header, Is.EqualTo(currentHeader),
+                    "and only that tab");
+
+                background.MarkSaved();
+                Assert.That((string)backgroundTab.Header, Is.EqualTo(cleanHeader));
+            });
+        }
+
+        /// <summary>DoD 4: Close, Close All and Save All are disabled with no document open.</summary>
+        [Test]
+        public void CloseCloseAllAndSaveAllAreDisabledWithNoDocumentOpen()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+
+                Assert.That(window.CloseItemForTest.IsEnabled, Is.True, "a document is open");
+                Assert.That(window.CloseAllItemForTest.IsEnabled, Is.True);
+                Assert.That(window.SaveAllItemForTest.IsEnabled, Is.True);
+
+                foreach (var doc in shell.Documents.ToList())
+                    Assert.That(shell.Close(doc), Is.True, "a clean document closes without asking");
+
+                Assert.That(shell.CurrentDocument, Is.Null);
+                Assert.That(window.CloseItemForTest.IsEnabled, Is.False);
+                Assert.That(window.CloseAllItemForTest.IsEnabled, Is.False);
+                Assert.That(window.SaveAllItemForTest.IsEnabled, Is.False);
+            });
+        }
+
         // ---- Close All / Save All -------------------------------------------
 
+        /// <summary>
+        /// Every document is dirtied first, for the reason
+        /// <see cref="ADiscardedTabCloseRemovesBothTheTabAndTheDocument"/> gives: against clean
+        /// documents <c>CloseAllAsync</c>'s discharge loop is a no-op and the guard it exists for
+        /// is deletable. Verified by mutation: with <c>pair.Key.MarkSaved()</c> removed, the final
+        /// "Documents is empty" assertion fails.
+        /// </summary>
         [Test]
         public void CloseAllAsksEveryDocumentBeforeClosingAny()
         {
@@ -184,6 +271,9 @@ namespace WinUIDesigner.Shell.Tests
                 shell.New();
                 var all = shell.Documents.ToList();
                 Assert.That(all.Count, Is.GreaterThanOrEqualTo(3));
+
+                foreach (var d in all)
+                    d.MarkSuspect();
 
                 var asked = new List<Document>();
                 var closedWhileAsking = 0;

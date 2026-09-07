@@ -484,6 +484,22 @@ namespace WinUIDesigner.Shell
         /// <summary>Test seam: the error strip.</summary>
         internal ErrorListView ErrorsForTest { get { return errors; } }
 
+        /// <summary>Test seam: File &gt; Close.</summary>
+        internal MenuFlyoutItem CloseItemForTest { get { return closeItem; } }
+
+        /// <summary>Test seam: File &gt; Close All.</summary>
+        internal MenuFlyoutItem CloseAllItemForTest { get { return closeAllItem; } }
+
+        /// <summary>Test seam: File &gt; Save All.</summary>
+        internal MenuFlyoutItem SaveAllItemForTest { get { return saveAllItem; } }
+
+        /// <summary>The tab built for <paramref name="doc"/>, or null once it has closed.</summary>
+        internal TabViewItem TabFor(Document doc)
+        {
+            TabViewItem tab;
+            return doc != null && tabs.TryGetValue(doc, out tab) ? tab : null;
+        }
+
         void OnJumpToErrorRequested(object sender, WinUIDesigner.DesignModel.Xaml.XamlError error)
         {
             var view = ViewFor(shell.CurrentDocument);
