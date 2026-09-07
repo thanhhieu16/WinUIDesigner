@@ -271,19 +271,56 @@ Cancel at any prompt abandons the whole operation with nothing closed.
 
 *Cost if wrong:* a Cancel halfway through leaves half the documents closed and no way back.
 
-### 10. `Document.Mode` has an equality guard
+### 10. `Document.Mode` has an equality guard, and re-serializes only a document that has moved on
 
-The reference's setter is unconditional; this one returns early when the value is unchanged.
-The reference can afford it because nothing re-asserts the current mode. This design does:
-`JumpToError` sets `Mode = Xaml` on a document that may already be in XAML mode with
-unsaved typing in it, and an unguarded setter would run `UpdateXaml()` and overwrite that
-typing with a serialization of the pre-edit tree — then select a line and column that refer
-to text no longer present.
+The reference's setter is unconditional on both counts; this one is conditional on both.
 
+First, it returns early when the value is unchanged. The reference can afford an unguarded
+setter because nothing re-asserts the current mode. This design does: `JumpToError` sets
+`Mode = Xaml` on a document that may already be in XAML mode with unsaved typing in it, and
+an unguarded setter would run `UpdateXaml()` and overwrite that typing with a serialization
+of the pre-edit tree — then select a line and column that refer to text no longer present.
 The same guard is what makes Decision 20's mode-button re-sync safe.
 
+Second, entering XAML mode runs `UpdateXaml()` only when the document has moved on from
+what `UpdateDesign()` last parsed:
+
+```csharp
+if (mode == DocumentMode.Design)
+    UpdateDesign();
+else if (IsDirty || text != parsedText)
+    UpdateXaml();
+```
+
+The equality guard above is not enough on its own, because the damaging case is a *first*
+switch into XAML mode. `XamlParser.ReportException` reports and continues whenever an error
+sink is present, so a document with an unknown property or a bad conversion parses
+**successfully** — `LoadFailed == false`, `LoadErrors.Count > 0` — and `ShellModel.Open`
+adds exactly such a document. That is the only way the error strip fills on a freshly
+opened file, and those errors' `Line`/`Column` address the file's own text. An
+unconditional `UpdateXaml()` re-indents and re-sorts that text before Decision 20's
+selection can be made in it, so Decision 20's staleness check refuses — permanently, for
+the entire class of document the strip exists to serve. Only the `LoadFailed == true` class,
+reachable solely by editing XAML inside the app, could jump at all.
+
+Both halves of the condition are needed. `text != parsedText` catches a document whose text
+was edited since the last parse. `IsDirty` catches a **surface** edit, which moves the tree
+without touching `text`, so `text == parsedText` would otherwise wrongly skip the
+re-serialization and show stale XAML. `text` is normalised by `Text`'s setter and
+`parsedText` is stored normalised (Decision 14), so the comparison is apples to apples.
+
+A save from Design mode (`WriteToDisk` calls `UpdateXaml()`, then `MarkSaved()`) leaves
+`text` at the serialization and `parsedText` at the older parse, so the next switch to XAML
+re-serializes once more. That is correct rather than merely harmless: the buffer genuinely
+is no longer what was parsed, and the round trip is a fixed point, so the second pass
+changes nothing.
+
+*Bonus:* a freshly opened, unedited file now shows its **actual text** in the XAML view —
+comments, formatting and attribute order intact — instead of a re-serialization.
+
 *Cost if wrong:* silent loss of whatever the user typed, at the exact moment they asked to
-be shown an error.
+be shown an error; or, with an unconditional `UpdateXaml()`, an error strip whose rows
+cannot be jumped to at all.
 
 ### 11. `Design` is `DocumentMode`'s zero value
 
@@ -535,12 +572,15 @@ is.
   worth pinning, it needs its own count of the objects a `DocumentView` builds — otherwise
   the honest position is that this is unmeasured.
 - **Undo history does not survive a mode round trip.** Decision 17.
-- **Entering XAML mode replaces the file's text with a re-serialization.** `UpdateXaml()`
-  round-trips through `XamlXmlWriter` and `XamlFormatter`, which re-indents, re-sorts
-  attributes, and drops anything the serializer does not model — comments included. Merely
-  looking at a hand-authored file's XAML therefore changes it in memory, and the next save
-  writes the reformatted version. True today through `WriteToDisk`; this phase is the first
-  time a user can see it happen.
+- **Once the document has been edited, entering XAML mode replaces its text with a
+  re-serialization.** `UpdateXaml()` round-trips through `XamlXmlWriter` and
+  `XamlFormatter`, which re-indents, re-sorts attributes, and drops anything the serializer
+  does not model — comments included. Decision 10 narrows this to a document that has moved
+  on from what was parsed: a freshly opened, untouched file keeps its own text byte for
+  byte, so merely *looking* at a hand-authored file's XAML no longer changes it. The first
+  surface edit, or the first save from Design mode, still costs the file its formatting and
+  its comments, and the next save writes the reformatted version. True today through
+  `WriteToDisk`; this phase is the first time a user can see it happen.
 - **Errors reported after the load do not reach the pane.** Decision 19.
 - **Whether the editor needs a delay before `JumpToError`'s selection lands is unmeasured.**
   Decision 20 requires the plan to measure it.
@@ -562,12 +602,14 @@ is.
   `FontFamily` accepts any string without validating it, so if none of the three resolves the
   editor falls back to the proportional UI font in silence and Decision 13's "monospace"
   quietly does not hold. One look during the manual walkthrough settles it.
-- **`JumpToError`'s own body is only half covered.** The refusal branch — selecting nothing
-  once the buffer is no longer the text the coordinates were reported against — has a test,
-  as do the `OffsetOf` and `TokenLength` helpers. The path that matters to the user, a mode
-  switch followed by a selection landing in a live editor, is proven by no automated test:
-  a `TextBox` cannot be root content in this test process, so nothing here lays one out.
-  Manual walkthrough item, with the two — refusal and selection — worth checking together.
+- **`JumpToError` is unproven in a *laid-out* editor.** Both branches of its body now have
+  tests, as do the `OffsetOf` and `TokenLength` helpers: the refusal branch (selecting
+  nothing once the buffer is no longer the text the coordinates were reported against) and
+  the landing branch (a recoverable-error document whose reported line and column select the
+  offending token in the editor). Neither test lays the editor out, because a `TextBox`
+  cannot be root content in this test process. Whether the selection is *visible* — scrolled
+  into view, highlighted, focused — is therefore still a manual walkthrough item, together
+  with Decision 20's unmeasured question of whether the editor needs a delay first.
 
 ## Out of scope
 

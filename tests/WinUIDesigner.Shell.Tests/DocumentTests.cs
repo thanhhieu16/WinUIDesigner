@@ -21,6 +21,22 @@ namespace WinUIDesigner.Shell.Tests
             "<Polyline x:Name=\"Line\" Points=\"10,10 40,25 70,5\" Stroke=\"Red\" StrokeThickness=\"2\" />" +
             "</Canvas>";
 
+        /// <summary>
+        /// Parses <em>successfully</em> and still reports an error: XamlParser.ReportException
+        /// reports and continues whenever an error sink is present, so a bad value conversion
+        /// leaves LoadFailed false with LoadErrors non-empty. Measured on this exact string:
+        /// one error, "Cannot set Width: nonsense is not a valid value for Double.
+        /// (Parameter 'value')", at line 3 column 23 - which is the W of Width on line 3.
+        /// Three lines and real indentation on purpose: a re-serialization of this tree is a
+        /// different string (attributes re-sorted, Content before Width), so a test that the
+        /// text survives the mode switch cannot pass by accident.
+        /// </summary>
+        const string RecoverableErrorXaml =
+            "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\r\n" +
+            "        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\r\n" +
+            "  <Button x:Name=\"Ok\" Width=\"nonsense\" Content=\"Ok\" />\r\n" +
+            "</Canvas>";
+
         const string MalformedXaml =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
             "<Button Width=\"75\"";
@@ -253,6 +269,68 @@ namespace WinUIDesigner.Shell.Tests
                     var button = canvas.ContentProperty.CollectionElements[0];
                     button.Properties["Width"].SetValue(120.0);
                     Assert.That(doc.IsDirty, Is.True, "a committed change marks the document dirty");
+                }
+            });
+        }
+
+        /// <summary>
+        /// The mode setter re-serializes only a document that has moved on from what was parsed.
+        /// </summary>
+        /// <remarks>
+        /// The untouched half is the bug fix. A document that parses with recoverable errors is
+        /// the only kind that fills the error strip on a freshly opened file, and its errors'
+        /// Line/Column address the file's own text; an unconditional UpdateXaml() on the way into
+        /// XAML mode destroyed exactly that text, so DocumentView.JumpToError's staleness guard
+        /// refused every jump the strip could offer. The dirty half is the other side of the same
+        /// condition: a surface edit moves the tree without touching Text, so IsDirty is the only
+        /// thing that can tell the setter to serialize it. Spec Decision 10.
+        /// </remarks>
+        [Test]
+        public void EnteringXamlModeReSerializesOnlyADocumentThatHasMovedOnFromWhatWasParsed()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, RecoverableErrorXaml))
+                {
+                    Assert.That(doc.LoadFailed, Is.False,
+                        "a bad conversion is reported and parsing continues - this document loads");
+                    Assert.That(doc.LoadErrors, Is.Not.Empty,
+                        "and it is the only class of document that fills the error strip on open");
+                    Assert.That(doc.IsDirty, Is.False);
+
+                    doc.Mode = DocumentMode.Xaml;
+
+                    // Ordinal, deliberately: "still parses the same" would be satisfied by a
+                    // re-serialization, this cannot be.
+                    Assert.That(doc.Text, Is.EqualTo(doc.ParsedText)
+                        .Using((System.Collections.Generic.IComparer<string>)System.StringComparer.Ordinal),
+                        "an untouched document must show its own text, byte for byte, or the " +
+                        "coordinates its LoadErrors carry address text that no longer exists");
+                    Assert.That(doc.IsDirty, Is.False, "looking at the XAML is not an edit");
+
+                    // Proves the assertion above is not vacuous: a re-serialization really is a
+                    // different string for this input, so surviving it means something.
+                    doc.UpdateXaml();
+                    Assert.That(doc.Text, Is.Not.EqualTo(doc.ParsedText)
+                        .Using((System.Collections.Generic.IComparer<string>)System.StringComparer.Ordinal),
+                        "UpdateXaml re-sorts this document's attributes, so the switch above " +
+                        "would have been detectable had it run");
+                }
+
+                using (var doc = new Document(null, RecoverableErrorXaml))
+                {
+                    var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+                    button.Properties["Height"].SetValue(44.0);
+                    Assert.That(doc.IsDirty, Is.True, "a surface edit dirties the document");
+                    Assert.That(doc.Text, Is.EqualTo(doc.ParsedText),
+                        "and it does so without touching Text, which is why IsDirty has to be " +
+                        "half of the setter's condition");
+
+                    doc.Mode = DocumentMode.Xaml;
+
+                    StringAssert.Contains("44", doc.Text,
+                        "a dirty document must still be serialized on the way into XAML mode, " +
+                        "or the user is shown XAML that predates their own edit");
                 }
             });
         }

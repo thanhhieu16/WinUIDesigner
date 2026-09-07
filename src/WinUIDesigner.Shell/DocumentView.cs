@@ -146,17 +146,17 @@ namespace WinUIDesigner.Shell
         /// early. Spec Decision 20.
         /// <para>
         /// Selects nothing at all when the buffer is no longer the text those coordinates were
-        /// reported against. Measured: XamlParser.ReportException reports and continues whenever
-        /// an error sink is present, so a document with an unknown property or a bad conversion
-        /// parses successfully - LoadFailed false, LoadErrors non-empty - and that is the only way
-        /// the error strip fills on a freshly opened file. For such a document the mode switch
-        /// above runs UpdateXaml(), which replaces the buffer with a re-serialization of the
-        /// parsed tree: re-indented, attributes re-sorted, and typically without the offending
-        /// attribute at all, because the parser could not build it. The line and column still
-        /// refer to the original file text, which no longer exists, so selecting at them would
-        /// silently take the user to an unrelated token. The LoadFailed path is unaffected -
-        /// UpdateXaml() early-returns on a null DesignContext, so the buffer is still what was
-        /// parsed.
+        /// reported against. That guard used to refuse every jump the error strip could offer:
+        /// XamlParser.ReportException reports and continues whenever an error sink is present, so
+        /// a document with an unknown property or a bad conversion parses successfully -
+        /// LoadFailed false, LoadErrors non-empty - which is the only way the strip fills on a
+        /// freshly opened file, and the mode switch above then re-serialized the parsed tree over
+        /// the buffer the coordinates addressed. Document.Mode's setter no longer re-serializes a
+        /// document that has not moved on from what was parsed, so for that case the buffer here
+        /// is still the file's own text and the jump lands. The guard stays for the cases where
+        /// the buffer genuinely has moved on - a surface edit, typing, or a save from Design mode
+        /// - because selecting at coordinates into text that no longer exists would silently take
+        /// the user to an unrelated token.
         /// </para>
         /// </remarks>
         public void JumpToError(XamlError error)

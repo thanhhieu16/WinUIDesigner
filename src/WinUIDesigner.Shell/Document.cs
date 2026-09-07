@@ -113,6 +113,20 @@ namespace WinUIDesigner.Shell
         }
 
         /// <summary>Which view the user is looking at. Spec Decision 10.</summary>
+        /// <remarks>
+        /// Entering XAML mode re-serializes the tree only when the document has moved on from
+        /// what <see cref="UpdateDesign"/> last parsed. An untouched document keeps its own text
+        /// byte for byte, and that is load-bearing rather than a nicety: XamlParser.ReportException
+        /// reports and continues whenever an error sink is present, so a file with an unknown
+        /// property or a bad conversion parses successfully - LoadFailed false, LoadErrors
+        /// non-empty - which is the only way the error strip fills on a freshly opened file, and
+        /// those errors' Line/Column address the file's own text. Re-serializing on the way into
+        /// XAML mode would destroy exactly that text before DocumentView.JumpToError could select
+        /// in it, and JumpToError's staleness guard would then refuse every jump the strip offers.
+        /// Both halves of the condition are needed: <c>text != parsedText</c> catches typing that
+        /// already reached <see cref="Text"/>, and <see cref="IsDirty"/> catches a surface edit,
+        /// which moves the tree without touching <c>text</c> at all. Spec Decision 10.
+        /// </remarks>
         public DocumentMode Mode
         {
             get { return mode; }
@@ -124,7 +138,7 @@ namespace WinUIDesigner.Shell
 
                 if (mode == DocumentMode.Design)
                     UpdateDesign();
-                else
+                else if (IsDirty || text != parsedText)
                     UpdateXaml();
 
                 RaisePropertyChanged("Mode");
@@ -210,10 +224,12 @@ namespace WinUIDesigner.Shell
         /// <remarks>
         /// The only thing <see cref="LoadErrors"/>' Line/Column coordinates mean anything against.
         /// <see cref="UpdateXaml"/> replaces <see cref="Text"/> with a re-serialization of the
-        /// parsed tree - re-indented, attributes re-sorted, and typically without whatever
-        /// attribute the parser could not build - and it does that without reparsing, so after a
-        /// single switch into XAML mode the buffer and these coordinates describe different
-        /// documents. Stored normalised so a caller can compare it against
+        /// parsed tree - re-indented and attributes re-sorted - and it does that without
+        /// reparsing, so once it has run the buffer and these coordinates describe different
+        /// documents. <see cref="Mode"/>'s setter no longer runs it for a document that has not
+        /// moved on from what was parsed, which is what lets a jump into a freshly opened file
+        /// land; a save from Design mode and every edit still put the two out of step, so the
+        /// comparison remains necessary. Stored normalised so a caller can compare it against
         /// <see cref="NormaliseLineEndings"/> of a TextBox's text, which is the only text a
         /// selection can be made in. Line and column numbering is unaffected by which line
         /// ending is used, so normalising loses nothing the coordinates depend on.
