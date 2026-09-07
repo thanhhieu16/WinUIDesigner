@@ -117,8 +117,8 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.DoesNotThrow(() => opened = shell.Open(null));
 
                 Assert.That(opened, Is.False);
-                Assert.That(reported, Is.Not.Null, "File.ReadAllText(null) throws " +
-                    "ArgumentNullException, which the read must catch and report");
+                Assert.That(reported, Is.Not.Null, "Path.GetFullPath(null) throws " +
+                    "ArgumentNullException, which Open's own try/catch must catch and report");
                 Assert.That(shell.Documents, Is.Empty);
             });
         }
@@ -132,11 +132,12 @@ namespace WinUIDesigner.Shell.Tests
                 ShellErrorEventArgs reported = null;
                 shell.ReportError += (s, e) => reported = e;
 
-                // A NUL character is rejected by File.ReadAllText with ArgumentException
+                // A NUL character is rejected by Path.GetFullPath with ArgumentException
                 // ("Null character in path"), verified empirically on this runtime: unlike
-                // "<" or ">" - which surface as IOException here and so were already caught
-                // by the narrower catch this test exists to replace - ArgumentException does
-                // not derive from IOException or UnauthorizedAccessException, so it actually
+                // "<" or ">" - which Path.GetFullPath lets through unchanged, only to surface
+                // as IOException from File.ReadAllText and so were already caught by the
+                // narrower catch this test exists to replace - ArgumentException does not
+                // derive from IOException or UnauthorizedAccessException, so it actually
                 // escaped the old two-catch code.
                 var path = "a\0b.xaml";
                 bool opened = true;
