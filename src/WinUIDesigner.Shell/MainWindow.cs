@@ -461,27 +461,54 @@ namespace WinUIDesigner.Shell
             return doc != null && views.TryGetValue(doc, out view) ? view : null;
         }
 
+        /// <summary>
+        /// Applies a Documents change to the strip: removes tabs/views for what left, adds them
+        /// for what arrived, then syncs the selection to whatever ShellModel now says is current.
+        /// </summary>
+        /// <remarks>
+        /// The whole body runs under syncingSelection, not just the SyncSelectedTab call at the
+        /// end. In a real, template-applying TabView, ForgetDocument's TabItems.Remove(tab) - when
+        /// the removed tab was the selected one - makes the TabView auto-select a neighbour and
+        /// raise SelectionChanged synchronously, still inside this call stack and therefore still
+        /// inside ShellModel.Close's own Documents.Remove, before Close reaches its own "if
+        /// (CurrentDocument == doc) CurrentDocument = Documents[0]" line. An unguarded
+        /// OnTabSelectionChanged would activate that neighbour there and then, so by the time
+        /// Close's own reassignment runs it would be a no-op and the final current document would
+        /// be whatever the TabView picked rather than what ShellModel.Close chose - the opposite of
+        /// Spec Decision 5. Cannot be covered by a test here: SelectionChanged never fires in this
+        /// test process, so this has to be right by construction rather than by a passing test.
+        /// </remarks>
         void OnDocumentsChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
-            if (e.OldItems != null)
+            var wasSyncing = syncingSelection;
+            syncingSelection = true;
+            try
             {
-                foreach (Document doc in e.OldItems)
-                    ForgetDocument(doc);
+                if (e.OldItems != null)
+                {
+                    foreach (Document doc in e.OldItems)
+                        ForgetDocument(doc);
+                }
+
+                if (e.NewItems != null)
+                {
+                    foreach (Document doc in e.NewItems)
+                        RememberDocument(doc);
+                }
+
+                if (e.Action == NotifyCollectionChangedAction.Reset)
+                {
+                    foreach (var doc in new List<Document>(views.Keys))
+                        ForgetDocument(doc);
+                }
+
+                SyncSelectedTab();
+            }
+            finally
+            {
+                syncingSelection = wasSyncing;
             }
 
-            if (e.NewItems != null)
-            {
-                foreach (Document doc in e.NewItems)
-                    RememberDocument(doc);
-            }
-
-            if (e.Action == NotifyCollectionChangedAction.Reset)
-            {
-                foreach (var doc in new List<Document>(views.Keys))
-                    ForgetDocument(doc);
-            }
-
-            SyncSelectedTab();
             RefreshCommands();
         }
 
@@ -636,9 +663,14 @@ namespace WinUIDesigner.Shell
         /// <remarks>
         /// ShellModel.Close re-points CurrentDocument while the TabView is reacting to the same
         /// removal, so without the flag the two pushes re-enter each other. Spec Decision 5.
+        /// Saves and restores the previous flag value rather than unconditionally clearing it,
+        /// because this can run nested inside OnDocumentsChanged's own guard (it calls this as its
+        /// last step); unconditionally setting false on the way out would clear that outer guard
+        /// while OnDocumentsChanged is still unwinding through ForgetDocument's TabItems.Remove.
         /// </remarks>
         void SyncSelectedTab()
         {
+            var wasSyncing = syncingSelection;
             syncingSelection = true;
             try
             {
@@ -648,7 +680,7 @@ namespace WinUIDesigner.Shell
             }
             finally
             {
-                syncingSelection = false;
+                syncingSelection = wasSyncing;
             }
         }
 
