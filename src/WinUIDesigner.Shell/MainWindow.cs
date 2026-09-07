@@ -48,6 +48,7 @@ namespace WinUIDesigner.Shell
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch
         };
+        readonly ErrorListView errors = new ErrorListView();
         readonly Dictionary<Document, DocumentView> views = new Dictionary<Document, DocumentView>();
         readonly Dictionary<Document, TabViewItem> tabs = new Dictionary<Document, TabViewItem>();
         bool syncingSelection;
@@ -115,6 +116,7 @@ namespace WinUIDesigner.Shell
 
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var menu = BuildMenu();
             Grid.SetRow(menu, 0);
@@ -176,6 +178,14 @@ namespace WinUIDesigner.Shell
 
             Grid.SetRow(columns, 1);
             root.Children.Add(columns);
+
+            // A full-width strip rather than the reference's right-column pane: that column
+            // already holds three things and a XAML parse message wraps several times at 280px.
+            // The list caps its own height - an Auto row is exactly the unbounded parent that
+            // makes a ListView realize every container. Spec Decision 18.
+            errors.JumpRequested += OnJumpToErrorRequested;
+            Grid.SetRow(errors, 2);
+            root.Children.Add(errors);
             return root;
         }
 
@@ -366,6 +376,7 @@ namespace WinUIDesigner.Shell
             if (wiredDocument == null)
             {
                 contentHost.Content = null;
+                errors.Show(null);
                 outlineView.Root = null;
                 Title = ApplicationTitle;
                 RefreshCommands();
@@ -373,6 +384,7 @@ namespace WinUIDesigner.Shell
             }
 
             contentHost.Content = ViewFor(wiredDocument);
+            errors.Show(wiredDocument.LoadErrors);
             outlineView.Root = wiredDocument.OutlineRoot;
 
             wiredSelection = wiredDocument.SelectionService;
@@ -468,6 +480,16 @@ namespace WinUIDesigner.Shell
 
         /// <summary>Test seam: the host that shows the current document's view.</summary>
         internal ContentControl ContentHostForTest { get { return contentHost; } }
+
+        /// <summary>Test seam: the error strip.</summary>
+        internal ErrorListView ErrorsForTest { get { return errors; } }
+
+        void OnJumpToErrorRequested(object sender, WinUIDesigner.DesignModel.Xaml.XamlError error)
+        {
+            var view = ViewFor(shell.CurrentDocument);
+            if (view != null)
+                view.JumpToError(error);
+        }
 
         /// <summary>The view built for <paramref name="doc"/>, or null once it has closed.</summary>
         internal DocumentView ViewFor(Document doc)

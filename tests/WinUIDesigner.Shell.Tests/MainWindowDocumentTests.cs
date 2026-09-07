@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.UI.Xaml;
 using NUnit.Framework;
 using WinUIDesigner.TestHost;
 
@@ -258,6 +259,50 @@ namespace WinUIDesigner.Shell.Tests
                     "every document here is pathless, so each needs Save As - and the run " +
                     "stops at the first one the user abandons rather than queueing dialogs " +
                     "that ShowDialogAsync would drop on the floor");
+            });
+        }
+
+        // ---- error strip -----------------------------------------------------
+
+        [Test]
+        public void TheErrorRowIsCollapsedForACleanDocumentAndForNoDocumentAtAll()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+                Assert.That(shell.CurrentDocument, Is.Not.Null);
+                Assert.That(shell.CurrentDocument.LoadErrors, Is.Empty);
+                Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Collapsed));
+
+                foreach (var doc in shell.Documents.ToList())
+                {
+                    doc.MarkSaved();
+                    shell.Close(doc);
+                }
+
+                Assert.That(shell.CurrentDocument, Is.Null);
+                Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Collapsed));
+            });
+        }
+
+        [Test]
+        public void ADocumentThatFailedToParseFillsTheErrorRow()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+                var doc = shell.CurrentDocument;
+
+                doc.Mode = DocumentMode.Xaml;
+                doc.Text = "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"";
+                doc.Mode = DocumentMode.Design;
+
+                Assert.That(doc.LoadFailed, Is.True);
+                Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Visible));
+                var rows = (IReadOnlyList<XamlErrorNode>)window.ErrorsForTest.List.ItemsSource;
+                Assert.That(rows, Is.Not.Empty);
             });
         }
     }
