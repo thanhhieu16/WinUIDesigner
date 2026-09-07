@@ -215,5 +215,143 @@ namespace WinUIDesigner.XamlDom.Tests
                 Assert.That(rotate.Angle, Is.EqualTo(45).Within(0.001));
             });
         }
+
+        [Test]
+        public void ALinearGradientBrushKeepsItsStops()
+        {
+            WinUITestHost.Run(() => {
+                var brush = new LinearGradientBrush();
+                brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.Colors.Red, Offset = 0 });
+                brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.Colors.Blue, Offset = 1 });
+
+                string saved;
+                var grid = RoundTripOnAGrid("Background", brush, out saved);
+
+                var reloaded = grid.Background as LinearGradientBrush;
+                Assert.That(reloaded, Is.Not.Null, "saved as: " + saved);
+                Assert.That(reloaded.GradientStops.Count, Is.EqualTo(2),
+                    "the stops did not survive; saved as: " + saved);
+                Assert.That(reloaded.GradientStops[0].Color, Is.EqualTo(Microsoft.UI.Colors.Red));
+                Assert.That(reloaded.GradientStops[0].Offset, Is.EqualTo(0).Within(0.001));
+                Assert.That(reloaded.GradientStops[1].Color, Is.EqualTo(Microsoft.UI.Colors.Blue));
+                Assert.That(reloaded.GradientStops[1].Offset, Is.EqualTo(1).Within(0.001));
+            });
+        }
+
+        [Test]
+        public void ATransformGroupKeepsItsChildrenInOrder()
+        {
+            WinUITestHost.Run(() => {
+                var group = new TransformGroup();
+                group.Children.Add(new RotateTransform { Angle = 45 });
+                group.Children.Add(new ScaleTransform { ScaleX = 2, ScaleY = 3 });
+
+                string saved;
+                var grid = RoundTripOnAGrid("RenderTransform", group, out saved);
+
+                var reloaded = grid.RenderTransform as TransformGroup;
+                Assert.That(reloaded, Is.Not.Null, "saved as: " + saved);
+                Assert.That(reloaded.Children.Count, Is.EqualTo(2), "saved as: " + saved);
+                Assert.That(reloaded.Children[0], Is.InstanceOf<RotateTransform>(),
+                    "order matters: a rotate then a scale is not the same transform as a scale " +
+                    "then a rotate");
+                Assert.That(((RotateTransform)reloaded.Children[0]).Angle, Is.EqualTo(45).Within(0.001));
+                Assert.That(reloaded.Children[1], Is.InstanceOf<ScaleTransform>());
+                Assert.That(((ScaleTransform)reloaded.Children[1]).ScaleX, Is.EqualTo(2).Within(0.001));
+            });
+        }
+
+        [Test]
+        public void AGeometryGroupKeepsItsChildrenAndFillRule()
+        {
+            WinUITestHost.Run(() => {
+                var group = new GeometryGroup { FillRule = FillRule.Nonzero };
+                group.Children.Add(new RectangleGeometry { Rect = new Rect(1, 2, 3, 4) });
+                group.Children.Add(new EllipseGeometry { Center = new Point(5, 6), RadiusX = 7, RadiusY = 8 });
+
+                var document = ParseDocument("<Path xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Data", group);
+                var saved = SaveToString(document);
+                var path = (Microsoft.UI.Xaml.Shapes.Path)ParseDocument(saved).RootInstance;
+
+                var reloaded = path.Data as GeometryGroup;
+                Assert.That(reloaded, Is.Not.Null, "saved as: " + saved);
+                Assert.That(reloaded.FillRule, Is.EqualTo(FillRule.Nonzero));
+                Assert.That(reloaded.Children.Count, Is.EqualTo(2), "saved as: " + saved);
+                Assert.That(((RectangleGeometry)reloaded.Children[0]).Rect, Is.EqualTo(new Rect(1, 2, 3, 4)));
+                Assert.That(((EllipseGeometry)reloaded.Children[1]).RadiusX, Is.EqualTo(7).Within(0.001));
+            });
+        }
+
+        [Test]
+        public void APopulatedCollectionIsWrittenEvenThoughItNeverReadsAsLocallySet()
+        {
+            WinUITestHost.Run(() => {
+                var brush = new LinearGradientBrush();
+                brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.Colors.Red, Offset = 0 });
+
+                // The measurement this test exists to pin: the collection is the property's
+                // lazily-created default and is mutated in place, so it never registers as a
+                // local value. A writer that gates collections the way it gates scalars emits
+                // nothing here and every other test in this fixture still passes.
+                Assert.That(
+                    brush.ReadLocalValue(LinearGradientBrush.GradientStopsProperty),
+                    Is.EqualTo(Microsoft.UI.Xaml.DependencyProperty.UnsetValue),
+                    "if this ever starts reporting the collection as locally set, the special " +
+                    "case in WriteCollection can go");
+
+                string saved;
+                var grid = RoundTripOnAGrid("Background", brush, out saved);
+                Assert.That(((LinearGradientBrush)grid.Background).GradientStops.Count, Is.EqualTo(1),
+                    "saved as: " + saved);
+            });
+        }
+
+        [Test]
+        public void AnEmptyCollectionWritesNoPropertyElement()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "RenderTransform", new TransformGroup());
+                var saved = SaveToString(document);
+
+                StringAssert.DoesNotContain("TransformGroup.Children", saved,
+                    "an empty collection must not produce a property element");
+            });
+        }
+
+        [Test]
+        public void ADeeplyNestedGraphStopsAtTheDepthCapWithoutThrowing()
+        {
+            WinUITestHost.Run(() => {
+                // Twenty nested groups, against a MaxDepth of 12. A genuine reference cycle is
+                // what MaxDepth exists to survive, but one could not be built here to test with:
+                // a TransformGroup cannot be made a descendant of itself through the public
+                // WinUI API, so depth is the only reachable way to drive the guard. The
+                // InProgress reference check stays as the belt to this test's braces and is
+                // recorded in the spec's Known gaps as unexercised.
+                var outermost = new TransformGroup();
+                var current = outermost;
+                for (int i = 0; i < 19; i++) {
+                    var next = new TransformGroup();
+                    current.Children.Add(next);
+                    current = next;
+                }
+                current.Children.Add(new RotateTransform { Angle = 45 });
+
+                var document = ParseDocument("<Grid xmlns='" + PresentationNs + "'/>");
+                var property = document.RootElement.FindOrCreateProperty("RenderTransform");
+
+                string saved = null;
+                Assert.DoesNotThrow(() => {
+                    property.PropertyValue = document.CreatePropertyValue(outermost, property);
+                    saved = SaveToString(document);
+                }, "the write path must never throw - a throw here strands a PlacementOperation " +
+                   "and, with no Application.UnhandledException handler in src/, ends the process");
+                Assert.That(saved, Is.Not.Null);
+                Assert.That(saved, Does.Contain("TransformGroup"),
+                    "the outer levels are still written; only the levels past the cap are not");
+            });
+        }
     }
 }

@@ -62,6 +62,9 @@ namespace WinUIDesigner.XamlDom
 			typeof(Microsoft.UI.Xaml.Media.EllipseGeometry),
 			typeof(Microsoft.UI.Xaml.Media.LineGeometry),
 			typeof(Microsoft.UI.Xaml.Media.GradientStop),
+			typeof(Microsoft.UI.Xaml.Media.TransformGroup),
+			typeof(Microsoft.UI.Xaml.Media.GeometryGroup),
+			typeof(Microsoft.UI.Xaml.Media.LinearGradientBrush),
 		};
 
 		/// <summary>
@@ -143,8 +146,11 @@ namespace WinUIDesigner.XamlDom
 				var dependencyProperty = WinUIStaticMemberLocator.FindDependencyProperty(type, descriptor.Name);
 				if (dependencyProperty == null)
 					continue;
-				if (CollectionSupport.IsCollectionType(descriptor.PropertyType))
-					continue;   // Task 2
+				if (CollectionSupport.IsCollectionType(descriptor.PropertyType)) {
+					if (WriteCollection(target, descriptor, descriptor.GetValue(instance)))
+						wroteSomething = true;
+					continue;
+				}
 
 				if (source.ReadLocalValue(dependencyProperty) == DependencyProperty.UnsetValue)
 					continue;
@@ -158,6 +164,67 @@ namespace WinUIDesigner.XamlDom
 				wroteSomething = true;
 			}
 
+			return wroteSomething;
+		}
+
+		/// <summary>
+		/// Writes a collection property as an explicit <c>&lt;Owner.Property&gt;</c> element with
+		/// one child element per item.
+		/// </summary>
+		/// <remarks>
+		/// <para>
+		/// Not through <see cref="XamlProperty.CollectionElements"/>: that path mutates the live
+		/// collection as well as the XML, and the items being written are already members of it.
+		/// Measured, it throws <c>COMException 0x800F1000</c> out of
+		/// <c>GradientStopCollection.Insert</c> - WinRT refuses a child that already has that
+		/// parent. The parser-side entry point takes a node that is already in the XML DOM, which
+		/// is what this method arranges.
+		/// </para>
+		/// <para>
+		/// The gate is <c>Count &gt; 0</c> rather than <c>ReadLocalValue</c>, which Task 1 uses
+		/// for scalars. Measured: a <c>GradientStopCollection</c> reads as not locally set even
+		/// after two stops have been added to it, because the collection is the property's
+		/// lazily-created default value and is mutated in place. Gating collections the way
+		/// scalars are gated emits no children at all.
+		/// </para>
+		/// <para>
+		/// The order is load-bearing and both wrong orders fail silently rather than throwing:
+		/// a null property element registers the value without attaching its node, and appending
+		/// the children after the call leaves an empty property element.
+		/// </para>
+		/// </remarks>
+		static bool WriteCollection(XamlObject target, PropertyDescriptor descriptor, object collection)
+		{
+			var items = collection as IEnumerable;
+			if (items == null)
+				return false;
+
+			var present = new List<object>();
+			foreach (var item in items) {
+				if (item != null)
+					present.Add(item);
+			}
+			if (present.Count == 0)
+				return false;
+
+			var property = target.FindOrCreateProperty(descriptor.Name);
+			if (!property.IsCollection)
+				return false;
+
+			var element = target.XmlElement;
+			var propertyElement = element.OwnerDocument.CreateElement(
+				element.Prefix, target.ElementType.Name + "." + descriptor.Name, element.NamespaceURI);
+			element.AppendChild(propertyElement);
+
+			var wroteSomething = false;
+			foreach (var item in present) {
+				var child = target.OwnerDocument.CreatePropertyValue(item, property) as XamlObject;
+				if (child == null)
+					continue;
+				propertyElement.AppendChild(child.XmlElement);
+				property.ParserAddCollectionElement(propertyElement, child);
+				wroteSomething = true;
+			}
 			return wroteSomething;
 		}
 	}
