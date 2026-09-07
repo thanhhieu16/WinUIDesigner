@@ -75,6 +75,15 @@ namespace WinUIDesigner.Shell
         UIElement BuildLayout()
         {
             var root = new Grid();
+
+            // A blank Canvas, a ListView and DesignSurface all have a null Background by
+            // default, so without one here they show through to whatever is behind the window
+            // rather than to a page surface. Looked up from the theme rather than hardcoded so
+            // it follows light/dark mode; left unset (matching the prior behaviour) if the key
+            // does not resolve.
+            if (Application.Current.Resources.TryGetValue("ApplicationPageBackgroundThemeBrush", out object pageBackground))
+                root.Background = pageBackground as Microsoft.UI.Xaml.Media.Brush;
+
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
 
