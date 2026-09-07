@@ -26,19 +26,32 @@ namespace WinUIDesigner.Shell
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            // Replaced by MainWindow in Task 6. Until then this proves the app starts and
-            // that a templated control lays out, which is the whole risk in this task.
-            window = new Window();
-            window.Content = new TextBox { Text = "WinUIDesigner shell", Margin = new Thickness(24) };
+            window = new MainWindow();
             window.Activate();
         }
 
         void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
         {
-            // Task 6 replaces this with a dialog. Handled=true keeps a defect in a design-time
-            // behavior from ending the process mid-drag; see spec Decision 18.
+            // Phase B's rule - never throw from the write path - rested on there being no
+            // handler anywhere in src/. This is the first phase that owns an Application and can
+            // install one. Handled=true keeps a defect in a design-time behaviour from ending the
+            // process mid-drag; the message is shown rather than swallowed. Spec Decision 18.
             e.Handled = true;
-            System.Diagnostics.Debug.WriteLine("Unhandled: " + e.Message);
+            var window = this.window;
+            if (window == null || window.Content == null)
+                return;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = window.Content.XamlRoot,
+                Title = "Unexpected error",
+                Content = new ScrollViewer
+                {
+                    Content = new TextBlock { Text = e.Message, TextWrapping = TextWrapping.Wrap }
+                },
+                CloseButtonText = "Close"
+            };
+            _ = dialog.ShowAsync();
         }
     }
 }
