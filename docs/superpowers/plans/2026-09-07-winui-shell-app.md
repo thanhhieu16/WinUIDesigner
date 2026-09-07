@@ -409,7 +409,7 @@ Expected: XamlDom 144 (140 passed, 4 ignored), DesignModel 77/77, Designer 245/2
 In the "What this is" section, after the sentence describing the five phases, add:
 
 ```markdown
-`src/` contains exactly one `.xaml` file: `src/WinUIDesigner.Shell/App.xaml`. That is not a
+`src/` contains exactly one `.xaml` file: `src/WinUIDesigner.Shell.App/App.xaml`. That is not a
 style choice. A WinUI 3 project containing no compiled XAML produces no app-level merged
 `resources.pri`, so `ms-appx:///` cannot be resolved, `XamlControlsResources` fails to load
 `themeresources.xaml`, and every control whose default template references a theme brush
@@ -1980,7 +1980,7 @@ The task that turns the pieces into an application. `ToolboxView` carries the on
 **Files:**
 - Create: `src/WinUIDesigner.Shell/ToolboxView.cs`
 - Create: `src/WinUIDesigner.Shell/MainWindow.cs`
-- Modify: `src/WinUIDesigner.Shell/App.xaml.cs`
+- Modify: `src/WinUIDesigner.Shell.App/App.xaml.cs`
 - Test: `tests/WinUIDesigner.Shell.Tests/ToolboxViewTests.cs`
 
 **Interfaces:**
