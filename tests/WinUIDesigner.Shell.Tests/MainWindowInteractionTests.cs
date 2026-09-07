@@ -551,27 +551,53 @@ namespace WinUIDesigner.Shell.Tests
         // ---- Close All / Save All -------------------------------------------
 
         /// <summary>
-        /// Amendment C3: this test empties the shared document set. Restores it in a finally so
-        /// later tests in this fixture - run in an order NUnit does not guarantee - still find a
-        /// current document.
+        /// Amendment C3, plus a further fix this task's own investigation found necessary: this
+        /// test cannot run against the fixture's shared <see cref="MainWindow"/>.
         /// </summary>
+        /// <remarks>
+        /// Confirmed empirically (see task-6-report.md's fix report): disposing the shared
+        /// window's original document - the one <see cref="CreateWindow"/> built, which by the
+        /// time this test runs has gone through many real layout passes across the rest of the
+        /// fixture - fails the host with 0xC000027B (STOWED_EXCEPTION) deterministically. This is
+        /// not a defect in <see cref="MainWindow.CloseAllAsync"/> itself: the identical
+        /// decide-all-then-discharge path, run against a document that has had at most one or two
+        /// layout passes, does not crash - proven by driving the same sequence against a document
+        /// this test creates and immediately closes (stable), and refuted for the two hypotheses
+        /// that looked plausible first: leaving the property-grid pane live (detaching it before
+        /// return still crashed) and CloseAllAsync's own closing loop (bypassing it and closing
+        /// one at a time by hand still crashed, and only when the shared original was among what
+        /// closed).
+        /// <para>
+        /// So this test builds and hosts its own <see cref="MainWindow"/> for its duration, proves
+        /// Close All against that window's own documents - never touching the shared one - and
+        /// restores the shared host's content in a finally. It does not need to leave a
+        /// replacement document behind: nothing else in the fixture ever looks at this window's
+        /// <c>ShellForTest</c> again.
+        /// </para>
+        /// </remarks>
         [Test]
         public void CloseAllAsksEveryDocumentBeforeClosingAny()
         {
-            WithShell(() =>
+            WinUITestHost.RunOnWindow(host =>
             {
-                var shell = window.ShellForTest;
-                shell.New();
-                shell.New();
-                var all = shell.Documents.ToList();
-                Assert.That(all.Count, Is.GreaterThanOrEqualTo(3));
-
-                var asked = new List<Document>();
-                var closedWhileAsking = 0;
-
+                var fresh = new MainWindow();
+                var freshContent = (FrameworkElement)fresh.Content;
+                fresh.Content = null;
+                host.Content = freshContent;
                 try
                 {
-                    window.CloseAllAsync(d =>
+                    SeedingMissingThemeKeys(() => freshContent.UpdateLayout());
+
+                    var shell = fresh.ShellForTest;
+                    shell.New();
+                    shell.New();
+                    var all = shell.Documents.ToList();
+                    Assert.That(all.Count, Is.GreaterThanOrEqualTo(3));
+
+                    var asked = new List<Document>();
+                    var closedWhileAsking = 0;
+
+                    fresh.CloseAllAsync(d =>
                     {
                         asked.Add(d);
                         closedWhileAsking = all.Count - shell.Documents.Count;
@@ -590,16 +616,26 @@ namespace WinUIDesigner.Shell.Tests
                 }
                 finally
                 {
-                    // CloseAllAsync closed every document this test found, including the one the
-                    // fixture built in OneTimeSetUp - the one `surface` was originally captured
-                    // from. Document.Dispose tears its DesignContext down for good, so a merely-new
-                    // document left behind is not enough on its own; WithShell re-finds the live
-                    // DesignSurface before every test body runs (see its remarks) specifically so
-                    // this does not leave the rest of the fixture holding a dead reference.
-                    if (shell.Documents.Count == 0)
-                        shell.New();
+                    // Restore the shared host's content for every later test in the fixture.
+                    // `fresh` and everything it built are abandoned here on purpose - nothing else
+                    // in the fixture references them again.
+                    host.Content = shellContent;
                 }
             });
+
+            // `fresh` and its whole visual tree (menu bar, toolbox, outline view, tab strip) are
+            // unreachable from here on, but not yet collected. Forcing that now, while nothing else
+            // is running on the dispatcher, measurably improved full-suite stability over repeated
+            // runs (see task-6-report.md's fix report for the numbers) - collection of this
+            // abandoned graph landing instead during a later test's own dispatcher activity is the
+            // leading explanation found for the instability this narrows, though it could not be
+            // proven beyond this empirical improvement. It does not provably reach zero: the same
+            // 0xC000027B crash, at a lower rate, was also measured against the untouched pre-Task-6
+            // baseline (65 tests, none of this file's code), so some residual native flakiness in
+            // this test host predates this task and is not fully within this fix's reach.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
 
         /// <summary>Amendment C3: restores the two documents this test creates in a finally.</summary>
