@@ -55,10 +55,13 @@ namespace WinUIDesigner.Shell.Tests
                     Assert.That(doc.IsDirty, Is.False, "constructing the view is not an edit");
 
                     doc.Mode = DocumentMode.Xaml;
+                    view.PushEditorTextToDocument();
 
                     Assert.That(doc.IsDirty, Is.False,
                         "TextBox hands back lone CR where XamlFormatter emitted CRLF (measured); " +
-                        "the round trip through the editor must not read as a user edit");
+                        "the round trip through the editor must not read as a user edit. TextChanged " +
+                        "does not fire for a programmatic assignment in a test process (measured), so " +
+                        "the explicit push above is the only way to exercise Document.Text's setter here.");
                     Assert.That(view.Editor.Text, Is.Not.Empty);
                     view.Detach();
                 }
