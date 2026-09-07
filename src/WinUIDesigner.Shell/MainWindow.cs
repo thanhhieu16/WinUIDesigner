@@ -65,6 +65,7 @@ namespace WinUIDesigner.Shell
         bool dialogOpen;
 
         MenuFlyoutItem undoItem, redoItem, cutItem, copyItem, pasteItem, deleteItem;
+        MenuFlyoutItem closeItem, closeAllItem, saveAllItem;
 
         public MainWindow()
         {
@@ -183,8 +184,17 @@ namespace WinUIDesigner.Shell
             var file = new MenuBarItem { Title = "File" };
             file.Items.Add(Item("New", VirtualKey.N, VirtualKeyModifiers.Control, (s, e) => Fire(NewAsync)));
             file.Items.Add(Item("Open...", VirtualKey.O, VirtualKeyModifiers.Control, (s, e) => Fire(OpenAsync)));
+            closeItem = Item("Close", VirtualKey.None, VirtualKeyModifiers.None,
+                (s, e) => Fire(() => RequestCloseAsync(shell.CurrentDocument, PrepareForCloseAsync)));
+            closeAllItem = Item("Close All", VirtualKey.None, VirtualKeyModifiers.None,
+                (s, e) => Fire(() => CloseAllAsync(PrepareForCloseAsync)));
+            file.Items.Add(closeItem);
+            file.Items.Add(closeAllItem);
+            file.Items.Add(new MenuFlyoutSeparator());
             file.Items.Add(Item("Save", VirtualKey.S, VirtualKeyModifiers.Control, (s, e) => Fire(() => SaveAsync(shell.CurrentDocument, false))));
             file.Items.Add(Item("Save As...", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(() => SaveAsync(shell.CurrentDocument, true))));
+            saveAllItem = Item("Save All", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(() => SaveAllAsync(SaveAsync)));
+            file.Items.Add(saveAllItem);
             file.Items.Add(new MenuFlyoutSeparator());
             file.Items.Add(Item("Exit", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Close()));
 
@@ -446,6 +456,11 @@ namespace WinUIDesigner.Shell
             copyItem.IsEnabled = svc != null && svc.CanCopy(ctx);
             pasteItem.IsEnabled = svc != null && svc.CanPaste(ctx);
             deleteItem.IsEnabled = svc != null && svc.CanDelete(ctx);
+
+            var hasDocument = shell.CurrentDocument != null;
+            closeItem.IsEnabled = hasDocument;
+            closeAllItem.IsEnabled = hasDocument;
+            saveAllItem.IsEnabled = hasDocument;
         }
 
         /// <summary>Test seam: the tab strip.</summary>
@@ -623,6 +638,65 @@ namespace WinUIDesigner.Shell
             // AskSaveChanges, which this window answers Cancel), and a document it kept must stay
             // usable. Close owns the document's lifetime; this method only decides.
             shell.Close(doc);
+        }
+
+        /// <summary>
+        /// Asks about every document, then closes them all. Cancel at any prompt abandons the
+        /// whole operation with nothing closed.
+        /// </summary>
+        /// <remarks>
+        /// Decide-all-then-discharge, the ordering ConfirmThenCloseAsync already uses for window
+        /// close. Clearing dirty flags inside the loop would leave the documents already asked
+        /// about looking clean when a later one answers Cancel. Spec Decision 9.
+        /// </remarks>
+        internal async Task CloseAllAsync(Func<Document, Task<CloseDecision>> decideClose)
+        {
+            var order = shell.Documents.ToList();
+            var decisions = new List<KeyValuePair<Document, CloseDecision>>();
+
+            foreach (var doc in order)
+            {
+                var decision = await decideClose(doc);
+                if (!decision.Proceed)
+                    return;
+                decisions.Add(new KeyValuePair<Document, CloseDecision>(doc, decision));
+            }
+
+            foreach (var pair in decisions)
+            {
+                if (pair.Value.ClearDirtyBeforeClose)
+                    pair.Key.MarkSaved();
+            }
+
+            // Close owns disposal - see RequestCloseAsync. Nothing here disposes.
+            foreach (var pair in decisions)
+                shell.Close(pair.Key);
+        }
+
+        /// <summary>
+        /// Saves every dirty document, asking for a path one at a time for any that has none.
+        /// </summary>
+        /// <remarks>
+        /// Sequential and short-circuiting on purpose. ShellModel.Save refuses a null FilePath and
+        /// raises an error, and ShowDialogAsync returns null for a second concurrent dialog, so a
+        /// naive loop over three unsaved documents would swallow two failures in silence. The
+        /// reference routes a pathless document to SaveAs the same way (XamlDesigner/Shell.cs:153-162).
+        /// Spec Decision 8.
+        /// </remarks>
+        internal async Task SaveAllAsync(Func<Document, bool, Task> saveOne)
+        {
+            foreach (var doc in shell.Documents.ToList())
+            {
+                if (!doc.IsDirty)
+                    continue;
+
+                await saveOne(doc, doc.FilePath == null);
+
+                // Still dirty means the save failed or the picker was dismissed. Stop rather than
+                // opening another dialog the user did not ask for.
+                if (doc.IsDirty)
+                    return;
+            }
         }
 
         void OnTabSelectionChanged(object sender, SelectionChangedEventArgs e)

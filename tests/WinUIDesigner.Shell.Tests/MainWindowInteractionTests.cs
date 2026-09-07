@@ -118,6 +118,16 @@ namespace WinUIDesigner.Shell.Tests
         }
 
         /// <summary>Runs the body on the dispatcher against the live shell tree.</summary>
+        /// <remarks>
+        /// Re-finds the live <see cref="DesignSurface"/> before every test body, not only in
+        /// <see cref="CreateWindow"/>. Task 6's CloseAllAsync can close the very document `surface`
+        /// was captured from in OneTimeSetUp - ShellModel.Close disposes it, which tears its
+        /// DesignContext down for good - so a fixture-wide static snapshot taken once would go
+        /// stale for every test that runs afterward, in whatever order NUnit happens to pick.
+        /// Re-finding here, inside the same SeedingMissingThemeKeys-guarded layout pass this
+        /// already ran, keeps `surface` pointed at whatever document is actually current without
+        /// adding a second, unguarded layout call of its own.
+        /// </remarks>
         static void WithShell(Action body)
         {
             WinUITestHost.RunOnWindow(host =>
@@ -128,6 +138,9 @@ namespace WinUIDesigner.Shell.Tests
                 SeedingMissingThemeKeys(() =>
                 {
                     shellContent.UpdateLayout();
+                    var liveSurface = FindDescendant<DesignSurface>(shellContent, x => true);
+                    if (liveSurface != null)
+                        surface = liveSurface;
                     body();
                 });
             });
@@ -282,7 +295,7 @@ namespace WinUIDesigner.Shell.Tests
 
                 var file = menuBar.Items.OfType<MenuBarItem>().First();
                 CollectionAssert.AreEqual(
-                    new[] { "New", "Open...", "Save", "Save As...", "Exit" },
+                    new[] { "New", "Open...", "Close", "Close All", "Save", "Save As...", "Save All", "Exit" },
                     file.Items.OfType<MenuFlyoutItem>().Select(i => i.Text).ToList());
 
                 var edit = menuBar.Items.OfType<MenuBarItem>().Last();
@@ -532,6 +545,140 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before - 1));
                 Assert.That(window.ViewFor(doomed), Is.Null,
                     "the view must be detached and forgotten with its document");
+            });
+        }
+
+        // ---- Close All / Save All -------------------------------------------
+
+        /// <summary>
+        /// Amendment C3: this test empties the shared document set. Restores it in a finally so
+        /// later tests in this fixture - run in an order NUnit does not guarantee - still find a
+        /// current document.
+        /// </summary>
+        [Test]
+        public void CloseAllAsksEveryDocumentBeforeClosingAny()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                shell.New();
+                shell.New();
+                var all = shell.Documents.ToList();
+                Assert.That(all.Count, Is.GreaterThanOrEqualTo(3));
+
+                var asked = new List<Document>();
+                var closedWhileAsking = 0;
+
+                try
+                {
+                    window.CloseAllAsync(d =>
+                    {
+                        asked.Add(d);
+                        closedWhileAsking = all.Count - shell.Documents.Count;
+                        return Task.FromResult(new MainWindow.CloseDecision
+                        {
+                            Proceed = true,
+                            ClearDirtyBeforeClose = true
+                        });
+                    }).Wait();
+
+                    Assert.That(asked.Count, Is.EqualTo(all.Count), "every document is asked");
+                    Assert.That(closedWhileAsking, Is.EqualTo(0),
+                        "nothing may close until every document has answered - a Cancel halfway " +
+                        "must leave the user with all of them, not half");
+                    Assert.That(shell.Documents, Is.Empty);
+                }
+                finally
+                {
+                    // CloseAllAsync closed every document this test found, including the one the
+                    // fixture built in OneTimeSetUp - the one `surface` was originally captured
+                    // from. Document.Dispose tears its DesignContext down for good, so a merely-new
+                    // document left behind is not enough on its own; WithShell re-finds the live
+                    // DesignSurface before every test body runs (see its remarks) specifically so
+                    // this does not leave the rest of the fixture holding a dead reference.
+                    if (shell.Documents.Count == 0)
+                        shell.New();
+                }
+            });
+        }
+
+        /// <summary>Amendment C3: restores the two documents this test creates in a finally.</summary>
+        [Test]
+        public void ACancelPartWayThroughCloseAllClosesNothing()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var first = shell.New();
+                var second = shell.New();
+                var before = shell.Documents.Count;
+                var seen = 0;
+
+                try
+                {
+                    window.CloseAllAsync(d =>
+                    {
+                        seen++;
+                        return Task.FromResult(new MainWindow.CloseDecision { Proceed = seen < 2 });
+                    }).Wait();
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(before));
+                    Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before));
+                }
+                finally
+                {
+                    first.MarkSaved();
+                    second.MarkSaved();
+                    shell.Close(first);
+                    shell.Close(second);
+                }
+            });
+        }
+
+        /// <summary>
+        /// Amendment C1/C2/C3: <c>shell.New()</c> produces a clean document, so SaveAllAsync's
+        /// dirty-only filter would never reach the delegate against the brief's original setup -
+        /// this test dirties two documents of its own with MarkSuspect() first. The
+        /// order-dependent "more than one document open" assertion is dropped (C2); what remains
+        /// is the test's actual subject, that Save All asks once and stops at the first document
+        /// the user abandons. Restores both documents in a finally (C3).
+        /// </summary>
+        [Test]
+        public void SaveAllAsksOncePerDocumentAndStopsWhenOneIsAbandoned()
+        {
+            WithShell(() =>
+            {
+                var shell = window.ShellForTest;
+                var first = shell.New();
+                var second = shell.New();
+                first.MarkSuspect();
+                second.MarkSuspect();
+
+                var forcedAsk = new List<Document>();
+
+                try
+                {
+                    window.SaveAllAsync((doc, forceAsk) =>
+                    {
+                        if (forceAsk)
+                            forcedAsk.Add(doc);
+                        // Leaving the document dirty is how a dismissed picker reports itself.
+                        doc.MarkSuspect();
+                        return Task.CompletedTask;
+                    }).Wait();
+
+                    Assert.That(forcedAsk.Count, Is.EqualTo(1),
+                        "every document here is pathless, so each needs Save As - and the run " +
+                        "stops at the first one the user abandons rather than queueing dialogs " +
+                        "that ShowDialogAsync would drop on the floor");
+                }
+                finally
+                {
+                    first.MarkSaved();
+                    second.MarkSaved();
+                    shell.Close(first);
+                    shell.Close(second);
+                }
             });
         }
     }
