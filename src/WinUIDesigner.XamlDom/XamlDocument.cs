@@ -367,7 +367,14 @@ namespace WinUIDesigner.XamlDom
 			// the design lets an unformattable instance serialize as its own empty/child-bearing
 			// element instead, exactly like every other type this method doesn't special-case).
 
-			return new XamlObject(this, xml, elementType, instance);
+			var result = new XamlObject(this, xml, elementType, instance);
+
+			// Phase C: give the element its instance's own properties. A refusal - an unlisted
+			// type, a cycle, a depth cap - leaves the empty element Phases A and B emitted.
+			if (forProperty != null && !hasStringConverter && !isMarkupExtensionValue)
+				XamlInstanceWriter.TryWrite(result);
+
+			return result;
 		}
 
 		internal string GetNamespaceFor(Type type, bool getClrNamespace = false)
