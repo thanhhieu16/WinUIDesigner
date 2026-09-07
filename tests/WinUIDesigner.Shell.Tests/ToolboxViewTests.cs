@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
 using WinUIDesigner.DesignModel;
@@ -132,33 +133,80 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// Builds a view, optionally attaches it to <paramref name="tools"/> and optionally
+        /// detaches it again, and returns a weak reference to it.
+        /// </summary>
+        /// <remarks>
+        /// NoInlining, with every strong reference to the view confined to this frame: a Debug
+        /// build keeps locals alive to the end of their method, so building and collecting in one
+        /// method would report the view as reachable whether or not anything actually held it.
+        /// </remarks>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static WeakReference BuildView(FakeToolService tools, bool attach, bool detach)
+        {
+            var view = new ToolboxView();
+            if (attach)
+            {
+                view.Attach(tools);
+                view.SelectForTest(typeof(Button));
+            }
+            if (detach)
+                view.Detach();
+            return new WeakReference(view);
+        }
+
+        static void CollectFully()
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            GC.Collect();
+        }
+
+        // A leaked CurrentToolChanged subscription cannot be caught by driving the view, and the
+        // test that used to try was vacuous for a structural reason worth writing down:
+        // OnCurrentToolChanged ignores its sender and gates on whichever service the view is
+        // attached to now, so an extra invocation from a closed service takes exactly the same
+        // branch as one from the live service. Raising the event on a detached service therefore
+        // proves nothing - the observable difference a leak makes is not behavioural but a
+        // lifetime one. These two tests are a pair: the first asserts Detach releases the view,
+        // and the second is its mutation control, showing the assertion has teeth because an
+        // attached service really does hold the view alive.
+
         [Test]
-        public void DetachStopsListeningSoAClosedDocumentCannotDriveTheView()
+        public void DetachUnsubscribesSoAClosedDocumentStopsHoldingTheView()
         {
             WinUITestHost.Run(() =>
             {
                 var closed = new FakeToolService(new FakePointerTool());
-                var view = new ToolboxView();
-                view.Attach(closed);
-                view.SelectForTest(typeof(Button));
+                var view = BuildView(closed, attach: true, detach: true);
 
-                view.Detach();
+                CollectFully();
 
-                // Detach now clears the selection itself (see the test above), so "the selection
-                // survived" is no longer available as proof of unsubscription. This is: attach a
-                // live service, arm against it, then raise CurrentToolChanged on the CLOSED one.
-                // A leaked subscription would run OnCurrentToolChanged against the live service -
-                // which sits at its pointer tool, so the guard inside it passes - and wipe the
-                // selection the user just made in the document that is actually open.
+                Assert.That(view.Target, Is.Null,
+                    "Detach must unsubscribe: a closed document's tool service still holds the " +
+                    "toolbox view, so every document ever opened stays reachable through it");
+                GC.KeepAlive(closed);
+            });
+        }
+
+        [Test]
+        public void AnAttachedToolServiceHoldsTheViewUntilDetach()
+        {
+            WinUITestHost.Run(() =>
+            {
                 var live = new FakeToolService(new FakePointerTool());
-                view.Attach(live);
-                view.SelectForTest(typeof(Button));
-                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)));
+                var view = BuildView(live, attach: true, detach: false);
 
-                closed.CurrentTool = new FakePointerTool();
+                CollectFully();
 
-                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)),
-                    "Detach must unsubscribe: a closed document's tool service still drove the view");
+                Assert.That(view.Target, Is.Not.Null,
+                    "an attached tool service is supposed to hold the view through its " +
+                    "CurrentToolChanged subscription - without that, the test above proves nothing");
+                GC.KeepAlive(live);
             });
         }
     }
