@@ -37,6 +37,18 @@ namespace WinUIDesigner.Shell.Tests
             "  <Button x:Name=\"Ok\" Width=\"nonsense\" Content=\"Ok\" />\r\n" +
             "</Canvas>";
 
+        /// <summary>
+        /// A perfectly ordinary document with LF-only line endings - what File.ReadAllText
+        /// hands back for a checkout with core.autocrlf=false, a file authored on another
+        /// platform, or anything generated. Not a CRLF character anywhere. Deliberately free of
+        /// parse errors, so the only thing the test below can be measuring is line endings.
+        /// </summary>
+        const string LfOnlyXaml =
+            "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\n" +
+            "        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">\n" +
+            "  <Button x:Name=\"Ok\" Width=\"75\" Content=\"Ok\" />\n" +
+            "</Canvas>";
+
         const string MalformedXaml =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
             "<Button Width=\"75\"";
@@ -331,6 +343,53 @@ namespace WinUIDesigner.Shell.Tests
                     StringAssert.Contains("44", doc.Text,
                         "a dirty document must still be serialized on the way into XAML mode, " +
                         "or the user is shown XAML that predates their own edit");
+                }
+            });
+        }
+
+        /// <summary>
+        /// An LF-only file is untouched too, and its first switch to XAML mode leaves it alone.
+        /// </summary>
+        /// <remarks>
+        /// The constructor used to store its argument raw while UpdateDesign normalised into
+        /// ParsedText, so an LF-only document had text != parsedText from the moment it was
+        /// built and re-serialized on the very first switch into XAML mode - the exact case the
+        /// condition exists to spare, silently exempted from it. File.ReadAllText returns
+        /// whatever line endings are on disk, so this is a common file, not an exotic one.
+        /// </remarks>
+        [Test]
+        public void AnLfOnlyFileIsNotReSerializedOnItsFirstSwitchToXamlMode()
+        {
+            WinUITestHost.Run(() =>
+            {
+                // Guards the constant itself: a stray CRLF in the literal, or an editor
+                // rewriting the file, would make everything below pass for the wrong reason.
+                Assert.That(LfOnlyXaml, Does.Not.Contain("\r"), "the input must be LF-only");
+                Assert.That(LfOnlyXaml, Does.Contain("\n"), "and must have line breaks at all");
+
+                using (var doc = new Document(null, LfOnlyXaml))
+                {
+                    Assert.That(doc.LoadFailed, Is.False);
+                    Assert.That(doc.IsDirty, Is.False);
+
+                    var expected = Document.NormaliseLineEndings(LfOnlyXaml);
+
+                    doc.Mode = DocumentMode.Xaml;
+
+                    Assert.That(doc.Text, Is.EqualTo(expected)
+                        .Using((System.Collections.Generic.IComparer<string>)System.StringComparer.Ordinal),
+                        "the constructor normalises, so text == parsedText and the first switch " +
+                        "must not re-serialize - storing the argument raw exempted every LF-only " +
+                        "file from the fix");
+                    Assert.That(doc.IsDirty, Is.False, "and none of that is a user edit");
+
+                    // Not vacuous: a re-serialization of this input really is a different string,
+                    // so surviving the switch above means something.
+                    doc.UpdateXaml();
+                    Assert.That(doc.Text, Is.Not.EqualTo(expected)
+                        .Using((System.Collections.Generic.IComparer<string>)System.StringComparer.Ordinal),
+                        "UpdateXaml re-indents this document, so the switch above would have " +
+                        "been detectable had it run");
                 }
             });
         }

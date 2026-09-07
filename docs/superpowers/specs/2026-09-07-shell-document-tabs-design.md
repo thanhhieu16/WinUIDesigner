@@ -307,7 +307,14 @@ Both halves of the condition are needed. `text != parsedText` catches a document
 was edited since the last parse. `IsDirty` catches a **surface** edit, which moves the tree
 without touching `text`, so `text == parsedText` would otherwise wrongly skip the
 re-serialization and show stale XAML. `text` is normalised by `Text`'s setter and
-`parsedText` is stored normalised (Decision 14), so the comparison is apples to apples.
+`parsedText` is stored normalised (Decision 14), so the comparison is apples to apples — and
+the constructor normalises its argument too, for the same reason. `File.ReadAllText` returns
+whatever line endings are on disk, and LF-only XAML is ordinary (a checkout with
+`core.autocrlf=false`, a file authored on another platform, anything generated); storing that
+raw made `text != parsedText` true from the moment of construction and silently exempted
+every such file from the condition on its first switch into XAML mode. Line and column
+numbering is unaffected by line ending, so `LoadErrors`' coordinates mean the same thing
+against either form.
 
 A save from Design mode (`WriteToDisk` calls `UpdateXaml()`, then `MarkSaved()`) leaves
 `text` at the serialization and `parsedText` at the older parse, so the next switch to XAML

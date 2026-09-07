@@ -44,10 +44,25 @@ namespace WinUIDesigner.Shell
         DocumentMode mode;
         UndoService subscribedUndoService;
 
+        /// <summary>
+        /// Builds a document from <paramref name="text"/> and parses it immediately.
+        /// </summary>
+        /// <remarks>
+        /// The text is normalised here rather than stored raw, and that is not cosmetic.
+        /// <see cref="Mode"/>'s setter decides whether to re-serialize by comparing
+        /// <c>text</c> against <see cref="ParsedText"/>, which <see cref="UpdateDesign"/> always
+        /// stores normalised. File.ReadAllText hands back whatever line endings the file has, and
+        /// LF-only XAML is ordinary - a checkout with core.autocrlf=false, a file authored on
+        /// another platform, anything generated - so storing raw text made the two differ from
+        /// the moment of construction, and every such document re-serialized on its very first
+        /// switch into XAML mode. That is precisely the case the condition exists to spare.
+        /// Line and column numbering is unaffected by which line ending is used, so LoadErrors'
+        /// coordinates mean the same thing against either form.
+        /// </remarks>
         public Document(string filePath, string text)
         {
             this.filePath = filePath;
-            this.text = text;
+            this.text = NormaliseLineEndings(text);
             UpdateDesign();
             isDirty = false;
         }
