@@ -264,6 +264,16 @@ namespace WinUIDesigner.Shell.Tests
 
         // ---- error strip -----------------------------------------------------
 
+        /// <summary>
+        /// Both "Collapsed" assertions here have to be reached from a row that was actually
+        /// <c>Visible</c> first - <see cref="ErrorListView"/>'s constructor already leaves it
+        /// <c>Collapsed</c>, so asserting that value straight off a freshly-opened, never-failed
+        /// document would pass even with <c>errors.Show(...)</c> deleted outright from both
+        /// branches of <c>WireCurrentDocument</c>. Driving a failed parse first (the same
+        /// malformed-XAML dance <see cref="ADocumentThatFailedToParseFillsTheErrorRow"/> uses)
+        /// and then a clean one, and again right before closing, makes each "Collapsed" assertion
+        /// about the wiring actually clearing the row rather than about an untouched default.
+        /// </summary>
         [Test]
         public void TheErrorRowIsCollapsedForACleanDocumentAndForNoDocumentAtAll()
         {
@@ -271,14 +281,42 @@ namespace WinUIDesigner.Shell.Tests
             {
                 var window = NewWindow();
                 var shell = window.ShellForTest;
-                Assert.That(shell.CurrentDocument, Is.Not.Null);
-                Assert.That(shell.CurrentDocument.LoadErrors, Is.Empty);
+                var doc = shell.CurrentDocument;
+                Assert.That(doc, Is.Not.Null);
+                Assert.That(doc.LoadErrors, Is.Empty);
+
+                const string malformed = "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"";
+                const string wellFormed = "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" />";
+
+                // Populated branch, failing: proves errors.Show(wiredDocument.LoadErrors) can
+                // make the row Visible at all.
+                doc.Mode = DocumentMode.Xaml;
+                doc.Text = malformed;
+                doc.Mode = DocumentMode.Design;
+                Assert.That(doc.LoadFailed, Is.True);
+                Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Visible));
+
+                // Populated branch, clean: proves the same call clears the row once the
+                // document reparses without errors - this is the "clean document" half of the
+                // test's name, now a real transition instead of an unexercised default.
+                doc.Mode = DocumentMode.Xaml;
+                doc.Text = wellFormed;
+                doc.Mode = DocumentMode.Design;
+                Assert.That(doc.LoadFailed, Is.False);
                 Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Collapsed));
 
-                foreach (var doc in shell.Documents.ToList())
+                // Drive it Visible once more before closing, so the final assertion is about
+                // the no-document branch's errors.Show(null) actually clearing the row - not
+                // about a row that happened to be empty already.
+                doc.Mode = DocumentMode.Xaml;
+                doc.Text = malformed;
+                doc.Mode = DocumentMode.Design;
+                Assert.That(window.ErrorsForTest.Visibility, Is.EqualTo(Visibility.Visible));
+
+                foreach (var d in shell.Documents.ToList())
                 {
-                    doc.MarkSaved();
-                    shell.Close(doc);
+                    d.MarkSaved();
+                    shell.Close(d);
                 }
 
                 Assert.That(shell.CurrentDocument, Is.Null);
