@@ -69,7 +69,7 @@ namespace WinUIDesigner.Shell.Tests
         }
 
         [Test]
-        public void AProgrammaticTextChangeReachesTheEditorWithoutLooping()
+        public void AProgrammaticTextChangeReachesTheEditor()
         {
             WinUITestHost.Run(() =>
             {
@@ -112,6 +112,65 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// The first coverage of <c>JumpToError</c>'s own body - the <c>OffsetOf</c> and
+        /// <c>TokenLength</c> tests below exercise its helpers, not it.
+        /// </summary>
+        /// <remarks>
+        /// The refusing half is the important one. A document with an unknown property or a bad
+        /// conversion parses successfully (XamlParser.ReportException reports and continues when
+        /// an error sink is present), which is the only way the error strip fills on a freshly
+        /// opened file - and for such a document the mode switch inside JumpToError re-serializes
+        /// the tree over the buffer, so the reported line and column address text that no longer
+        /// exists.
+        /// </remarks>
+        [Test]
+        public void JumpToErrorSelectsTheReportedTokenOnlyWhileTheBufferIsStillWhatWasParsed()
+        {
+            WinUITestHost.Run(() =>
+            {
+                const string malformed =
+                    "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"";
+
+                // A document that failed to parse keeps its buffer - UpdateXaml early-returns on a
+                // null DesignContext - so the coordinates still address what the user is shown.
+                using (var doc = new Document(null, malformed))
+                {
+                    Assert.That(doc.LoadFailed, Is.True);
+                    var view = new DocumentView(doc);
+                    Assert.That(Document.NormaliseLineEndings(view.Editor.Text), Is.EqualTo(doc.ParsedText));
+
+                    view.JumpToError(new XamlError { Message = "unclosed", Line = 1, Column = 2 });
+
+                    Assert.That(doc.InXamlMode, Is.True, "jumping to an error shows the text");
+                    Assert.That(view.Editor.SelectionStart, Is.EqualTo(1));
+                    Assert.That(view.Editor.SelectionLength, Is.EqualTo(6), "the token at 1,2 is Canvas");
+                    view.Detach();
+                }
+
+                // A document that parsed has its buffer replaced the moment it enters XAML mode.
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var view = new DocumentView(doc);
+                    doc.Mode = DocumentMode.Xaml;
+
+                    Assert.That(Document.NormaliseLineEndings(view.Editor.Text), Is.Not.EqualTo(doc.ParsedText),
+                        "UpdateXaml re-indents and re-sorts, so the buffer is no longer the text " +
+                        "the reported coordinates were measured against");
+                    Assert.That(DocumentView.OffsetOf(view.Editor.Text, 1, 2), Is.GreaterThanOrEqualTo(0),
+                        "these coordinates are in range for this buffer, so a zero-length " +
+                        "selection below can only come from the staleness guard");
+
+                    view.JumpToError(new XamlError { Message = "unknown property", Line = 1, Column = 2 });
+
+                    Assert.That(view.Editor.SelectionLength, Is.EqualTo(0),
+                        "selecting at coordinates into text that no longer exists takes the user " +
+                        "to an unrelated token; selecting nothing is the honest answer");
+                    view.Detach();
+                }
+            });
+        }
+
         [Test]
         public void OffsetOfCountsLinesAndColumnsAndRefusesWhatIsOutOfRange()
         {
@@ -129,6 +188,15 @@ namespace WinUIDesigner.Shell.Tests
 
             Assert.That(DocumentView.OffsetOf(crlf, 9, 1), Is.EqualTo(-1), "line past the end");
             Assert.That(DocumentView.OffsetOf(crlf, 1, 99), Is.EqualTo(-1), "column past the end");
+
+            // A column past the end of its own line but still inside the string. The case above
+            // does not catch this: 99 overruns the whole text, so a bound of text.Length rejects
+            // it anyway. Here the only thing that can reject 6 is the end of line 1.
+            Assert.That(DocumentView.OffsetOf("one\r\ntwo", 1, 6), Is.EqualTo(-1),
+                "column past the end of its line, not of the text");
+            Assert.That(DocumentView.OffsetOf("one\r\ntwo", 1, 4), Is.EqualTo(3),
+                "one past the last character of the line is still in range");
+
             Assert.That(DocumentView.OffsetOf(crlf, 0, 1), Is.EqualTo(-1));
             Assert.That(DocumentView.OffsetOf(null, 1, 1), Is.EqualTo(-1));
         }

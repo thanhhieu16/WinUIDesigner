@@ -36,6 +36,7 @@ namespace WinUIDesigner.Shell
         readonly List<XamlError> loadErrors = new List<XamlError>();
 
         string text;
+        string parsedText;
         string filePath;
         string tempName;
         bool isDirty;
@@ -202,6 +203,26 @@ namespace WinUIDesigner.Shell
             get { return loadErrors.AsReadOnly(); }
         }
 
+        /// <summary>
+        /// The text <see cref="UpdateDesign"/> last handed to the parser, normalised, or null
+        /// before the first parse.
+        /// </summary>
+        /// <remarks>
+        /// The only thing <see cref="LoadErrors"/>' Line/Column coordinates mean anything against.
+        /// <see cref="UpdateXaml"/> replaces <see cref="Text"/> with a re-serialization of the
+        /// parsed tree - re-indented, attributes re-sorted, and typically without whatever
+        /// attribute the parser could not build - and it does that without reparsing, so after a
+        /// single switch into XAML mode the buffer and these coordinates describe different
+        /// documents. Stored normalised so a caller can compare it against
+        /// <see cref="NormaliseLineEndings"/> of a TextBox's text, which is the only text a
+        /// selection can be made in. Line and column numbering is unaffected by which line
+        /// ending is used, so normalising loses nothing the coordinates depend on.
+        /// </remarks>
+        internal string ParsedText
+        {
+            get { return parsedText; }
+        }
+
         /// <summary>The live design surface this document owns.</summary>
         /// <remarks>
         /// Callers must not call <c>LoadDesigner</c> on it directly. Every load installs a fresh
@@ -303,6 +324,10 @@ namespace WinUIDesigner.Shell
             OutlineRoot = null;
             loadErrors.Clear();
             LoadFailed = false;
+
+            // Recorded before the parse, not after, so it is right on both exits: the errors
+            // reported below carry coordinates into exactly this text and nothing else.
+            parsedText = NormaliseLineEndings(text);
 
             var settings = new XamlLoadSettings();
 

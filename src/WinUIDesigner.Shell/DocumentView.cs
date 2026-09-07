@@ -144,6 +144,20 @@ namespace WinUIDesigner.Shell
         /// normalises CRLF to lone CR (measured), so the two differ by one character per
         /// preceding line and a line-40 error computed against Document.Text lands 39 characters
         /// early. Spec Decision 20.
+        /// <para>
+        /// Selects nothing at all when the buffer is no longer the text those coordinates were
+        /// reported against. Measured: XamlParser.ReportException reports and continues whenever
+        /// an error sink is present, so a document with an unknown property or a bad conversion
+        /// parses successfully - LoadFailed false, LoadErrors non-empty - and that is the only way
+        /// the error strip fills on a freshly opened file. For such a document the mode switch
+        /// above runs UpdateXaml(), which replaces the buffer with a re-serialization of the
+        /// parsed tree: re-indented, attributes re-sorted, and typically without the offending
+        /// attribute at all, because the parser could not build it. The line and column still
+        /// refer to the original file text, which no longer exists, so selecting at them would
+        /// silently take the user to an unrelated token. The LoadFailed path is unaffected -
+        /// UpdateXaml() early-returns on a null DesignContext, so the buffer is still what was
+        /// parsed.
+        /// </para>
         /// </remarks>
         public void JumpToError(XamlError error)
         {
@@ -153,6 +167,13 @@ namespace WinUIDesigner.Shell
             document.Mode = DocumentMode.Xaml;
 
             var text = editor.Text ?? string.Empty;
+            if (Document.NormaliseLineEndings(text) != document.ParsedText)
+            {
+                editor.SelectionStart = 0;
+                editor.SelectionLength = 0;
+                return;
+            }
+
             int start = OffsetOf(text, error.Line, error.Column);
             if (start < 0)
             {
@@ -202,8 +223,17 @@ namespace WinUIDesigner.Shell
             if (currentLine < line)
                 return -1;
 
+            // The column has to land inside the line just located, not merely inside the string.
+            // Bounding it by text.Length instead let OffsetOf("one\r\ntwo", 1, 6) return 5 - the
+            // first character of line 2 - where Spec Decision 20 says an out-of-range line OR
+            // column selects nothing. One past the last character is still in range, matching the
+            // end-of-text case this replaced.
+            int lineEnd = i;
+            while (lineEnd < text.Length && text[lineEnd] != '\r' && text[lineEnd] != '\n')
+                lineEnd++;
+
             int offset = i + (column - 1);
-            return offset > text.Length ? -1 : offset;
+            return offset > lineEnd ? -1 : offset;
         }
 
         /// <summary>
