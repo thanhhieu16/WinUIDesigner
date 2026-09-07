@@ -96,12 +96,55 @@ AngleX, AngleY, CenterX, CenterY, Inverse, Dispatcher, DispatcherQueue
 `Inverse` is computed and has no setter in XAML terms; `Dispatcher` and `DispatcherQueue` are
 runtime plumbing. A walker driven by `TypeDescriptor` alone would try to serialize all three.
 
-### `ReadLocalValue` is a working "was this actually set" oracle
+Filtering on **writable and backed by a `DependencyProperty`** removes exactly the junk, on
+every type measured. `WinUIStaticMemberLocator.FindDependencyProperty(type, name)`
+(`XamlPropertyInfo.cs:100`) supplies the second half:
+
+| Type | Kept by the filter |
+|---|---|
+| `SkewTransform` | `AngleX, AngleY, CenterX, CenterY` |
+| `TransformGroup` | `Children` |
+| `LinearGradientBrush` | `EndPoint, StartPoint, ColorInterpolationMode, GradientStops, MappingMode, SpreadMethod, Opacity, RelativeTransform, Transform` |
+| `RectangleGeometry` | `Rect, Transform` |
+| `GeometryGroup` | `Children, FillRule, Transform` |
+
+So an entry does not need a hand-typed property list; it needs only to name the type. The
+filter is what keeps `Inverse`, `Bounds`, `Value`, `Dispatcher` and `DispatcherQueue` out.
+
+### Enum-valued properties already work, with no new formatter entry
+
+`GeometryGroup.FillRule` set to `Nonzero` and written through `CreatePropertyValue` produces
+`<GeometryGroup FillRule="Nonzero" />`. `TypeDescriptor.GetConverter` returns an `EnumConverter`
+for an enum type, which answers both directions, so Phase B's existing `hasStringConverter`
+branch claims it before this phase's code is reached. `SpreadMethod`, `MappingMode`,
+`ColorInterpolationMode` and `FillRule` need nothing.
+
+### Nested listed types recurse and round-trip
+
+A `RectangleGeometry` carrying `Rect = 1,2,3,4` and `Transform = RotateTransform { Angle = 45 }`
+writes as
+
+```xml
+<RectangleGeometry Rect="1,2,3,4">
+  <RectangleGeometry.Transform><RotateTransform Angle="45" /></RectangleGeometry.Transform>
+</RectangleGeometry>
+```
+
+and reparses to a rect of `1,2,3,4` and an angle of `45`.
+
+### `ReadLocalValue` is a working oracle for scalars and useless for collections
 
 On `new SkewTransform { AngleX = 30 }`, comparing `ReadLocalValue(dp)` against
 `DependencyProperty.UnsetValue` reports `AngleX` set, `AngleY` and `CenterX` not set. The
 codebase already relies on this API for the same kind of question
 (`XamlValueConverter.cs:219`).
+
+It does **not** work for collection properties. Measured: `LinearGradientBrush.GradientStops`
+reads as *not* locally set on a fresh brush **and still reads as not locally set after two
+`GradientStop`s have been added to it**. Same for `TransformGroup.Children` and
+`GeometryGroup.Children`. The collection is the property's lazily-created default value and is
+mutated in place, so nothing is ever locally set. A writer gated on `ReadLocalValue` alone
+would emit no gradient stops at all — the exact bug this phase exists to fix, reintroduced.
 
 ### The scalar write path already works through the public API
 
@@ -175,22 +218,32 @@ type lost.
 *Cost if wrong:* a bug in the bottom layer reaches all four projects. Mitigated by Decision 2's
 gate and Decision 5's refusal rule — an unlisted type keeps today's exact behaviour.
 
-**2. An explicit allow-list table decides which types are serialized, not reflection over
-whatever `TypeDescriptor` returns.**
-Same shape as `XamlValueConverter`'s and `XamlValueFormatter`'s sixteen-entry tables, and for
-the same reason those exist: WinRT metadata does not carry the attributes that would make a
-generic walk safe. The measurement above is the concrete case — `Inverse`, `Dispatcher` and
-`DispatcherQueue` are returned for `SkewTransform` and none of them belongs in XAML. Each entry
-names the type and the properties to consider.
-*Cost of the cut:* a type outside the table still saves as an empty element. It keeps today's
+**2. An explicit allow-list of *types* decides what is serialized; the *properties* of a listed
+type are derived by filtering on "writable and backed by a `DependencyProperty`".**
+Two separate jobs. The filter handles junk properties and was measured to do it cleanly on all
+five types tried — `Inverse`, `Bounds`, `Value`, `Dispatcher` and `DispatcherQueue` all fail it,
+and nothing wanted does. The allow-list handles blast radius: it is what keeps this phase from
+attempting to serialize an arbitrary `Storyboard` or `BitmapImage` the first time one appears
+in a document. Same shape as `XamlValueConverter`'s and `XamlValueFormatter`'s sixteen-entry
+tables, which exist because WinRT metadata carries none of the attributes that would make an
+unbounded walk safe.
+*Cost of the cut:* a type outside the list still saves as an empty element. It keeps today's
 behaviour rather than a new wrong one, and adding an entry is a one-line change.
+*Cost if wrong:* if the filter lets something through on an unmeasured type, the output carries
+a property XAML cannot read back. The round-trip tests in the DoD are what catch that, which is
+why every listed type gets one rather than a "does not throw" assertion.
 
-**3. A property is written only when `ReadLocalValue(dp) != DependencyProperty.UnsetValue`.**
-Writing every listed property unconditionally would put `CenterX="0" CenterY="0"` into every
-saved transform, and the same noise into every gradient stop.
-*Cost if wrong:* a property set to its own default value through a path that does not register
-as a local value would be dropped. No such path is known for the listed types; the DoD covers
-the round-trip for each.
+**3. A scalar property is written only when
+`ReadLocalValue(dp) != DependencyProperty.UnsetValue`. A collection property is written when its
+live collection is non-null and non-empty.**
+Writing every property unconditionally would put `CenterX="0" CenterY="0"` into every saved
+transform. But `ReadLocalValue` cannot be the rule for collections: measured, a
+`GradientStopCollection` reads as not locally set even after two stops have been added to it,
+because the collection is the lazily-created default value and is mutated in place. Gating
+collections on `ReadLocalValue` would emit no gradient stops at all.
+*Cost if wrong:* a scalar set to its own default value through a path that does not register as
+a local value would be dropped. No such path is known for the listed types; the DoD covers the
+round-trip for each.
 
 **4. Collections are written through the parser-side path — append the child node to the
 property element, then `ParserAddCollectionElement` — never through
@@ -247,29 +300,20 @@ XamlDocument.CreatePropertyValue(parent, instance, forProperty)
     └─ neither                                 → empty element + sink report
 ```
 
-`XamlInstanceWriter` holds the table and one recursive walk:
+`XamlInstanceWriter` holds the type list and one recursive walk:
 
-- `HasEntry(Type)` — is this type listed.
-- `TryWrite(XamlObject target, int depth)` — for each listed property of `target.ElementType`
-  that reads as locally set on `target.Instance`, either
-  - **scalar:** `target.FindOrCreateProperty(name).PropertyValue = document.CreatePropertyValue(value, property)` — recursion lands back in `CreatePropertyValue`, so a leaf goes through `XamlValueFormatter` and a listed nested object comes back here;
+- `HasEntry(Type)` — is this type listed. A plain `HashSet<Type>`, since Decision 2 derives the
+  properties rather than listing them.
+- `TryWrite(XamlObject target, int depth)` — for each property of `target.ElementType` that is
+  writable and backed by a `DependencyProperty`, and that Decision 3's rule says is set, either
+  - **scalar:** `target.FindOrCreateProperty(name).PropertyValue = document.CreatePropertyValue(value, property)` — recursion lands back in `CreatePropertyValue`, so a leaf goes through `XamlValueFormatter`, an enum goes through Phase B's `hasStringConverter` branch, and a listed nested object comes back here;
   - **collection:** create the `<Owner.Property>` element, append each child's `XmlElement`, then `ParserAddCollectionElement`, then recurse into each child.
 
   Returns `false` on any refusal, leaving the element as it was.
 
-Table entry shape, mirroring `XamlValueFormatter.Add`:
-
-```csharp
-Add(table, typeof(SkewTransform),
-    "AngleX", "AngleY", "CenterX", "CenterY");
-Add(table, typeof(LinearGradientBrush),
-    "StartPoint", "EndPoint", "SpreadMethod", "MappingMode", "Opacity", "GradientStops");
-```
-
-Property-name-to-`DependencyProperty` resolution for Decision 3's oracle uses the existing
-`XamlProperty.DependencyProperty` (`XamlProperty.cs:690`); a listed property that resolves to
-no `DependencyProperty` is written unconditionally if it reads non-null and non-default, or
-refused if that cannot be determined.
+Property-name-to-`DependencyProperty` resolution, for both the filter and Decision 3's oracle,
+uses `WinUIStaticMemberLocator.FindDependencyProperty(Type, string)` (`XamlPropertyInfo.cs:100`).
+It already degrades to `null` rather than throwing when the static accessor cannot be read.
 
 ## Testing and definition of done
 
@@ -282,7 +326,11 @@ project's `.exe` as CLAUDE.md requires. Every test runs inside `WinUITestHost.Ru
 4. `LinearGradientBrush` with two stops round-trips: stop count, colours, offsets.
 5. `RectangleGeometry`, `EllipseGeometry`, `LineGeometry`, `GeometryGroup` round-trip.
 6. Unset properties are absent from the output — a `SkewTransform` with only `AngleX` set does
-   not emit `CenterX`.
+   not emit `CenterX`, and no listed type emits `Inverse`, `Bounds`, `Value`, `Dispatcher` or
+   `DispatcherQueue`.
+6b. A populated collection is emitted even though `ReadLocalValue` reports it unset. This is
+   Decision 3's split, and a writer that gated collections on `ReadLocalValue` would pass every
+   other test in this list while emitting no gradient stops.
 7. A type outside the table (`ImageBrush`) still emits its empty element, and now reports
    through `IXamlErrorSink`.
 8. A `{Binding}` on a property whose declared type is listed still round-trips as a markup
