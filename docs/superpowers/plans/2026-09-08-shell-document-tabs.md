@@ -2199,6 +2199,33 @@ Run `src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/W
 7. Double-clicking an error jumps into XAML mode with the token selected.
 8. Save All prompts once per never-saved document.
 
+**Walked on 2026-09-08 against `6c779e2`, driven by synthetic input rather than by hand.**
+All eight pass. What each one was checked against:
+
+| # | Evidence |
+|---|----------|
+| 1 | Tab headers read `New1` and `Broken.xaml`; typing in the editor turned the header into `Broken.xaml*` and the window title into `Broken.xaml* - WinUI Designer`; saving cleared both, and Save As renamed the header to `New1.xaml`. |
+| 2 | Clicking the `New1` tab switched the title to `New1 - WinUI Designer`, swapped the outline from `Grid/Canvas/Button/Button` back to a lone `Canvas`, and collapsed the error strip; clicking back restored all three. |
+| 3 | The tab close button raised "Unsaved changes — Save changes to \"Broken.xaml\"?" with Save / Discard / Cancel. Cancel left the tab in place, still dirty, with its text intact. |
+| 4 | With `New1` set to Design and `Broken.xaml` set to XAML, switching between the tabs kept each document's own mode. |
+| 5 | Typing ` EDITED` into the XAML editor and pressing Ctrl+S wrote that exact text to `Broken.xaml` on disk and cleared the dirty marker. |
+| 6 | Re-opening the already-open `Broken.xaml` through Ctrl+O switched to its existing tab: still two tabs, no reload, no second error dialog. |
+| 7 | Double-clicking the error row switched to XAML mode and selected `Width=` at line 7, column 50 — the token the error names. |
+| 8 | With both documents dirty, Save All raised exactly one Save As dialog (for the never-saved `New1`, defaulted to `New1.xaml`), then wrote both files. |
+
+Two things the walkthrough settled that the test suite could not:
+
+- The editor's monospace font resolves — the XAML pane renders in a fixed-pitch
+  face, closing the spec's "font string unverified" gap.
+- An opened file keeps its own text in the XAML view: the leading comment, the
+  original indentation and the original attribute order all survived, which is
+  what skipping re-serialization for an untouched document was meant to buy.
+
+One defect found, and it predates this phase: the property grid's rows are wider
+than the 280px right column (`MainWindow.cs:134`), so a long value is cut off at
+the window edge with no horizontal scroll — `HorizontalAlignment` rendered as
+`Windows.Foundatio`. The tabs phase did not touch that column.
+
 ## Plan self-review
 
 **Spec coverage.** Decision 1 → Task 5 Step 3. 2 → Tasks 3 and 5. 3 → Task 5 Step 5. 4 → Task 5 Steps 4 and 5. 5 → Task 5 (`SyncSelectedTab`, `syncingSelection`). 6 → Task 5 Steps 7–8 and Task 2 Step 4 (`Open` de-dupe). 7 → Tasks 5 and 6 (every command routes through `PrepareForCloseAsync`). 8 → Task 6 `SaveAllAsync`. 9 → Task 6 `CloseAllAsync`. 10 → Task 1 `Mode` guard + `ReAssertingTheCurrentModeIsANoOp...`. 11 → Task 1 `DocumentMode.cs`. 12 → Task 2 Step 3. 13 → Task 3 editor. 14 → Task 1 `Text` setter + `NormaliseLineEndings`, Task 3 sync + `OpeningTheXamlViewDoesNotDirty...`. 15 → Task 1 `SelectionService` + `OnUndoStackChanged`. 16 → Task 1 `MalformedTextSwitchedToDesignMode...`. 17 → Task 1 remark (no code change; the null-checks in `OnSelectionChanged`/`OnUndoStackChanged` are left alone). 18 → Task 4 `MaxListHeight` + Task 7 row. 19 → Task 4 `XamlErrorNode`. 20 → Task 3 `JumpToError`/`OffsetOf`/`TokenLength` + the Step 5 delay measurement. 21 → Task 3 group name and suppression flag and layout. 22 → Task 5 `RememberDocument`/`ForgetDocument`/`OnDocumentPropertyChanged`. 23 → nothing to do; verified by Task 7 Step 6.
