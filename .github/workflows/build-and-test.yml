@@ -1,0 +1,52 @@
+# Builds the solution and runs every test project through its own .exe, the way CLAUDE.md
+# requires: `dotnet test` cannot activate Microsoft.UI.Xaml classes and reports those tests as
+# ignored, so it is not a green run.
+name: Build and test
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build WinUIDesigner.sln
+
+      # Each project runs in its own process, and every one runs even if an earlier one failed.
+      # NUnitLite's exit code is its failure count, so any non-zero code fails the step.
+      - name: Test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force TestResults | Out-Null
+          $failed = @()
+          foreach ($name in 'XamlDom', 'DesignModel', 'Designer', 'Shell') {
+            $exe = "tests/WinUIDesigner.$name.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.$name.Tests.exe"
+            Write-Host "::group::WinUIDesigner.$name.Tests"
+            & $exe "--result=TestResults/WinUIDesigner.$name.Tests.xml"
+            $code = $LASTEXITCODE
+            Write-Host "::endgroup::"
+            Write-Host "WinUIDesigner.$name.Tests exited with $code"
+            if ($code -ne 0) { $failed += "WinUIDesigner.$name.Tests ($code)" }
+          }
+          if ($failed.Count -gt 0) {
+            Write-Host "::error::Failed: $($failed -join ', ')"
+            exit 1
+          }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/
