@@ -201,9 +201,15 @@ namespace WinUIDesigner.Designer.Tests
                 var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Visibility");
                 var comboBox = (ComboBox)node.Editor;
 
-                CollectionAssert.Contains(((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList(), Microsoft.UI.Xaml.Visibility.Collapsed);
+                // Display strings, not the boxed enum values: a boxed enum in ItemsSource renders
+                // as its WinRT runtime class name ("Windows.Foundation.IReference`1<...>").
+                var items = ((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList();
+                Assert.That(items, Is.All.InstanceOf<string>());
+                CollectionAssert.Contains(items, "Collapsed");
+                var index = items.IndexOf("Collapsed");
+                Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, WinUIDesigner.Designer.PropertyGrid.Editors.ComboBoxEditor.ValueAt(comboBox, index));
 
-                comboBox.SelectedItem = Microsoft.UI.Xaml.Visibility.Collapsed;
+                comboBox.SelectedIndex = index;
                 RaiseSelectionChanged(comboBox);
 
                 Assert.AreEqual(Microsoft.UI.Xaml.Visibility.Collapsed, ((Button)a.Component).Visibility);
@@ -267,17 +273,17 @@ namespace WinUIDesigner.Designer.Tests
                     var node = grid.Categories.SelectMany(c => c.Properties).First(p => p.Name == "Background");
                     var comboBox = (ComboBox)node.Editor;
 
-                    Assert.AreEqual("Name", comboBox.DisplayMemberPath);
-                    Assert.AreEqual("Value", comboBox.SelectedValuePath);
+                    // The names are shown as plain strings - DisplayMemberPath="Name" against
+                    // Metadata's private NamedValue rendered every row blank - and the value behind
+                    // each one is looked up by index.
                     var items = ((System.Collections.IEnumerable)comboBox.ItemsSource).Cast<object>().ToList();
                     Assert.AreEqual(2, items.Count, "AddDoubleNamedStandardValues reflects NamedBrushValues' 2 public static properties");
+                    CollectionAssert.AreEquivalent(new[] { "First", "Second" }, items);
+                    var index = items.IndexOf("First");
+                    Assert.AreSame(NamedBrushValues.First, WinUIDesigner.Designer.PropertyGrid.Editors.ComboBoxEditor.ValueAt(comboBox, index));
 
-                    // Full round-trip, fix round 2: Commit now reads comboBox.SelectedValue (not
-                    // .SelectedItem, which was the opaque NamedValue wrapper - the bug reported after
-                    // fix round 1). Setting SelectedValue directly to the real underlying value (not
-                    // the wrapper) exercises WinUI's Selector reverse lookup: it searches ItemsSource
-                    // for whichever item's "Value" (SelectedValuePath) matches and selects that item,
-                    // proving DisplayMemberPath/SelectedValuePath are correctly wired both directions.
+                    // Full round-trip: Commit reads the value behind SelectedIndex, never the
+                    // displayed name.
                     // This assignment alone already fires a real SelectionChanged synchronously (the
                     // same mechanism the re-entrancy guard above protects against in the model->control
                     // sync direction), which commits for real right here - deliberately NOT also calling
@@ -287,7 +293,7 @@ namespace WinUIDesigner.Designer.Tests
                     // ("already has a parent", confirmed empirically) once the first commit has already
                     // parented it - unlike the enum test's boxed values, which never go through that
                     // DesignItem-registration path at all.
-                    comboBox.SelectedValue = NamedBrushValues.First;
+                    comboBox.SelectedIndex = index;
                     Assert.AreSame(NamedBrushValues.First, ((Button)a.Component).Background);
                 } finally {
                     ResetMetadataNamedStandardValues();
