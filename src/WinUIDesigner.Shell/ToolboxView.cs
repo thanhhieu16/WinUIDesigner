@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.Designer.Services;
 
@@ -21,6 +22,13 @@ namespace WinUIDesigner.Shell
     /// re-clicking it raises no event. Clearing the selection when the engine resets is what
     /// keeps the same control placeable twice in a row. Phase 5 Decision 12.
     /// </para>
+    /// <para>
+    /// An entry can also be dragged onto the surface. The drag uses the list's own item drag
+    /// rather than StartDragAsync, arms a CreateComponentTool exactly as a click does, and carries
+    /// only the type's name in the DataPackage: a managed tool cannot cross into WinRT, and it
+    /// does not need to, since only the current tool listens to the surface's drag events.
+    /// Toolbox-drag spec Decisions 1, 2 and 6.
+    /// </para>
     /// </remarks>
     public sealed class ToolboxView : UserControl
     {
@@ -28,6 +36,7 @@ namespace WinUIDesigner.Shell
         readonly List<ControlNode> nodes;
         IToolService toolService;
         bool suppressSelectionChanged;
+        CreateComponentTool draggedTool;
 
         public ToolboxView()
         {
@@ -45,6 +54,17 @@ namespace WinUIDesigner.Shell
             list.ItemsSource = nodes;
             list.DisplayMemberPath = "Name";
             list.SelectionChanged += OnSelectionChanged;
+
+            // CanReorderItems and AllowDrop stay at their default, false: entries can be dragged
+            // out, never reordered or dropped onto.
+            list.CanDragItems = true;
+            list.DragItemsStarting += (s, e) =>
+            {
+                var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
+                if (!BeginDrag(node?.Type, e.Data))
+                    e.Cancel = true;
+            };
+            list.DragItemsCompleted += (s, e) => CompleteDrag(e.DropResult);
 
             // A ListView already contains its own ScrollViewer. Wrapping it in another one
             // hands the inner list an infinite available height, so its virtualizing panel
@@ -78,6 +98,7 @@ namespace WinUIDesigner.Shell
             if (toolService != null)
                 toolService.CurrentToolChanged -= OnCurrentToolChanged;
             toolService = null;
+            draggedTool = null;
 
             suppressSelectionChanged = true;
             try
@@ -129,11 +150,66 @@ namespace WinUIDesigner.Shell
             Arm((list.SelectedItem as ControlNode)?.Type);
         }
 
-        void Arm(Type type)
+        CreateComponentTool Arm(Type type)
         {
             if (type == null || toolService == null)
+                return null;
+            var tool = new CreateComponentTool(type);
+            toolService.CurrentTool = tool;
+            return tool;
+        }
+
+        /// <summary>The list the entries are shown and dragged from. Test seam.</summary>
+        internal ListView ListForTest
+        {
+            get { return list; }
+        }
+
+        /// <summary>Starts a toolbox drag of <paramref name="type"/>. Test seam.</summary>
+        internal bool BeginDragForTest(Type type, DataPackage data)
+        {
+            return BeginDrag(type, data);
+        }
+
+        /// <summary>Ends a toolbox drag as the system would report it. Test seam.</summary>
+        internal void CompleteDragForTest(DataPackageOperation result)
+        {
+            CompleteDrag(result);
+        }
+
+        /// <remarks>
+        /// Returns false - and the caller cancels the drag - when no tool service is attached:
+        /// with no document open, or the current one in XAML mode, there is no surface the drop
+        /// could land on.
+        /// </remarks>
+        bool BeginDrag(Type type, DataPackage data)
+        {
+            draggedTool = null;
+            var tool = Arm(type);
+            if (tool == null)
+                return false;
+
+            draggedTool = tool;
+            data.Properties[CreateComponentTool.ToolboxTypeKey] = type.AssemblyQualifiedName;
+            data.RequestedOperation = DataPackageOperation.Copy;
+            return true;
+        }
+
+        /// <remarks>
+        /// A drag that ended in None - Escape, or a release anywhere that refused it - disarms the
+        /// tool it armed, so the user's next click on the surface does not place a control they
+        /// abandoned. Resetting to PointerTool also clears the selection, through
+        /// OnCurrentToolChanged. A drop that landed has already reset the tool itself, and a tool
+        /// the user has since changed is left alone.
+        /// </remarks>
+        void CompleteDrag(DataPackageOperation result)
+        {
+            var tool = draggedTool;
+            draggedTool = null;
+            if (result != DataPackageOperation.None || tool == null || toolService == null)
                 return;
-            toolService.CurrentTool = new CreateComponentTool(type);
+            if (ReferenceEquals(toolService.CurrentTool, tool))
+                toolService.CurrentTool = toolService.PointerTool;
         }
 
         void OnCurrentToolChanged(object sender, EventArgs e)

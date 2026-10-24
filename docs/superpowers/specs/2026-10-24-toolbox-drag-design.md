@@ -1,7 +1,7 @@
 # Toolbox drag-to-place — design
 
 **Date:** 2026-10-24
-**Status:** draft, awaiting review
+**Status:** approved 2026-10-24; planned in `docs/superpowers/plans/2026-10-24-toolbox-drag.md`
 **Reference:** `F:\ReferencesCode\CSharp\WpfDesigner\XamlDesigner` (read-only) — `ToolboxView`
 starts `DragDrop.DoDragDrop` with the prepared tool; `WpfDesign.Designer`'s
 `CreateComponentTool` handles the drop.

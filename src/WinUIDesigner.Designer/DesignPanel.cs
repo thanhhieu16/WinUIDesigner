@@ -24,6 +24,15 @@ namespace WinUIDesigner.Designer
 			Children.Add(_adornerLayer);
 			IsContentHitTestVisible = true;
 			IsTabStop = true; // makes Focus()/KeyDown reachable - same reasoning as DesignerThumb's own IsTabStop=true (DragListener.cs's Escape-to-cancel comment)
+			// A drop target for the toolbox drag (toolbox-drag spec Decision 5). WinUI raises
+			// DragEnter/DragOver/Drop only on an element with AllowDrop set, and delivers drag input,
+			// like pointer input, only where something is hit-testable - a null Background is not,
+			// and neither this panel nor a new document's root Canvas sets one, so without the
+			// Transparent brush a drag over an empty stretch of the surface reaches no handler.
+			// Harmless while PointerTool is current: it subscribes to no drag event, so the system
+			// refuses the drag.
+			AllowDrop = true;
+			Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 		}
 
 		public UIElement Content {

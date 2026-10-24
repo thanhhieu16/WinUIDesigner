@@ -3,6 +3,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
+using Windows.ApplicationModel.DataTransfer;
 using WinUIDesigner.DesignModel;
 using WinUIDesigner.TestHost;
 
@@ -207,6 +208,117 @@ namespace WinUIDesigner.Shell.Tests
                     "an attached tool service is supposed to hold the view through its " +
                     "CurrentToolChanged subscription - without that, the test above proves nothing");
                 GC.KeepAlive(live);
+            });
+        }
+
+        [Test]
+        public void EntriesCanBeDraggedOutButNotReorderedOrDroppedOnto()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var list = new ToolboxView().ListForTest;
+                Assert.That(list.CanDragItems, Is.True);
+                Assert.That(list.CanReorderItems, Is.False);
+                Assert.That(list.AllowDrop, Is.False);
+            });
+        }
+
+        [Test]
+        public void BeginningADragArmsTheDraggedTypeAndMarksTheDataPackage()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var tools = new FakeToolService(new FakePointerTool());
+                var view = new ToolboxView();
+                view.Attach(tools);
+                var data = new DataPackage();
+
+                Assert.That(view.BeginDragForTest(typeof(Button), data), Is.True);
+
+                var armed = tools.CurrentTool as WinUIDesigner.Designer.Services.CreateComponentTool;
+                Assert.That(armed, Is.Not.Null, "a drag arms a CreateComponentTool exactly as a click does");
+                Assert.That(armed.ComponentType, Is.EqualTo(typeof(Button)));
+                Assert.That(data.RequestedOperation, Is.EqualTo(DataPackageOperation.Copy));
+                object marker;
+                Assert.That(data.Properties.TryGetValue(WinUIDesigner.Designer.Services.CreateComponentTool.ToolboxTypeKey, out marker), Is.True);
+                Assert.That(marker, Is.EqualTo(typeof(Button).AssemblyQualifiedName));
+            });
+        }
+
+        [Test]
+        public void ADragWithNoAttachedToolServiceIsRefused()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var view = new ToolboxView();
+                var data = new DataPackage();
+
+                Assert.That(view.BeginDragForTest(typeof(Button), data), Is.False,
+                    "with no document, or one in XAML mode, there is nowhere for the drop to land");
+                object marker;
+                Assert.That(data.Properties.TryGetValue(WinUIDesigner.Designer.Services.CreateComponentTool.ToolboxTypeKey, out marker), Is.False);
+            });
+        }
+
+        [Test]
+        public void AnAbandonedDragDisarmsTheToolItArmed()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var pointer = new FakePointerTool();
+                var tools = new FakeToolService(pointer);
+                var view = new ToolboxView();
+                view.Attach(tools);
+
+                view.BeginDragForTest(typeof(Button), new DataPackage());
+                Assert.That(tools.CurrentTool, Is.Not.SameAs(pointer));
+
+                view.CompleteDragForTest(DataPackageOperation.None);
+
+                Assert.That(tools.CurrentTool, Is.SameAs(pointer),
+                    "otherwise the next click on the surface places a control the user abandoned");
+                Assert.That(view.SelectedTypeForTest, Is.Null);
+            });
+        }
+
+        [Test]
+        public void AnAbandonedDragLeavesAToolTheUserHasSinceChosenAlone()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var pointer = new FakePointerTool();
+                var tools = new FakeToolService(pointer);
+                var view = new ToolboxView();
+                view.Attach(tools);
+
+                view.BeginDragForTest(typeof(Button), new DataPackage());
+                view.SelectForTest(typeof(CheckBox));
+                var chosen = tools.CurrentTool;
+
+                view.CompleteDragForTest(DataPackageOperation.None);
+
+                Assert.That(tools.CurrentTool, Is.SameAs(chosen));
+            });
+        }
+
+        [Test]
+        public void ACompletedDropLeavesTheToolAsTheDropLeftIt()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var tools = new FakeToolService(new FakePointerTool());
+                var view = new ToolboxView();
+                view.Attach(tools);
+
+                view.BeginDragForTest(typeof(Button), new DataPackage());
+                var armed = tools.CurrentTool;
+
+                // The real drop resets the tool itself (CreateComponentTool.HandleDrop); Copy
+                // means the toolbox has nothing left to undo. Nothing resets it here, so the
+                // armed tool surviving proves CompleteDrag did not touch it.
+                view.CompleteDragForTest(DataPackageOperation.Copy);
+
+                Assert.That(tools.CurrentTool, Is.SameAs(armed));
             });
         }
     }

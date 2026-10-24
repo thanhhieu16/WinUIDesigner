@@ -22,8 +22,6 @@ namespace WinUIDesigner.Designer.Services
 		readonly Type _componentType;
 		readonly object[] _arguments;
 		CreateComponentMouseGesture _gesture;
-		DesignItem _dropItem;
-		ChangeGroup _dropChangeGroup;
 
 		// Set true the moment ANY gesture starts (plain-control drag, or an IDrawItemExtension's
 		// own multi-click gesture - DrawPolylineMouseGesture/DrawPathMouseGesture, Tasks 10/13,
@@ -36,6 +34,12 @@ namespace WinUIDesigner.Designer.Services
 		// is single-use by design (a fresh one is constructed per toolbox interaction, matching
 		// the reference's own ToolboxView.PrepareTool).
 		bool _drawing;
+
+		/// <summary>The DataPackage property a toolbox drag writes the dragged type's
+		/// assembly-qualified name under. A drag is accepted only when it carries this key naming
+		/// this tool's own ComponentType, so text or files dragged in from another application
+		/// never place a control that happens to be armed (toolbox-drag spec Decision 3).</summary>
+		public const string ToolboxTypeKey = "WinUIDesigner.ToolboxType";
 
 		public CreateComponentTool(Type componentType) : this(componentType, null) { }
 
@@ -60,6 +64,7 @@ namespace WinUIDesigner.Designer.Services
 		public void Activate(IDesignPanel designPanel)
 		{
 			designPanel.PointerPressed += OnPointerPressed;
+			designPanel.DragEnter += OnDragOver;
 			designPanel.DragOver += OnDragOver;
 			designPanel.Drop += OnDrop;
 			designPanel.DragLeave += OnDragLeave;
@@ -68,6 +73,7 @@ namespace WinUIDesigner.Designer.Services
 		public void Deactivate(IDesignPanel designPanel)
 		{
 			designPanel.PointerPressed -= OnPointerPressed;
+			designPanel.DragEnter -= OnDragOver;
 			designPanel.DragOver -= OnDragOver;
 			designPanel.Drop -= OnDrop;
 			designPanel.DragLeave -= OnDragLeave;
@@ -135,67 +141,75 @@ namespace WinUIDesigner.Designer.Services
 		void OnDragOver(object sender, DragEventArgs e)
 		{
 			var designPanel = (DesignPanel)sender;
-			HandleDragOver(designPanel, e.GetPosition(designPanel), e);
+			e.AcceptedOperation = HandleDragOver(designPanel, e.GetPosition(designPanel), e.DataView.Properties);
+			e.Handled = true;
 		}
 
-		/// <summary>Toolbox-drop path (spec's "Known gaps" #3: no real toolbox exists yet to
-		/// exercise this end-to-end - built and unit-tested via this extracted method, ready for
-		/// Phase 5's real toolbox). Deliberately simpler than the reference's live-follow-cursor
-		/// MoveLogic-driven version: creates and inserts the item once, on the first DragOver
-		/// that hits a valid container, at that point; later DragOver calls while still over the
-		/// canvas just keep accepting the Copy operation so cursor feedback stays correct. This
-		/// scope narrowing is because MoveLogic (Controls/MoveLogic.cs) operates in window
-		/// coordinates while DragEventArgs.GetPosition naturally gives panel-relative ones, and
-		/// reconciling the two exactly needs more empirical verification than this
-		/// hard-to-exercise, low-priority path (Known gap #3) justifies right now.</summary>
-		internal void HandleDragOver(IDesignPanel designPanel, Point point, DragEventArgs e)
+		/// <summary>Toolbox-drag path, deciding only: Copy over a model item that carries an
+		/// IPlacementBehavior, None anywhere else or for a drag that is not this tool's. Nothing is
+		/// created or inserted here - insertion happens once, on Drop, at the release point
+		/// (toolbox-drag spec Decision 4). Phase 4d's version inserted on the FIRST DragOver that
+		/// hit a container, which placed the control where the cursor entered the surface rather
+		/// than where it was released. The check is looser than the drop's own
+		/// CanEnterContainer, which needs a PlacementOperation around an already-created item -
+		/// exactly the per-DragOver work this avoids - so the cursor can read Copy over a
+		/// container that then refuses the drop.</summary>
+		internal DataPackageOperation HandleDragOver(IDesignPanel designPanel, Point point, IReadOnlyDictionary<string, object> properties)
 		{
-			e.AcceptedOperation = DataPackageOperation.Copy;
-			e.Handled = true;
-			if (_dropItem != null) return;
-
+			if (!CarriesThisTool(properties)) return DataPackageOperation.None;
 			var result = designPanel.HitTest(point, false, true, HitTestType.Default);
-			if (result.ModelHit == null) return;
+			if (result.ModelHit == null || result.ModelHit.GetBehavior<IPlacementBehavior>() == null) return DataPackageOperation.None;
+			return DataPackageOperation.Copy;
+		}
+
+		void OnDrop(object sender, DragEventArgs e)
+		{
+			var designPanel = (DesignPanel)sender;
+			e.AcceptedOperation = HandleDrop(designPanel, e.GetPosition(designPanel), e.DataView.Properties)
+				? DataPackageOperation.Copy
+				: DataPackageOperation.None;
+			e.Handled = true;
+		}
+
+		/// <summary>Places the dragged control at the drop point - the same create, insert at
+		/// default size, select and commit the click path's click-without-drag performs - as one
+		/// "Add Control" undo entry, then resets the current tool to PointerTool. Returns whether
+		/// anything was placed. A drawn shape (Polyline/Path) is placed at its default size rather
+		/// than handed to its IDrawItemExtension: a multi-click draw cannot start from a drop.</summary>
+		internal bool HandleDrop(IDesignPanel designPanel, Point point, IReadOnlyDictionary<string, object> properties)
+		{
+			if (!CarriesThisTool(properties)) return false;
+			var result = designPanel.HitTest(point, false, true, HitTestType.Default);
+			if (result.ModelHit == null) return false;
 
 			var context = result.ModelHit.Context;
 			var changeGroup = context.RootItem.OpenGroup("Add Control");
 			var createdItem = CreateItem(context, _componentType, _arguments);
 			createdItem.Position = point;
 
-			if (AddItemsWithDefaultSize(result.ModelHit, new[] { createdItem })) {
-				_dropItem = createdItem;
-				_dropChangeGroup = changeGroup;
-			} else {
+			if (!AddItemsWithDefaultSize(result.ModelHit, new[] { createdItem })) {
 				changeGroup.Abort();
+				return false;
 			}
-		}
+			changeGroup.Commit();
 
-		void OnDrop(object sender, DragEventArgs e)
-		{
-			HandleDrop((DesignPanel)sender);
-		}
-
-		internal void HandleDrop(IDesignPanel designPanel)
-		{
-			if (_dropItem == null) return;
-			_dropChangeGroup?.Commit();
-			_dropChangeGroup = null;
-			var toolService = _dropItem.Context.Services.GetService<IToolService>();
-			_dropItem = null;
-			if (toolService.CurrentTool is CreateComponentTool) toolService.CurrentTool = toolService.PointerTool;
+			var toolService = context.Services.GetService<IToolService>();
+			if (ReferenceEquals(toolService.CurrentTool, this)) toolService.CurrentTool = toolService.PointerTool;
+			return true;
 		}
 
 		void OnDragLeave(object sender, DragEventArgs e)
 		{
-			HandleDragLeave();
+			// Nothing to undo: DragOver no longer inserts anything (see HandleDragOver). Kept
+			// subscribed so Activate/Deactivate stay symmetric with the other drag events.
 		}
 
-		internal void HandleDragLeave()
+		bool CarriesThisTool(IReadOnlyDictionary<string, object> properties)
 		{
-			if (_dropItem == null) return;
-			_dropChangeGroup?.Abort();
-			_dropChangeGroup = null;
-			_dropItem = null;
+			object value;
+			return properties != null
+				&& properties.TryGetValue(ToolboxTypeKey, out value)
+				&& string.Equals(value as string, _componentType.AssemblyQualifiedName, StringComparison.Ordinal);
 		}
 
 		internal static DesignItem CreateItem(DesignContext context, Type type, object[] arguments)
