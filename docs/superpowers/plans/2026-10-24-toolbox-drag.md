@@ -90,6 +90,16 @@ Run `WinUIDesigner.Shell.App.exe` and check, by hand or driven by `SetCursorPos`
 
 Results are recorded below once walked.
 
+## CI result
+
+`f6c9219`, [run 3](https://github.com/thanhhieu16/WinUIDesigner/actions/runs/40121449154):
+all four suites green from their `.exe`s. Designer.Tests 255/255 (248 before, the seven new
+`CreateComponentToolDropTests`), Shell.Tests 82 passed + 1 `[Explicit]` (76 before, the six new
+`ToolboxViewTests`). This settles both open questions as far as a test process can: `new
+DataPackage()` constructs in the test host and its `Properties` round-trip a string, and no
+existing suite depended on empty stretches of `DesignPanel` being unhittable. The walkthrough
+above has not been run yet.
+
 ## Self-review
 
 **Spec coverage.** Decision 1 → Task 3 (`CanDragItems`, `DragItemsStarting`). 2 → Task 3
