@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
 using WinUIDesigner.DesignModel.Xaml;
 
@@ -338,6 +339,36 @@ namespace WinUIDesigner.Shell
             editor.SelectionStart = tag.Item1;
             editor.SelectionLength = tag.Item2;
             editor.Focus(FocusState.Programmatic);
+
+            // The TextBox scrolls the caret - the selection's END - into view, and nothing lets a
+            // programmatic selection put the caret at its start, so a long start tag showed its
+            // tail with its '<' scrolled off to the left (walkthrough step 12a). Scrolling back to
+            // the left edge once the TextBox has done its own scrolling brings the tag's start
+            // into view; a start tag begins at its indentation, so that is near column 0 for all
+            // but deeply nested elements. The vertical offset the caret scroll chose is kept.
+            var queue = DispatcherQueue;
+            if (queue != null)
+                queue.TryEnqueue(DispatcherQueuePriority.Low, ScrollEditorToLeftEdge);
+        }
+
+        void ScrollEditorToLeftEdge()
+        {
+            var scroller = FindDescendant<ScrollViewer>(editor);
+            if (scroller != null)
+                scroller.ChangeView(0, null, null, true);
+        }
+
+        static T FindDescendant<T>(DependencyObject parent) where T : DependencyObject
+        {
+            int count = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < count; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                var found = child as T ?? FindDescendant<T>(child);
+                if (found != null)
+                    return found;
+            }
+            return null;
         }
 
         /// <summary>

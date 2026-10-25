@@ -71,6 +71,15 @@ shot 12a-xaml-shows-selection
 click 213 711
 wait 1500
 shot 12b-design-keeps-selection
+# Copy and paste: Ctrl+C, Ctrl+V adds a second button; Ctrl+X cuts the pasted one again.
+key ctrl+c
+wait 500
+key ctrl+v
+wait 1500
+shot 12c-pasted
+key ctrl+x
+wait 1500
+shot 12d-cut
 # Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
 # File name box focused and holding "New1". The XAML filter adds the extension.
 key ctrl+s
@@ -94,3 +103,13 @@ screen 16-open-dialog
 dblclick 260 188
 wait 2500
 shot 17-opened
+# Error strip, last because it moves the mode bar up ~40px: break the XAML, switch to Design,
+# and the strip lists the error.
+click 342 711
+wait 1500
+click 460 350
+key ctrl+end
+type <Broken
+click 213 711
+wait 1500
+shot 18-error-strip

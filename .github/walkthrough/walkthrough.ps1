@@ -91,7 +91,7 @@ function To-Screen([int]$x, [int]$y) {
     return @(($origin.X + $x), ($origin.Y + $y))
 }
 
-$keys = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; escape = 0x1B; enter = 0x0D; delete = 0x2E; tab = 0x09; f5 = 0x74 }
+$keys = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; escape = 0x1B; enter = 0x0D; delete = 0x2E; tab = 0x09; f5 = 0x74; home = 0x24; end = 0x23 }
 function Press-Key([string]$combo) {
     $codes = foreach ($part in $combo.ToLower().Split('+')) {
         if ($keys.ContainsKey($part)) { $keys[$part] } else { [Native]::VkKeyScan($part[0]) -band 0xFF }
