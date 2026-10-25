@@ -311,6 +311,29 @@ namespace WinUIDesigner.Shell
             RaisePropertyChanged("Text");
         }
 
+        /// <summary>
+        /// Rebuilds the design surface from the document's XAML: the reference's Refresh (F5),
+        /// UpdateXaml then UpdateDesign.
+        /// </summary>
+        /// <remarks>
+        /// In Design mode the tree is serialized first only when it has moved on from what was
+        /// last parsed - the same condition the Mode setter uses, so refreshing an untouched file
+        /// keeps its own text byte for byte. In XAML mode the text is the source of truth and is
+        /// never overwritten: the refresh re-parses what the user has typed, which refreshes the
+        /// error strip without leaving the editor. Either way the result is a new DesignContext,
+        /// so the undo history does not survive a refresh, as it does not survive a mode round
+        /// trip (Decision 17), and listeners are told through PropertyChanged("DesignContext").
+        /// The dirty flag is left alone: a refresh changes no content.
+        /// </remarks>
+        public void Refresh()
+        {
+            if (InDesignMode && (IsDirty || text != parsedText))
+                UpdateXaml();
+            UpdateDesign();
+            RaisePropertyChanged("DesignContext");
+            RaisePropertyChanged("SelectionService");
+        }
+
         /// <summary>Clears the dirty flag. Called by ShellModel once the text has reached disk.</summary>
         public void MarkSaved()
         {
