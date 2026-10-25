@@ -187,6 +187,69 @@ namespace WinUIDesigner.Designer.Tests
             });
         }
 
+        /// <summary>A new document's root Canvas has no Background, so WinUI does not hit-test
+        /// its empty interior. Found by the walkthrough: neither a drop nor a click placed
+        /// anything on a blank document. Unlike the fixture above, nothing here sets a Background.</summary>
+        static DesignSurface LoadWithoutBackground(Microsoft.UI.Xaml.Window window)
+        {
+            var surface = new DesignSurface();
+            window.Content = surface;
+            using (var reader = XmlReader.Create(new StringReader(CanvasXaml)))
+                surface.LoadDesigner(reader, new XamlLoadSettings());
+            surface.UpdateLayout();
+            Assert.IsNull(RootCanvas(surface).Background, "the scenario under test is a background-less root");
+            return surface;
+        }
+
+        [Test]
+        public void TheEmptyInteriorOfABackgroundlessRootPanelStillHitsThatPanel()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadWithoutBackground(window);
+                var panel = surface.DesignPanel;
+
+                var inside = panel.HitTest(PanelPoint(surface, 50, 60), false, true, HitTestType.Default);
+                Assert.AreSame(surface.DesignContext.RootItem, inside.ModelHit);
+
+                var outside = panel.HitTest(new Point(-50, -50), false, true, HitTestType.Default);
+                Assert.IsNull(outside.ModelHit, "the bounds fallback still needs the point inside the panel");
+            });
+        }
+
+        [Test]
+        public void ADropOnABlankBackgroundlessDocumentPlacesTheControl()
+        {
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadWithoutBackground(window);
+                var tool = Arm(surface, typeof(Button));
+
+                Assert.AreEqual(DataPackageOperation.Copy, tool.HandleDragOver(surface.DesignPanel, PanelPoint(surface, 50, 60), Marker(typeof(Button))));
+                Assert.IsTrue(tool.HandleDrop(surface.DesignPanel, PanelPoint(surface, 50, 60), Marker(typeof(Button))));
+                surface.UpdateLayout();
+
+                Assert.AreEqual(1, RootCanvas(surface).Children.Count);
+            });
+        }
+
+        [Test]
+        public void ABackgroundedChildStillWinsOverTheBoundsFallback()
+        {
+            // The fallback only runs when the ordinary pass delivered nothing, so a control that is
+            // genuinely hit is never replaced by the background-less panel around it.
+            WinUITestHost.RunWithWindow(window => {
+                var surface = LoadWithoutBackground(window);
+                var tool = Arm(surface, typeof(Button));
+                Assert.IsTrue(tool.HandleDrop(surface.DesignPanel, PanelPoint(surface, 50, 60), Marker(typeof(Button))));
+                surface.UpdateLayout();
+                var button = (Button)RootCanvas(surface).Children[0];
+
+                var centre = button.TransformToVisual(surface.DesignPanel).TransformPoint(new Point(button.ActualWidth / 2, button.ActualHeight / 2));
+                var hit = surface.DesignPanel.HitTest(centre, false, true, HitTestType.Default);
+
+                Assert.AreSame(button, hit.ModelHit?.Component);
+            });
+        }
+
         [Test]
         public void TheDesignPanelIsADropTargetOverItsWholeArea()
         {
