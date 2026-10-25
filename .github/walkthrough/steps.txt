@@ -1,13 +1,14 @@
-# Toolbox drag-to-place and property grid walkthrough (plan 2026-10-24-toolbox-drag, Task 4).
-# Coordinates read off the start screenshot of a 1008x729 client area.
-shot 01-start
-# 1. Drag Button from the toolbox onto empty canvas.
-drag 37 581 420 300
-shot 02-after-drop
-# 2. One Ctrl+Z removes it.
-key ctrl+z
-shot 03-after-undo
-# 7. Click-to-place still works: select Button, click the canvas.
+# Diagnostic: give the root Canvas a visible Background through XAML mode, to see where it is
+# laid out, then try click-to-place on it.
+click 342 711
+wait 500
+click 450 300
+key ctrl+a
+type <Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="640" Height="480" Background="LightBlue" />
+shot 01-xaml-typed
+click 213 711
+wait 1000
+shot 02-design-blue
 click 37 581
 click 330 420
-shot 04-after-click-place
+shot 03-after-click-place
