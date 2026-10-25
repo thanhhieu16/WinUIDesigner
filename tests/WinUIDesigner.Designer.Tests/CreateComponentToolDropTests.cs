@@ -128,6 +128,11 @@ namespace WinUIDesigner.Designer.Tests
                 var button = canvas.Children[0] as Button;
                 Assert.IsNotNull(button);
                 Assert.AreSame(button, services.Selection.PrimarySelection?.Component, "the dropped control is selected");
+                // In the Canvas's own coordinates. The Canvas is centred in the shared window's
+                // panel, so a panel-relative point written straight to Canvas.Left/Top - which the
+                // walkthrough caught - misses these by that offset.
+                Assert.AreEqual(50, Canvas.GetLeft(button), 0.5);
+                Assert.AreEqual(60, Canvas.GetTop(button), 0.5);
 
                 var toolService = services.GetService<IToolService>();
                 Assert.AreSame(toolService.PointerTool, toolService.CurrentTool);

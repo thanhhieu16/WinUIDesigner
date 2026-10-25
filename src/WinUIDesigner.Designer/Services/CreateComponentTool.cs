@@ -130,7 +130,7 @@ namespace WinUIDesigner.Designer.Services
 			var context = result.ModelHit.Context;
 			var changeGroup = context.RootItem.OpenGroup("Add Control");
 			var createdItem = CreateItem(context, _componentType, _arguments);
-			createdItem.Position = point;
+			createdItem.Position = ToContainer(designPanel, result.ModelHit, point);
 
 			_drawing = true;
 			_gesture = new CreateComponentMouseGesture(result.ModelHit, createdItem, changeGroup);
@@ -185,7 +185,7 @@ namespace WinUIDesigner.Designer.Services
 			var context = result.ModelHit.Context;
 			var changeGroup = context.RootItem.OpenGroup("Add Control");
 			var createdItem = CreateItem(context, _componentType, _arguments);
-			createdItem.Position = point;
+			createdItem.Position = ToContainer(designPanel, result.ModelHit, point);
 
 			if (!AddItemsWithDefaultSize(result.ModelHit, new[] { createdItem })) {
 				changeGroup.Abort();
@@ -210,6 +210,20 @@ namespace WinUIDesigner.Designer.Services
 			return properties != null
 				&& properties.TryGetValue(ToolboxTypeKey, out value)
 				&& string.Equals(value as string, _componentType.AssemblyQualifiedName, StringComparison.Ordinal);
+		}
+
+		/// <summary>Converts a DesignPanel-relative point into <paramref name="container"/>'s own
+		/// coordinates, which is what a placement behavior reads a new item's Position and bounds
+		/// in (CanvasPlacementSupport writes them straight to Canvas.Left/Top). Without it every
+		/// click-placed or dropped control landed offset by wherever the container sits inside the
+		/// panel - measured in the walkthrough as a button clicked at y=420 landing at y=488,
+		/// the root Canvas being centred 67px below the panel's top.</summary>
+		internal static Point ToContainer(IDesignPanel designPanel, DesignItem container, Point panelPoint)
+		{
+			var panel = designPanel as UIElement;
+			var view = container.View;
+			if (panel == null || view == null) return panelPoint;
+			return panel.TransformToVisual(view).TransformPoint(panelPoint);
 		}
 
 		internal static DesignItem CreateItem(DesignContext context, Type type, object[] arguments)
@@ -268,7 +282,7 @@ namespace WinUIDesigner.Designer.Services
 		public void Start(IDesignPanel designPanel, Point startPoint)
 		{
 			_designPanel = designPanel;
-			_startPoint = startPoint;
+			_startPoint = CreateComponentTool.ToContainer(designPanel, _container, startPoint);
 			designPanel.PointerMoved += OnPointerMoved;
 			designPanel.PointerReleased += OnPointerReleased;
 			designPanel.PointerCaptureLost += OnPointerCaptureLost;
@@ -279,6 +293,7 @@ namespace WinUIDesigner.Designer.Services
 
 		internal void HandlePointerMoved(Point point)
 		{
+			point = CreateComponentTool.ToContainer(_designPanel, _container, point);
 			if (!_dragStarted) {
 				if (Math.Abs(point.X - _startPoint.X) < Controls.DragListener.MinimumHorizontalDragDistance
 					&& Math.Abs(point.Y - _startPoint.Y) < Controls.DragListener.MinimumVerticalDragDistance) return;

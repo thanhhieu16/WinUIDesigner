@@ -122,6 +122,11 @@ namespace WinUIDesigner.Designer.Tests
                 var canvas = (Microsoft.UI.Xaml.Controls.Canvas)surface.DesignContext.RootItem.Component;
                 Assert.AreEqual(1, canvas.Children.Count);
                 Assert.IsInstanceOf<Microsoft.UI.Xaml.Controls.Button>(canvas.Children[0]);
+                // At the click point in the Canvas's own coordinates, not the panel's: the Canvas
+                // is centred in the panel, and a panel point written straight to Canvas.Left/Top
+                // placed every click-placed control off by that offset (found in the walkthrough).
+                Assert.AreEqual(50, Microsoft.UI.Xaml.Controls.Canvas.GetLeft(canvas.Children[0]), 0.5);
+                Assert.AreEqual(60, Microsoft.UI.Xaml.Controls.Canvas.GetTop(canvas.Children[0]), 0.5);
             });
         }
 
