@@ -1,6 +1,8 @@
 using System;
+using System.Linq;
 using System.Xml;
 using WinUIDesigner.DesignModel;
+using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.DesignModel.Xaml;
 using WinUIDesigner.Designer.Services;
 
@@ -57,11 +59,39 @@ namespace WinUIDesigner.Designer
 			if (context.RootItem != null) {
 				_designPanel.Content = context.RootItem.View;
 			}
+			var undo = context.Services.GetService<UndoService>();
+			if (undo != null) undo.UndoStackChanged += OnUndoStackChanged;
+		}
+
+		/// <summary>Drops anything an undo or redo took out of the document from the selection.
+		/// Without it, undoing a placement left the removed control selected - its adorners gone
+		/// with it, but the property grid still showing it until the next selection change (seen
+		/// in the shell walkthrough). Delete has always cleared the selection itself
+		/// (ModelTools.DeleteComponents); an undo removes items through the change log instead,
+		/// which knows nothing about selection.</summary>
+		void OnUndoStackChanged(object sender, EventArgs e)
+		{
+			var context = _designContext;
+			if (context == null) return;
+			var selection = context.Services.GetService<ISelectionService>();
+			if (selection == null) return;
+			var detached = selection.SelectedItems.Where(item => !IsInDocument(context, item)).ToArray();
+			if (detached.Length > 0) selection.SetSelectedComponents(detached, SelectionTypes.Remove);
+		}
+
+		static bool IsInDocument(DesignContext context, DesignItem item)
+		{
+			for (var current = item; current != null; current = current.Parent) {
+				if (current == context.RootItem) return true;
+			}
+			return false;
 		}
 
 		public void UnloadDesigner()
 		{
 			if (_designContext != null) {
+				var undo = _designContext.Services.GetService<UndoService>();
+				if (undo != null) undo.UndoStackChanged -= OnUndoStackChanged;
 				foreach (object o in _designContext.Services.AllServices) {
 					var d = o as IDisposable;
 					if (d != null) d.Dispose();

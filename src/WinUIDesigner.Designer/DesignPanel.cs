@@ -24,6 +24,15 @@ namespace WinUIDesigner.Designer
 			Children.Add(_adornerLayer);
 			IsContentHitTestVisible = true;
 			IsTabStop = true; // makes Focus()/KeyDown reachable - same reasoning as DesignerThumb's own IsTabStop=true (DragListener.cs's Escape-to-cancel comment)
+			// A drop target for the toolbox drag (toolbox-drag spec Decision 5). WinUI raises
+			// DragEnter/DragOver/Drop only on an element with AllowDrop set, and delivers drag input,
+			// like pointer input, only where something is hit-testable - a null Background is not,
+			// and neither this panel nor a new document's root Canvas sets one, so without the
+			// Transparent brush a drag over an empty stretch of the surface reaches no handler.
+			// Harmless while PointerTool is current: it subscribes to no drag event, so the system
+			// refuses the drag.
+			AllowDrop = true;
+			Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 		}
 
 		public UIElement Content {
@@ -212,54 +221,79 @@ namespace WinUIDesigner.Designer
 			// IsContentHitTestVisible: skip the content pass entirely instead of the reference's
 			// _eatAllHitTestRequests element-swap trick (dropped - see "Known drops").
 			if (continueHitTest && testDesignSurface && IsContentHitTestVisible && _content != null) {
+				bool delivered = false;
 				foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, _content)) {
 					if (!continueHitTest) break;
-					var customResult = new DesignPanelHitTestResult(element);
-					DependencyObject obj = element;
-					DesignItem modelHit = null;
-					while (obj != null) {
-						var el = obj as UIElement;
-						if (el != null && Context != null) {
-							modelHit = Context.Services.Component.GetDesignItem(el, true);
-							if (modelHit != null) break;
-						}
-						obj = VisualTreeHelper.GetParent(obj);
-					}
-					customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);
+					continueHitTest = DeliverContentHit(element, callback, ref delivered);
+				}
 
-					// Design-time lock (Phase 4g): a locked item and everything inside it are
-					// unhittable, reproducing the reference's ContinueSkipSelfAndChildren filter
-					// (WpfDesign.Designer/Project/DesignPanel.cs:103). Testing only the resolved
-					// ModelHit would leave a locked container's children selectable, so walk the
-					// whole ancestor chain.
-					//
-					// Final-review fix (F5/F6): read IsLocked off the live view's attached dependency
-					// property rather than through XamlDesignItem.IsDesignTimeLocked. The model path
-					// runs XamlModelPropertyCollection.GetAttachedProperty ->
-					// XamlObject.FindOrCreateAttachedProperty, whose miss path ADDS a XamlProperty to
-					// the object's property list - so a read mutates the document, and
-					// XamlDesignItem.AllSetProperties (which PropertyGridControl renders, with no IsSet
-					// filter) would then carry a phantom IsLocked entry for every element the pointer
-					// has passed over. It also put an allocation, a linear scan of the property list and
-					// a reflection lookup into this method, which runs on every pointer move even on a
-					// document with nothing locked. IsLockedProperty is the same source of truth
-					// GetConvertedValueOnInstance ultimately reads (XamlProperty writes it onto the
-					// instance), so this is O(1), allocation-free and non-mutating. The chain semantics
-					// are unchanged: a locked container's children stay unhittable.
-					bool lockedInChain = false;
-					for (var ancestor = customResult.ModelHit; ancestor != null; ancestor = ancestor.Parent) {
-						var ancestorView = ancestor.View;
-						if (ancestorView != null && WinUIDesigner.XamlDom.DesignTimeProperties.GetIsLocked(ancestorView)) {
-							lockedInChain = true;
-							break;
-						}
+				// A Panel with a null Background is not hit-testable over its empty interior, so the
+				// pass above finds nothing there - and a new document's root is exactly such a Canvas,
+				// so without this a click or drop on a blank document hit nothing at all and could
+				// place nothing (measured in the toolbox-drag walkthrough; the test fixtures had been
+				// setting a Background on the live view to get past the same thing). At design time
+				// the empty area of a panel is still a place to click, drop or select, so when the
+				// ordinary pass delivered nothing, ask again by bounds and accept only such panels -
+				// not every element by its bounding box, which would let a click near a Line or Path
+				// select it.
+				if (!delivered && continueHitTest) {
+					foreach (var element in VisualTreeHelper.FindElementsInHostCoordinates(hostPoint, _content, true)) {
+						if (!continueHitTest) break;
+						var panel = element as Panel;
+						if (panel == null || panel.Background != null) continue;
+						continueHitTest = DeliverContentHit(element, callback, ref delivered);
 					}
-					if (lockedInChain)
-						continue;
-
-					continueHitTest = callback(customResult);
 				}
 			}
+		}
+
+		bool DeliverContentHit(UIElement element, Predicate<DesignPanelHitTestResult> callback, ref bool delivered)
+		{
+			var customResult = new DesignPanelHitTestResult(element);
+			DependencyObject obj = element;
+			DesignItem modelHit = null;
+			while (obj != null) {
+				var el = obj as UIElement;
+				if (el != null && Context != null) {
+					modelHit = Context.Services.Component.GetDesignItem(el, true);
+					if (modelHit != null) break;
+				}
+				obj = VisualTreeHelper.GetParent(obj);
+			}
+			customResult.ModelHit = modelHit ?? (Context != null ? Context.RootItem : null);
+
+			// Design-time lock (Phase 4g): a locked item and everything inside it are
+			// unhittable, reproducing the reference's ContinueSkipSelfAndChildren filter
+			// (WpfDesign.Designer/Project/DesignPanel.cs:103). Testing only the resolved
+			// ModelHit would leave a locked container's children selectable, so walk the
+			// whole ancestor chain.
+			//
+			// Final-review fix (F5/F6): read IsLocked off the live view's attached dependency
+			// property rather than through XamlDesignItem.IsDesignTimeLocked. The model path
+			// runs XamlModelPropertyCollection.GetAttachedProperty ->
+			// XamlObject.FindOrCreateAttachedProperty, whose miss path ADDS a XamlProperty to
+			// the object's property list - so a read mutates the document, and
+			// XamlDesignItem.AllSetProperties (which PropertyGridControl renders, with no IsSet
+			// filter) would then carry a phantom IsLocked entry for every element the pointer
+			// has passed over. It also put an allocation, a linear scan of the property list and
+			// a reflection lookup into this method, which runs on every pointer move even on a
+			// document with nothing locked. IsLockedProperty is the same source of truth
+			// GetConvertedValueOnInstance ultimately reads (XamlProperty writes it onto the
+			// instance), so this is O(1), allocation-free and non-mutating. The chain semantics
+			// are unchanged: a locked container's children stay unhittable.
+			bool lockedInChain = false;
+			for (var ancestor = customResult.ModelHit; ancestor != null; ancestor = ancestor.Parent) {
+				var ancestorView = ancestor.View;
+				if (ancestorView != null && WinUIDesigner.XamlDom.DesignTimeProperties.GetIsLocked(ancestorView)) {
+					lockedInChain = true;
+					break;
+				}
+			}
+			if (lockedInChain)
+				return true;
+
+			delivered = true;
+			return callback(customResult);
 		}
 
 		/// <summary>The real OnPointerPressed hit-test-and-select logic, extracted so a test can

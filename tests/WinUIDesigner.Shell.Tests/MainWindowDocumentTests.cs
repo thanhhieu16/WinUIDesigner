@@ -228,6 +228,44 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <summary>
+        /// The window title follows the current document's own title changes and ignores a
+        /// background document's - the path a save now relies on, since <c>SaveAsync</c> no longer
+        /// repaints the title itself (it may be saving a background tab, under Save All).
+        /// </summary>
+        /// <remarks>
+        /// <c>MarkSuspect</c> and <c>MarkSaved</c> flip <c>IsDirty</c> exactly as a save does, and
+        /// raise the same <c>PropertyChanged("Title")</c>, without needing a file on disk.
+        /// </remarks>
+        [Test]
+        public void TheWindowTitleFollowsOnlyTheCurrentDocumentsTitleChanges()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+                var background = shell.CurrentDocument;
+                var current = shell.New();
+                Assert.That(shell.CurrentDocument, Is.SameAs(current));
+
+                var cleanTitle = current.Title + " - WinUI Designer";
+                Assert.That(window.Title, Is.EqualTo(cleanTitle));
+
+                background.MarkSuspect();
+                Assert.That(window.Title, Is.EqualTo(cleanTitle),
+                    "a background document going dirty must not repaint the window title");
+                background.MarkSaved();
+                Assert.That(window.Title, Is.EqualTo(cleanTitle),
+                    "nor must saving it");
+
+                current.MarkSuspect();
+                Assert.That(window.Title, Is.EqualTo(current.Title + " - WinUI Designer"));
+                Assert.That(window.Title, Does.Contain("*"), "the current document's dirty marker reaches the title");
+                current.MarkSaved();
+                Assert.That(window.Title, Is.EqualTo(cleanTitle), "and so does its save");
+            });
+        }
+
         /// <summary>DoD 4: Close, Close All and Save All are disabled with no document open.</summary>
         [Test]
         public void CloseCloseAllAndSaveAllAreDisabledWithNoDocumentOpen()

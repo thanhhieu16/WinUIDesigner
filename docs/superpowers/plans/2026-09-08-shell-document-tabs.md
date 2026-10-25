@@ -2226,6 +2226,19 @@ than the 280px right column (`MainWindow.cs:134`), so a long value is cut off at
 the window edge with no horizontal scroll — `HorizontalAlignment` rendered as
 `Windows.Foundatio`. The tabs phase did not touch that column.
 
+**Fixed after the walkthrough, as two defects rather than one.** The width: the
+property grid's `ScrollViewer` allowed horizontal scrolling, so it measured its
+content at infinite width and each row's star editor column grew to fit its
+editor; it now disables horizontal scrolling and the rows measure at the
+column's width. The text: `Windows.Foundatio` was never a cut-off enum name but
+the start of `Windows.Foundation.IReference`1<...>` — a boxed enum handed to a
+`ComboBox`'s `ItemsSource` shows its WinRT runtime class name. `ComboBoxEditor`
+now gives the `ComboBox` plain display strings and keeps the values alongside by
+index, which also fixes named standard values, whose `DisplayMemberPath="Name"`
+against `Metadata`'s private `NamedValue` could never resolve. Both fixes were
+written without a Windows machine to hand, so neither has been run yet; whether
+the editor's text now reads `Stretch` is a walkthrough item.
+
 ## Plan self-review
 
 **Spec coverage.** Decision 1 → Task 5 Step 3. 2 → Tasks 3 and 5. 3 → Task 5 Step 5. 4 → Task 5 Steps 4 and 5. 5 → Task 5 (`SyncSelectedTab`, `syncingSelection`). 6 → Task 5 Steps 7–8 and Task 2 Step 4 (`Open` de-dupe). 7 → Tasks 5 and 6 (every command routes through `PrepareForCloseAsync`). 8 → Task 6 `SaveAllAsync`. 9 → Task 6 `CloseAllAsync`. 10 → Task 1 `Mode` guard + `ReAssertingTheCurrentModeIsANoOp...`. 11 → Task 1 `DocumentMode.cs`. 12 → Task 2 Step 3. 13 → Task 3 editor. 14 → Task 1 `Text` setter + `NormaliseLineEndings`, Task 3 sync + `OpeningTheXamlViewDoesNotDirty...`. 15 → Task 1 `SelectionService` + `OnUndoStackChanged`. 16 → Task 1 `MalformedTextSwitchedToDesignMode...`. 17 → Task 1 remark (no code change; the null-checks in `OnSelectionChanged`/`OnUndoStackChanged` are left alone). 18 → Task 4 `MaxListHeight` + Task 7 row. 19 → Task 4 `XamlErrorNode`. 20 → Task 3 `JumpToError`/`OffsetOf`/`TokenLength` + the Step 5 delay measurement. 21 → Task 3 group name and suppression flag and layout. 22 → Task 5 `RememberDocument`/`ForgetDocument`/`OnDocumentPropertyChanged`. 23 → nothing to do; verified by Task 7 Step 6.

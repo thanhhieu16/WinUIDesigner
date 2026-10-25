@@ -170,10 +170,16 @@ namespace WinUIDesigner.Shell
             Grid.SetRow(outlineScroll, 1);
             right.Children.Add(outlineScroll);
 
+            // Horizontal scrolling disabled, unlike the outline above: a ScrollViewer that may
+            // scroll horizontally measures its content at infinite width, so each row's Star
+            // editor column grew to whatever its editor asked for and the rows ran past the 280px
+            // column, cutting values off at the window edge. Disabled, the rows are measured at
+            // the column's own width and a long value is clipped inside its editor instead.
             var gridScroll = new ScrollViewer
             {
                 Content = propertyGridHost,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                HorizontalScrollMode = ScrollMode.Disabled,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto
             };
             Grid.SetRow(gridScroll, 2);
@@ -428,10 +434,9 @@ namespace WinUIDesigner.Shell
         /// prompts rather than discarding a half-mutated tree silently. Phase 5 Decision 18.
         /// </summary>
         /// <remarks>
-        /// Called by App's UnhandledException handler. Safe with no document open. UpdateTitle is
-        /// called explicitly because nothing here subscribes to Document.PropertyChanged - the
-        /// title normally re-reads through OnUndoStackChanged, and this path does not touch the
-        /// undo stack.
+        /// Called by App's UnhandledException handler. Safe with no document open. The title
+        /// repaints through OnDocumentPropertyChanged: MarkSuspect raises PropertyChanged("Title")
+        /// when it flips IsDirty, like every other title change.
         /// </remarks>
         public void MarkCurrentDocumentSuspect()
         {
@@ -440,7 +445,6 @@ namespace WinUIDesigner.Shell
                 return;
 
             doc.MarkSuspect();
-            UpdateTitle();
         }
 
         void OnSelectionChanged(object sender, DesignItemCollectionEventArgs e)
@@ -882,10 +886,14 @@ namespace WinUIDesigner.Shell
             if (doc == null)
                 return;
 
+            // No UpdateTitle here, deliberately: doc may be a background tab (Save All), and the
+            // window title belongs to the current one. A save that changes anything visible -
+            // IsDirty cleared, FilePath assigned - raises Document.PropertyChanged("Title"), which
+            // OnDocumentPropertyChanged routes to that document's own tab header, and to the
+            // window title only when doc is the current document.
             if (!forceAsk && doc.FilePath != null)
             {
                 shell.Save(doc);
-                UpdateTitle();
                 return;
             }
 
@@ -899,7 +907,6 @@ namespace WinUIDesigner.Shell
                 return;
 
             shell.SaveAs(doc, file.Path);
-            UpdateTitle();
         }
 
         void OnAppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
