@@ -1,0 +1,39 @@
+# Runs .github/walkthrough/steps.txt against the real shell app with synthetic input and prints
+# each screenshot to the log as base64 (see walkthrough.ps1). Only runs when the walkthrough
+# itself changes, or on demand.
+name: Walkthrough
+
+on:
+  push:
+    branches: ['claude/**']
+    paths: ['.github/walkthrough/**', '.github/workflows/walkthrough.yml']
+  workflow_dispatch:
+
+jobs:
+  walkthrough:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build WinUIDesigner.sln
+
+      - name: Walk
+        shell: pwsh
+        run: >
+          ./.github/walkthrough/walkthrough.ps1
+          -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
+          -Steps .github/walkthrough/steps.txt
+          -OutDir walkthrough-shots
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough-shots
+          path: walkthrough-shots/

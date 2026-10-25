@@ -1,0 +1,2 @@
+# Round 1: only look, to read coordinates off the screenshot.
+shot start
