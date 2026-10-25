@@ -118,7 +118,7 @@ namespace WinUIDesigner.Designer.Services
 
 			// Capture + focus happen exactly once, here, before branching into either
 			// IDrawItemExtension.StartDrawItem or CreateComponentMouseGesture - spec decision 2.
-			if (pointer != null) designPanel.CapturePointer(pointer);
+			if (pointer != null) DiagTrace.Write($"DesignPanel.CapturePointer returned {designPanel.CapturePointer(pointer)}");
 			designPanel.Focus(FocusState.Pointer);
 
 			var drawItemBehavior = result.ModelHit.Extensions.OfType<IDrawItemExtension>().FirstOrDefault(x => x.CanItemBeDrawn(_componentType));
@@ -141,6 +141,12 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnDragOver(object sender, DragEventArgs e)
 		{
+			try { OnDragOverCore(sender, e); } catch (Exception ex) { DiagTrace.Write("OnDragOver threw " + ex); throw; }
+		}
+
+		void OnDragOverCore(object sender, DragEventArgs e)
+		{
+			DiagTrace.Write("OnDragOver entered");
 			var designPanel = (DesignPanel)sender;
 			e.AcceptedOperation = HandleDragOver(designPanel, e.GetPosition(designPanel), e.DataView.Properties);
 			DiagTrace.Write($"CreateComponentTool.OnDragOver point={e.GetPosition(designPanel)} accepted={e.AcceptedOperation} keys={string.Join(",", e.DataView.Properties.Keys)}");

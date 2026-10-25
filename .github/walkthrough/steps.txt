@@ -1,4 +1,4 @@
-# Diagnostic round with tracing: click-to-place and drag-to-place.
+# Diagnostic round with tracing: click-to-place, then drag-to-place.
 click 37 581
 click 330 420
 shot 01-click-place

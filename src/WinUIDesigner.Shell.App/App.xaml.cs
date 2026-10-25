@@ -23,6 +23,8 @@ namespace WinUIDesigner.Shell
         {
             InitializeComponent();
             UnhandledException += OnUnhandledException;
+            System.AppDomain.CurrentDomain.FirstChanceException += (s, e) =>
+                WinUIDesigner.Designer.DiagTrace.Write("FirstChance " + e.Exception.GetType().Name + ": " + e.Exception.Message);
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -38,6 +40,7 @@ namespace WinUIDesigner.Shell
             // install one. Handled=true keeps a defect in a design-time behaviour from ending the
             // process mid-drag; the message is shown rather than swallowed. Spec Decision 18.
             e.Handled = true;
+            WinUIDesigner.Designer.DiagTrace.Write("UnhandledException " + e.Exception);
 
             var window = this.window;
 

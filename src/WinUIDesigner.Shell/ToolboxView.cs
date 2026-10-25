@@ -60,10 +60,19 @@ namespace WinUIDesigner.Shell
             list.CanDragItems = true;
             list.DragItemsStarting += (s, e) =>
             {
-                var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
-                WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsStarting type={node?.Type?.Name} attached={toolService != null}");
-                if (!BeginDrag(node?.Type, e.Data))
-                    e.Cancel = true;
+                try
+                {
+                    var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
+                    WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsStarting type={node?.Type?.Name} attached={toolService != null}");
+                    if (!BeginDrag(node?.Type, e.Data))
+                        e.Cancel = true;
+                    WinUIDesigner.Designer.DiagTrace.Write("Toolbox.DragItemsStarting done");
+                }
+                catch (Exception ex)
+                {
+                    WinUIDesigner.Designer.DiagTrace.Write("DragItemsStarting threw " + ex);
+                    throw;
+                }
             };
             list.DragItemsCompleted += (s, e) => { WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsCompleted result={e.DropResult}"); CompleteDrag(e.DropResult); };
 
