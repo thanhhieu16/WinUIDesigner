@@ -26,6 +26,10 @@ jobs:
       - name: Build
         run: dotnet build WinUIDesigner.sln
 
+      - name: Prepare a folder for the save step
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force C:\wt | Out-Null
+
       - name: Walk
         shell: pwsh
         run: >
@@ -33,6 +37,12 @@ jobs:
           -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
           -Steps .github/walkthrough/steps.txt
           -OutDir walkthrough-shots
+
+      - name: Show the saved file
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path C:\wt\walk.xaml) { Get-Content C:\wt\walk.xaml; Copy-Item C:\wt\walk.xaml walkthrough-shots/ } else { Write-Host 'no saved file' }
 
       - name: Upload screenshots
         if: always()
