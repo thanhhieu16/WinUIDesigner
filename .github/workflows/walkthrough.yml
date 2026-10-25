@@ -34,6 +34,13 @@ jobs:
           -Steps .github/walkthrough/steps.txt
           -OutDir walkthrough-shots
 
+      - name: Show the saved file
+        if: always()
+        shell: pwsh
+        run: |
+          $saved = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'walk.xaml'
+          if (Test-Path $saved) { Get-Content $saved; Copy-Item $saved walkthrough-shots/ } else { Write-Host 'no saved file' }
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4

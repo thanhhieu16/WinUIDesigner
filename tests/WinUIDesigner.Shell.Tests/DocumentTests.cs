@@ -454,5 +454,67 @@ namespace WinUIDesigner.Shell.Tests
                 }
             });
         }
+
+        [Test]
+        public void RefreshRebuildsTheTreeAndKeepsAnUntouchedDocumentsOwnText()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, RecoverableErrorXaml))
+                {
+                    var before = doc.DesignContext;
+                    var text = doc.Text;
+                    var raised = new System.Collections.Generic.List<string>();
+                    doc.PropertyChanged += (s, e) => raised.Add(e.PropertyName);
+
+                    doc.Refresh();
+
+                    Assert.That(doc.DesignContext, Is.Not.Null.And.Not.SameAs(before), "a refresh builds a new tree");
+                    Assert.That(doc.Text, Is.EqualTo(text),
+                        "an untouched file keeps its own text, so its errors' coordinates still address it");
+                    Assert.That(doc.LoadErrors, Is.Not.Empty, "and the re-parse reports its errors again");
+                    Assert.That(doc.IsDirty, Is.False, "a refresh changes no content");
+                    Assert.That(raised, Does.Contain("DesignContext"), "listeners are told to re-wire");
+                }
+            });
+        }
+
+        [Test]
+        public void RefreshCarriesASurfaceEditIntoTheRebuiltTree()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+                    button.Properties["Width"].SetValue(321.0);
+
+                    doc.Refresh();
+
+                    var rebuilt = (Button)doc.DesignContext.RootItem.ContentProperty.CollectionElements[0].Component;
+                    Assert.That(rebuilt.Width, Is.EqualTo(321.0), "the edit was serialized before the reload");
+                    Assert.That(doc.IsDirty, Is.True, "and the document is still unsaved");
+                }
+            });
+        }
+
+        [Test]
+        public void RefreshInXamlModeReParsesTheTypedTextWithoutTouchingIt()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    doc.Mode = DocumentMode.Xaml;
+                    doc.Text = MalformedXaml;
+
+                    doc.Refresh();
+
+                    Assert.That(doc.Mode, Is.EqualTo(DocumentMode.Xaml), "the user stays in the editor");
+                    Assert.That(doc.Text, Is.EqualTo(MalformedXaml), "what they typed is the source, never overwritten");
+                    Assert.That(doc.LoadFailed, Is.True, "and the error strip learns it does not parse");
+                }
+            });
+        }
     }
 }

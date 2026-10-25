@@ -71,7 +71,7 @@ namespace WinUIDesigner.Shell
         bool closingConfirmed;
         bool dialogOpen;
 
-        MenuFlyoutItem undoItem, redoItem, cutItem, copyItem, pasteItem, deleteItem;
+        MenuFlyoutItem undoItem, redoItem, cutItem, copyItem, pasteItem, deleteItem, selectAllItem, refreshItem;
         MenuFlyoutItem closeItem, closeAllItem, saveAllItem;
 
         public MainWindow()
@@ -227,6 +227,10 @@ namespace WinUIDesigner.Shell
             pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); }));
             deleteItem = Item("Delete", VirtualKey.Delete, VirtualKeyModifiers.None,
                 (s, e) => DeleteSelection(), OnDeleteAcceleratorInvoked);
+            selectAllItem = Item("Select All", VirtualKey.A, VirtualKeyModifiers.Control,
+                (s, e) => SelectAll(), OnSelectAllAcceleratorInvoked);
+            refreshItem = Item("Refresh", VirtualKey.F5, VirtualKeyModifiers.None,
+                (s, e) => RefreshCurrentDocument());
 
             var edit = new MenuBarItem { Title = "Edit" };
             edit.Items.Add(undoItem);
@@ -236,6 +240,9 @@ namespace WinUIDesigner.Shell
             edit.Items.Add(copyItem);
             edit.Items.Add(pasteItem);
             edit.Items.Add(deleteItem);
+            edit.Items.Add(new MenuFlyoutSeparator());
+            edit.Items.Add(selectAllItem);
+            edit.Items.Add(refreshItem);
 
             var bar = new MenuBar();
             bar.Items.Add(file);
@@ -298,6 +305,65 @@ namespace WinUIDesigner.Shell
 
             DeleteSelection();
             args.Handled = true;
+        }
+
+        /// <summary>
+        /// Select All's one implementation, shared by the menu item and the Ctrl+A accelerator.
+        /// Same text-entry guard as <see cref="DeleteSelection"/>, for the same reason: Ctrl+A in
+        /// the XAML editor or the outline filter selects that box's text, not the controls.
+        /// </summary>
+        void SelectAll()
+        {
+            if (IsTextEntryFocused() || wiredSelection == null || wiredDocument == null || wiredDocument.DesignContext == null)
+                return;
+            var targets = SelectAllTargets(wiredDocument.DesignContext, wiredSelection.PrimarySelection);
+            if (targets.Count > 0)
+                wiredSelection.SetSelectedComponents(targets);
+        }
+
+        /// <summary>Same Handled asymmetry as <see cref="OnDeleteAcceleratorInvoked"/>.</summary>
+        void OnSelectAllAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+        {
+            if (IsTextEntryFocused())
+                return;
+
+            SelectAll();
+            args.Handled = true;
+        }
+
+        /// <summary>
+        /// What Select All selects: every child of the container holding the primary selection,
+        /// or the root's children when the root or nothing is selected.
+        /// </summary>
+        /// <remarks>
+        /// "All" is ambiguous for a tree - the Phase 5 spec left Select All out for exactly that
+        /// reason. Selecting every descendant would hand a move or a resize both a panel and its
+        /// own children at once; selecting siblings is what a designer's Ctrl+A does, and it
+        /// widens naturally from wherever the user already is. A design-time-locked child is left
+        /// out, matching DesignPanel.HitTest, which never lets a locked item be clicked.
+        /// </remarks>
+        internal static IList<DesignItem> SelectAllTargets(DesignContext context, DesignItem primary)
+        {
+            var root = context.RootItem;
+            var container = primary == null || primary == root ? root : (primary.Parent ?? root);
+            var content = container?.ContentProperty;
+            if (content == null)
+                return new DesignItem[0];
+
+            var children = content.IsCollection
+                ? content.CollectionElements.ToList()
+                : (content.Value != null ? new List<DesignItem> { content.Value } : new List<DesignItem>());
+            return children
+                .Where(item => item.View == null || !WinUIDesigner.XamlDom.DesignTimeProperties.GetIsLocked(item.View))
+                .ToList();
+        }
+
+        /// <summary>F5: rebuilds the current document's surface from its XAML.</summary>
+        internal void RefreshCurrentDocument()
+        {
+            var doc = shell.CurrentDocument;
+            if (doc != null)
+                doc.Refresh();
         }
 
         /// <summary>True when keyboard focus is inside a control that edits text.</summary>
@@ -471,6 +537,8 @@ namespace WinUIDesigner.Shell
         {
             undoItem.IsEnabled = wiredUndo != null && wiredUndo.CanUndo;
             redoItem.IsEnabled = wiredUndo != null && wiredUndo.CanRedo;
+            selectAllItem.IsEnabled = wiredSelection != null;
+            refreshItem.IsEnabled = wiredDocument != null;
 
             var ctx = wiredDocument == null ? null : wiredDocument.DesignContext;
             var svc = ctx == null ? null : ctx.Services.GetService<ICopyPasteService>();
@@ -502,6 +570,16 @@ namespace WinUIDesigner.Shell
 
         /// <summary>Test seam: File &gt; Save All.</summary>
         internal MenuFlyoutItem SaveAllItemForTest { get { return saveAllItem; } }
+
+        internal MenuFlyoutItem SelectAllItemForTest { get { return selectAllItem; } }
+
+        internal MenuFlyoutItem RefreshItemForTest { get { return refreshItem; } }
+
+        /// <summary>Runs Select All as the menu would. Test seam.</summary>
+        internal void SelectAllForTest()
+        {
+            SelectAll();
+        }
 
         /// <summary>The tab built for <paramref name="doc"/>, or null once it has closed.</summary>
         internal TabViewItem TabFor(Document doc)
@@ -631,7 +709,7 @@ namespace WinUIDesigner.Shell
                 if (ReferenceEquals(doc, shell.CurrentDocument))
                     UpdateTitle();
             }
-            else if (e.PropertyName == "Mode")
+            else if (e.PropertyName == "Mode" || e.PropertyName == "DesignContext")
             {
                 // Only the current document. A background tab changing mode must not take the
                 // outline, property grid and toolbox away from the visible one. Spec Decision 22.

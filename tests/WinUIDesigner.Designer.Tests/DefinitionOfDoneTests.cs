@@ -89,6 +89,35 @@ namespace WinUIDesigner.Designer.Tests
 			});
 		}
 
+		// Select All's consumer: every selected item gets its own highlight, and losing the
+		// selection takes each one away again. Before SelectionExtensionServer was ported, a
+		// two-item selection showed one highlight - the primary's - and nothing on the other.
+		[Test]
+		public void EverySelectedElementGetsItsOwnHighlight()
+		{
+			WinUITestHost.RunWithWindow(window => {
+				var surface = LoadInto(window, TwoButtonsXaml);
+				var grid = (Grid)surface.DesignContext.RootItem.Component;
+				var leftItem = surface.DesignContext.Services.Component.GetDesignItem(grid.Children[0]);
+				var rightItem = surface.DesignContext.Services.Component.GetDesignItem(grid.Children[1]);
+				var selection = surface.DesignContext.Services.Selection;
+
+				selection.SetSelectedComponents(new DesignItem[] { leftItem, rightItem });
+				surface.UpdateLayout();
+				var highlighted = surface.DesignPanel.Adorners
+					.Where(a => a.Children.OfType<SelectionHighlight>().Any())
+					.Select(a => a.AdornedElement).ToList();
+				CollectionAssert.AreEquivalent(new[] { grid.Children[0], grid.Children[1] }, highlighted);
+
+				selection.SetSelectedComponents(new DesignItem[] { rightItem });
+				surface.UpdateLayout();
+				highlighted = surface.DesignPanel.Adorners
+					.Where(a => a.Children.OfType<SelectionHighlight>().Any())
+					.Select(a => a.AdornedElement).ToList();
+				CollectionAssert.AreEquivalent(new[] { grid.Children[1] }, highlighted);
+			});
+		}
+
 		// Spec DoD bullet 3: mutating a layout property through DesignItemProperty.SetValue moves
 		// the highlight adorner to track the adorned element after the next LayoutUpdated pass.
 		[Test]

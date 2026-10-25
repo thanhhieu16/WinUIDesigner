@@ -23,3 +23,64 @@ shot 04-redone
 click 600 560
 wait 1000
 shot 05-canvas-selected
+# Select All: place a second Button, select the canvas, Ctrl+A selects both buttons.
+click 37 581
+click 520 250
+wait 1500
+click 600 560
+wait 500
+key ctrl+a
+wait 1000
+shot 06-select-all
+# Refresh: F5 rebuilds the surface; both buttons are still there, nothing selected.
+key f5
+wait 1500
+shot 07-refreshed
+# Delete: select both buttons, Delete removes both, one Ctrl+Z brings both back.
+click 600 560
+wait 500
+key ctrl+a
+wait 500
+key delete
+wait 1000
+shot 08-deleted
+key ctrl+z
+wait 1000
+shot 09-delete-undone
+# XAML mode shows the serialized document.
+click 342 711
+wait 1500
+shot 10-xaml-mode
+# Replace the text by typing: Ctrl+A in the editor must select text, not design items.
+click 460 350
+key ctrl+a
+type <Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"><Button Content="Typed" Canvas.Left="40" Canvas.Top="30"/></Canvas>
+wait 500
+shot 11-xaml-typed
+# Back to Design: the typed button is on the surface at (40,30).
+click 213 711
+wait 1500
+shot 12-design-from-xaml
+# Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
+# File name box focused and holding "New1". The XAML filter adds the extension.
+key ctrl+s
+wait 2500
+screen 13-save-dialog
+type walk
+key enter
+wait 2000
+shot 14-saved
+# Close the saved (clean) tab, then open the file again.
+click 426 64
+wait 1000
+shot 15-closed
+key ctrl+o
+wait 2500
+screen 16-open-dialog
+# Keys typed into the Open picker on the runner land unpredictably (measured over three runs:
+# lost, in the address bar, or refused there as "You can't open this location"), while mouse
+# input lands. So open by mouse alone: the picker starts in Documents, which lists the
+# "Visual Studio 18" folder first and walk.xaml second.
+dblclick 260 188
+wait 2500
+shot 17-opened

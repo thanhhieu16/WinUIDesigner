@@ -471,5 +471,65 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(rows, Is.Not.Empty);
             });
         }
+
+        const string CanvasWithNestedPanel =
+            "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">" +
+            "<Button Content=\"A\" /><Button Content=\"B\" />" +
+            "<StackPanel><CheckBox /><CheckBox /><CheckBox /></StackPanel>" +
+            "</Canvas>";
+
+        [Test]
+        public void SelectAllTakesTheRootsChildrenOrThePrimarySelectionsSiblings()
+        {
+            WinUITestHost.Run(() =>
+            {
+                using (var doc = new Document(null, CanvasWithNestedPanel))
+                {
+                    var root = doc.DesignContext.RootItem;
+                    var rootChildren = root.ContentProperty.CollectionElements;
+                    var stack = rootChildren[2];
+                    var checkBoxes = stack.ContentProperty.CollectionElements;
+
+                    Assert.That(MainWindow.SelectAllTargets(doc.DesignContext, null), Is.EqualTo(rootChildren),
+                        "nothing selected: the root's children");
+                    Assert.That(MainWindow.SelectAllTargets(doc.DesignContext, root), Is.EqualTo(rootChildren),
+                        "the root selected: its children, not the root again");
+                    Assert.That(MainWindow.SelectAllTargets(doc.DesignContext, checkBoxes[1]), Is.EqualTo(checkBoxes),
+                        "a nested control selected: its siblings, never a panel together with its own children");
+
+                    WinUIDesigner.XamlDom.DesignTimeProperties.SetIsLocked(checkBoxes[0].View, true);
+                    Assert.That(MainWindow.SelectAllTargets(doc.DesignContext, checkBoxes[1]), Is.EqualTo(checkBoxes.Skip(1)),
+                        "a locked control cannot be clicked, so Select All leaves it out too");
+                }
+            });
+        }
+
+        [Test]
+        public void RefreshReWiresTheWindowToTheRebuiltTree()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var doc = window.ShellForTest.CurrentDocument;
+                doc.Mode = WinUIDesigner.Shell.DocumentMode.Xaml;
+                doc.Text = CanvasWithNestedPanel;
+                doc.Mode = WinUIDesigner.Shell.DocumentMode.Design;
+                Assert.That(window.RefreshItemForTest.IsEnabled, Is.True);
+                Assert.That(window.SelectAllItemForTest.IsEnabled, Is.True);
+
+                var before = doc.DesignContext;
+                window.RefreshCurrentDocument();
+                Assert.That(doc.DesignContext, Is.Not.SameAs(before));
+
+                // Selecting through the window lands in the rebuilt tree's selection service only
+                // if the window re-wired to it; a stale wiring would select into the old one.
+                window.SelectAllForTest();
+                Assert.That(doc.SelectionService.SelectionCount, Is.EqualTo(3));
+
+                doc.Mode = WinUIDesigner.Shell.DocumentMode.Xaml;
+                Assert.That(window.SelectAllItemForTest.IsEnabled, Is.False, "there is no surface to select on in XAML mode");
+                Assert.That(window.RefreshItemForTest.IsEnabled, Is.True, "but a refresh still re-parses the text");
+            });
+        }
     }
 }
