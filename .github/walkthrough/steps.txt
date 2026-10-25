@@ -61,6 +61,16 @@ shot 11-xaml-typed
 click 213 711
 wait 1500
 shot 12-design-from-xaml
+# Selection follows a mode switch: select the typed button, switch to XAML and its start tag is
+# selected in the editor; switch back and the button is selected on the surface again.
+click 270 126
+wait 800
+click 342 711
+wait 1500
+shot 12a-xaml-shows-selection
+click 213 711
+wait 1500
+shot 12b-design-keeps-selection
 # Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
 # File name box focused and holding "New1". The XAML filter adds the extension.
 key ctrl+s
