@@ -28,7 +28,6 @@ namespace WinUIDesigner.Designer.Services
 			// click-to-select logic.
 			var designPanel = (DesignPanel)sender;
 			var point = e.GetCurrentPoint(designPanel).Position;
-			DiagTrace.Write($"PointerTool.OnPointerPressed point={point}");
 			designPanel.HandlePointerPressed(point, e.KeyModifiers);
 		}
 	}

@@ -26,38 +26,13 @@ jobs:
       - name: Build
         run: dotnet build WinUIDesigner.sln
 
-      - name: Walk (default)
-        if: always()
-        continue-on-error: true
+      - name: Walk
         shell: pwsh
         run: >
           ./.github/walkthrough/walkthrough.ps1
           -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
           -Steps .github/walkthrough/steps.txt
-          -OutDir walkthrough-shots/default
-          -DragVariant default
-
-      - name: Walk (defer)
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        run: >
-          ./.github/walkthrough/walkthrough.ps1
-          -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
-          -Steps .github/walkthrough/steps.txt
-          -OutDir walkthrough-shots/defer
-          -DragVariant defer
-
-      - name: Walk (bare)
-        if: always()
-        continue-on-error: true
-        shell: pwsh
-        run: >
-          ./.github/walkthrough/walkthrough.ps1
-          -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
-          -Steps .github/walkthrough/steps.txt
-          -OutDir walkthrough-shots/bare
-          -DragVariant bare
+          -OutDir walkthrough-shots
 
       - name: Upload screenshots
         if: always()

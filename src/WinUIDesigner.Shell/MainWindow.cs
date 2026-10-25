@@ -123,8 +123,6 @@ namespace WinUIDesigner.Shell
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            root.AddHandler(UIElement.PointerPressedEvent, (PointerEventHandler)((s, e) =>
-                WinUIDesigner.Designer.DiagTrace.Write($"root.PointerPressed handled={e.Handled} source={e.OriginalSource?.GetType().FullName} point={e.GetCurrentPoint(root).Position}")), true);
 
             var menu = BuildMenu();
             Grid.SetRow(menu, 0);

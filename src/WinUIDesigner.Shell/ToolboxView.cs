@@ -60,35 +60,11 @@ namespace WinUIDesigner.Shell
             list.CanDragItems = true;
             list.DragItemsStarting += (s, e) =>
             {
-                try
-                {
-                    var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
-                    WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsStarting type={node?.Type?.Name} attached={toolService != null}");
-                    var variant = Environment.GetEnvironmentVariable("WINUIDESIGNER_DRAGVARIANT");
-                    WinUIDesigner.Designer.DiagTrace.Write("drag variant " + variant);
-                    if (variant == "bare")
-                    {
-                        e.Data.SetText("x");
-                    }
-                    else if (variant == "defer")
-                    {
-                        var type = node?.Type;
-                        var data = e.Data;
-                        data.Properties[CreateComponentTool.ToolboxTypeKey] = type.AssemblyQualifiedName;
-                        data.RequestedOperation = DataPackageOperation.Copy;
-                        DispatcherQueue.TryEnqueue(() => { WinUIDesigner.Designer.DiagTrace.Write("deferred arm"); draggedTool = Arm(type); });
-                    }
-                    else if (!BeginDrag(node?.Type, e.Data))
-                        e.Cancel = true;
-                    WinUIDesigner.Designer.DiagTrace.Write("Toolbox.DragItemsStarting done");
-                }
-                catch (Exception ex)
-                {
-                    WinUIDesigner.Designer.DiagTrace.Write("DragItemsStarting threw " + ex);
-                    throw;
-                }
+                var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
+                if (!BeginDrag(node?.Type, e.Data))
+                    e.Cancel = true;
             };
-            list.DragItemsCompleted += (s, e) => { WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsCompleted result={e.DropResult}"); CompleteDrag(e.DropResult); };
+            list.DragItemsCompleted += (s, e) => CompleteDrag(e.DropResult);
 
             // A ListView already contains its own ScrollViewer. Wrapping it in another one
             // hands the inner list an infinite available height, so its virtualizing panel

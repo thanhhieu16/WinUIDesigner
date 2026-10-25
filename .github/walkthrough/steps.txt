@@ -1,4 +1,25 @@
-# Drag-to-place, once per drag variant (TEMP bisect of the 0xC0000409 crash).
-drag 37 581 450 300
+# Shell walkthrough, driven by synthetic input on a 1024x768 runner (client area 1008x729).
+# Coordinates are read off the screenshots: toolbox "Button" at (37,581); the 640x480 root
+# Canvas spans roughly x 200-728, y 147-627.
+#
+# A toolbox drag is deliberately absent: on the GitHub runner any ListView item drag fail-fasts
+# the app with 0xC0000409, even a bare one with no handler code of ours (see the toolbox-drag
+# plan's walkthrough section), so drag-to-place needs a person at a real desktop.
+shot 01-start
+# Click-to-place a Button; it is selected and the property grid shows its properties.
+click 37 581
+click 330 420
 wait 1500
-shot 01-drag-place
+shot 02-click-placed
+# One Ctrl+Z removes it.
+key ctrl+z
+wait 1000
+shot 03-undone
+# Ctrl+Y puts it back.
+key ctrl+y
+wait 1000
+shot 04-redone
+# Select the canvas by clicking its empty interior: the property grid's enum rows read as names.
+click 600 560
+wait 1000
+shot 05-canvas-selected

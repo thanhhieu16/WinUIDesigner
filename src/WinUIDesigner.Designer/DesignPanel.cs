@@ -33,14 +33,6 @@ namespace WinUIDesigner.Designer
 			// refuses the drag.
 			AllowDrop = true;
 			Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-			AddHandler(PointerPressedEvent, (PointerEventHandler)((s, e) => {
-				var p = e.GetCurrentPoint(this).Position;
-				var hit = HitTest(p, true, true, HitTestType.ElementSelection);
-				DiagTrace.Write($"DesignPanel.PointerPressed handled={e.Handled} source={e.OriginalSource?.GetType().Name} point={p} size={ActualWidth}x{ActualHeight} modelHit={hit.ModelHit?.ComponentType?.Name} adorner={hit.AdornerHit != null} tool={Context?.Services.GetService<IToolService>()?.CurrentTool?.GetType().Name}");
-			}), true);
-			AddHandler(PointerReleasedEvent, (PointerEventHandler)((s, e) =>
-				DiagTrace.Write($"DesignPanel.PointerReleased handled={e.Handled} source={e.OriginalSource?.GetType().Name}")), true);
-			PointerCaptureLost += (s, e) => DiagTrace.Write($"DesignPanel.PointerCaptureLost source={e.OriginalSource?.GetType().Name}");
 		}
 
 		public UIElement Content {

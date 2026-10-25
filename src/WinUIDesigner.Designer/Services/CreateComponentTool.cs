@@ -81,7 +81,6 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnPointerPressed(object sender, PointerRoutedEventArgs e)
 		{
-			DiagTrace.Write($"CreateComponentTool.OnPointerPressed left={e.GetCurrentPoint(null).Properties.IsLeftButtonPressed}");
 			if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
 			var designPanel = (DesignPanel)sender;
 			var point = e.GetCurrentPoint(designPanel).Position;
@@ -118,7 +117,7 @@ namespace WinUIDesigner.Designer.Services
 
 			// Capture + focus happen exactly once, here, before branching into either
 			// IDrawItemExtension.StartDrawItem or CreateComponentMouseGesture - spec decision 2.
-			if (pointer != null) DiagTrace.Write($"DesignPanel.CapturePointer returned {designPanel.CapturePointer(pointer)}");
+			if (pointer != null) designPanel.CapturePointer(pointer);
 			designPanel.Focus(FocusState.Pointer);
 
 			var drawItemBehavior = result.ModelHit.Extensions.OfType<IDrawItemExtension>().FirstOrDefault(x => x.CanItemBeDrawn(_componentType));
@@ -141,15 +140,8 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnDragOver(object sender, DragEventArgs e)
 		{
-			try { OnDragOverCore(sender, e); } catch (Exception ex) { DiagTrace.Write("OnDragOver threw " + ex); throw; }
-		}
-
-		void OnDragOverCore(object sender, DragEventArgs e)
-		{
-			DiagTrace.Write("OnDragOver entered");
 			var designPanel = (DesignPanel)sender;
 			e.AcceptedOperation = HandleDragOver(designPanel, e.GetPosition(designPanel), e.DataView.Properties);
-			DiagTrace.Write($"CreateComponentTool.OnDragOver point={e.GetPosition(designPanel)} accepted={e.AcceptedOperation} keys={string.Join(",", e.DataView.Properties.Keys)}");
 			e.Handled = true;
 		}
 
@@ -173,7 +165,6 @@ namespace WinUIDesigner.Designer.Services
 		void OnDrop(object sender, DragEventArgs e)
 		{
 			var designPanel = (DesignPanel)sender;
-			DiagTrace.Write($"CreateComponentTool.OnDrop point={e.GetPosition(designPanel)}");
 			e.AcceptedOperation = HandleDrop(designPanel, e.GetPosition(designPanel), e.DataView.Properties)
 				? DataPackageOperation.Copy
 				: DataPackageOperation.None;
@@ -288,7 +279,6 @@ namespace WinUIDesigner.Designer.Services
 
 		internal void HandlePointerMoved(Point point)
 		{
-			DiagTrace.Write($"Gesture.HandlePointerMoved {point}");
 			if (!_dragStarted) {
 				if (Math.Abs(point.X - _startPoint.X) < Controls.DragListener.MinimumHorizontalDragDistance
 					&& Math.Abs(point.Y - _startPoint.Y) < Controls.DragListener.MinimumVerticalDragDistance) return;
@@ -315,13 +305,11 @@ namespace WinUIDesigner.Designer.Services
 
 		internal void HandlePointerReleased()
 		{
-			DiagTrace.Write($"Gesture.HandlePointerReleased dragStarted={_dragStarted} operation={_operation != null}");
 			if (_dragStarted) {
 				_operation?.Commit();
 				_operation = null;
 			} else {
-				var added = CreateComponentTool.AddItemsWithDefaultSize(_container, new[] { _createdItem });
-				DiagTrace.Write($"Gesture added={added} position={_createdItem.Position} container={_container.ComponentType.Name}");
+				CreateComponentTool.AddItemsWithDefaultSize(_container, new[] { _createdItem });
 			}
 			_changeGroup?.Commit();
 			_changeGroup = null;
@@ -330,14 +318,14 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e)
 		{
-			DiagTrace.Write($"Gesture.OnPointerCaptureLost source={e.OriginalSource?.GetType().Name}");
 			// PointerCaptureLost is a routed event, and only the panel's own loss means this
 			// gesture lost anything. Over a panel, the PanelMove overlay's DragListener captures on
 			// the press before the press bubbles here, so the panel's own CapturePointer returns
 			// false and the overlay keeps the capture. On release the overlay loses it, that
 			// CaptureLost bubbles up to the panel, and treating it as the panel's own cancelled
-			// every click-to-place a few ms before PointerReleased arrived (measured in the
-			// walkthrough; a test cannot raise a routed pointer event, so nothing else caught it).
+			// every click-to-place a few ms before PointerReleased arrived - so clicking a control
+			// onto any panel placed nothing. Measured in the synthetic-input walkthrough; a test
+			// cannot raise a routed pointer event, so the suites could not see it.
 			if (!ReferenceEquals(e.OriginalSource, sender)) return;
 			Cancel();
 		}
