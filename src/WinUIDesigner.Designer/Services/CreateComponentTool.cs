@@ -282,6 +282,7 @@ namespace WinUIDesigner.Designer.Services
 
 		internal void HandlePointerMoved(Point point)
 		{
+			DiagTrace.Write($"Gesture.HandlePointerMoved {point}");
 			if (!_dragStarted) {
 				if (Math.Abs(point.X - _startPoint.X) < Controls.DragListener.MinimumHorizontalDragDistance
 					&& Math.Abs(point.Y - _startPoint.Y) < Controls.DragListener.MinimumVerticalDragDistance) return;
@@ -308,18 +309,20 @@ namespace WinUIDesigner.Designer.Services
 
 		internal void HandlePointerReleased()
 		{
+			DiagTrace.Write($"Gesture.HandlePointerReleased dragStarted={_dragStarted} operation={_operation != null}");
 			if (_dragStarted) {
 				_operation?.Commit();
 				_operation = null;
 			} else {
-				CreateComponentTool.AddItemsWithDefaultSize(_container, new[] { _createdItem });
+				var added = CreateComponentTool.AddItemsWithDefaultSize(_container, new[] { _createdItem });
+				DiagTrace.Write($"Gesture added={added} position={_createdItem.Position} container={_container.ComponentType.Name}");
 			}
 			_changeGroup?.Commit();
 			_changeGroup = null;
 			Stop();
 		}
 
-		void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e) => Cancel();
+		void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e) { DiagTrace.Write("Gesture.OnPointerCaptureLost"); Cancel(); }
 
 		void OnKeyDown(object sender, KeyRoutedEventArgs e)
 		{

@@ -1,15 +1,6 @@
-# Diagnostic round with tracing: where does a click on the surface and on the outline go?
-shot 01-start
-# Plain click on the canvas with the pointer tool: should select it.
-click 400 400
-shot 02-canvas-clicked
-# Click the outline's Canvas row.
-click 853 97
-shot 03-outline-clicked
-# Click-to-place.
+# Diagnostic round with tracing: click-to-place and drag-to-place.
 click 37 581
 click 330 420
-shot 04-click-place
-# Drag-to-place.
-drag 37 621 450 300
-shot 05-drag-place
+shot 01-click-place
+drag 37 581 450 300
+shot 02-drag-place
