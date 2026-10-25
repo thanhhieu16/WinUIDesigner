@@ -76,19 +76,15 @@ shot 15-closed
 key ctrl+o
 wait 2500
 screen 16-open-dialog
-# The Open picker loses what is typed into it (two runs ended with every box empty), so step
-# through it with a screenshot after each input. Alt+N is the File name box's mnemonic.
-key alt+n
-wait 500
-screen 17a-open-focused
-type walk
-wait 500
-screen 17b-open-typed-name
-key ctrl+a
-type C:\wt\walk.xaml
-wait 500
-screen 17c-open-typed-path
+# On the runner the Open picker sends typed keys to its address bar, not its File name box
+# (measured: a click on the box and Alt+N both left focus there), and the address bar refuses a
+# file path ("You can't open this location using this program"). So navigate the address bar to
+# the folder (Alt+D focuses it) and double-click the file, the first row of the list.
+key alt+d
+type C:\wt
 key enter
+wait 1500
+screen 17-open-folder
+dblclick 242 160
 wait 2500
-screen 17d-open-entered
 shot 18-opened
