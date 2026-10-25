@@ -300,7 +300,7 @@ namespace WinUIDesigner.Shell.Tests
 
                 var edit = menuBar.Items.OfType<MenuBarItem>().Last();
                 CollectionAssert.AreEqual(
-                    new[] { "Undo", "Redo", "Cut", "Copy", "Paste", "Delete" },
+                    new[] { "Undo", "Redo", "Cut", "Copy", "Paste", "Delete", "Select All", "Refresh" },
                     edit.Items.OfType<MenuFlyoutItem>().Select(i => i.Text).ToList());
             });
         }
