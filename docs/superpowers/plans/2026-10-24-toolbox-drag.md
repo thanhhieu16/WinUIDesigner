@@ -98,7 +98,7 @@ all four suites green from their `.exe`s. Designer.Tests 255/255 (248 before, th
 `ToolboxViewTests`). This settles both open questions as far as a test process can: `new
 DataPackage()` constructs in the test host and its `Properties` round-trip a string, and no
 existing suite depended on empty stretches of `DesignPanel` being unhittable. The walkthrough
-above has not been run yet.
+above has not been run yet - see the next section.
 
 ## Self-review
 
@@ -115,3 +115,42 @@ beyond the drag: any pointer press on an empty part of the panel now reaches `De
 handlers where before it reached nothing. If a suite turns red on it, the fallback is to drop
 the brush and rely on `AllowDrop` alone, at the cost of drags over empty canvas going
 undelivered.
+
+## Walkthrough result
+
+Driven on 2026-10-25 by `.github/workflows/walkthrough.yml`, which runs
+`.github/walkthrough/steps.txt` against the real `WinUIDesigner.Shell.App.exe` on the
+`windows-latest` runner with `SetCursorPos` + `mouse_event` + `keybd_event`, and publishes the
+screenshots to `refs/walkthrough/latest`. Final state at `8127081`.
+
+| # | Result |
+|---|--------|
+| 1 | **Not verified.** On the runner, any `ListView` item drag fail-fasts the app with `0xC0000409` right after `DragItemsStarting` returns - including a bare variant that only calls `e.Data.SetText` and arms no tool, so it is not this phase's handler code. Not root-caused; the runner runs the app elevated, which is the leading suspect. Needs a person at a real, non-elevated desktop. |
+| 2 | Click-place a Button, then Ctrl+Z: removed in one step; Ctrl+Y puts it back. |
+| 3-6 | Not verified: each needs a real drag (see 1). |
+| 7 | Click-to-place works and lands at the click point (after the fixes below). |
+
+Also confirmed on screen: the property grid's enum rows read `Stretch`, `Left`, `Center`,
+`Visible` and stay inside the 280px column (the `180a5ba` fix), and clicking the empty interior
+of the root Canvas selects it.
+
+**Three defects the walkthrough found, none visible to the suites, all fixed:**
+
+1. *A background-less panel's empty interior hit nothing.* `DesignPanel.HitTest` uses
+   `FindElementsInHostCoordinates`, which skips a `Panel` with a null `Background`, and a new
+   document's root `Canvas` has none - so a click or drop on a blank document found no
+   container. The test fixtures had been setting a `Background` on the live view to get past
+   exactly this. Fixed with a bounds-based second pass that accepts only background-less panels.
+2. *Click-to-place never placed anything over a panel.* `PanelMove`'s overlay `DragListener`
+   captures on every press before the press bubbles to `DesignPanel`, so the gesture's
+   `CapturePointer` returns false; on release the overlay's `PointerCaptureLost` - a routed
+   event - bubbled up and the gesture took it as its own, cancelling ~5ms before
+   `PointerReleased`. Fixed by ignoring a capture loss whose `OriginalSource` is not the panel.
+   Measured with a temporary trace (since removed); a first fix aimed at `DragListener` was
+   disproved by the same trace and reverted.
+3. *Placed controls landed offset by the container's position in the panel.* The panel-relative
+   point went straight into `Canvas.Left/Top`: a click at y=420 put the button at y=488. Fixed by
+   `CreateComponentTool.ToContainer`; the click and drop tests now assert absolute positions.
+
+Still open and seen in passing: after Ctrl+Z removes the selected button, the property grid
+keeps showing the removed button's properties until the next selection change.
