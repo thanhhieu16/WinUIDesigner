@@ -1,13 +1,3 @@
-# Toolbox drag-to-place and property grid walkthrough (plan 2026-10-24-toolbox-drag, Task 4).
-# Coordinates read off the start screenshot of a 1008x729 client area.
-shot 01-start
-# 1. Drag Button from the toolbox onto empty canvas.
-drag 37 581 420 300
-shot 02-after-drop
-# 2. One Ctrl+Z removes it.
-key ctrl+z
-shot 03-after-undo
-# 7. Click-to-place still works: select Button, click the canvas.
-click 37 581
-click 330 420
-shot 04-after-click-place
+# Diagnostic: where is the root Canvas? Select it from the outline so its selection frame shows.
+click 853 97
+shot 01-canvas-selected
