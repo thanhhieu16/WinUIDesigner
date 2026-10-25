@@ -17,9 +17,37 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Linq;
 
 namespace WinUIDesigner.DesignModel.Extensions
 {
+	/// <summary>Applies an extension to every selected item, not only the primary one. Ported
+	/// from the reference (WpfDesign/Project/Extensions/SelectionExtensionServers.cs), where it
+	/// backs the per-item selection rectangle. Phase 3 dropped it for want of a consumer; Select
+	/// All (Ctrl+A) is that consumer - without it a multi-selection highlighted only its primary
+	/// item, so the walkthrough's two selected buttons showed one frame between them.</summary>
+	public class SelectionExtensionServer : DefaultExtensionServer
+	{
+		protected override void OnInitialized()
+		{
+			base.OnInitialized();
+			this.Services.Selection.SelectionChanged += OnSelectionChanged;
+		}
+
+		void OnSelectionChanged(object sender, DesignItemCollectionEventArgs e)
+		{
+			// e.Items holds every item whose selected state changed, in either direction - and
+			// can hold null, since DefaultSelectionService adds the old and new primary selection
+			// to it and either may be absent.
+			ReapplyExtensions(e.Items.Where(item => item != null).ToArray());
+		}
+
+		public override bool ShouldApplyExtensions(DesignItem extendedItem)
+		{
+			return Services.Selection.IsComponentSelected(extendedItem);
+		}
+	}
+
 	public class PrimarySelectionExtensionServer : DefaultExtensionServer
 	{
 		DesignItem oldPrimarySelection;
