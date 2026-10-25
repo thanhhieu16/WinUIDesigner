@@ -71,15 +71,8 @@ shot 12a-xaml-shows-selection
 click 213 711
 wait 1500
 shot 12b-design-keeps-selection
-# Copy and paste: Ctrl+C, Ctrl+V adds a second button; Ctrl+X cuts the pasted one again.
-key ctrl+c
-wait 500
-key ctrl+v
-wait 1500
-shot 12c-pasted
-key ctrl+x
-wait 1500
-shot 12d-cut
+# No copy/paste step: CopyPasteService's Copy/Cut/Paste are still the Phase 4c no-ops (a run
+# with Ctrl+C, Ctrl+V showed nothing pasted), so there is nothing to walk yet.
 # Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
 # File name box focused and holding "New1". The XAML filter adds the extension.
 key ctrl+s
