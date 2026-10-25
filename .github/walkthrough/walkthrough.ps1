@@ -103,6 +103,7 @@ function Press-Key([string]$combo) {
     foreach ($c in $codes) { [Native]::keybd_event([byte]$c, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
 }
 
+try {
 foreach ($raw in Get-Content $Steps) {
     $line = $raw.Trim()
     if ($line -eq '' -or $line.StartsWith('#')) { continue }
@@ -172,4 +173,10 @@ foreach ($raw in Get-Content $Steps) {
 
 if ($process.HasExited) { throw "the app exited with code $($process.ExitCode)" }
 Write-Host 'walkthrough finished; the app is still running'
-Stop-Process -Id $process.Id -Force
+} catch {
+    # Written next to the screenshots so it travels to refs/walkthrough/latest with them.
+    "$_" | Out-File (Join-Path $OutDir 'error.txt')
+    throw
+} finally {
+    if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+}

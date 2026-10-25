@@ -108,6 +108,15 @@ namespace WinUIDesigner.Designer.Controls
             // already called PlacementOperation.ChangeContainer mid-drag, a partially-reparented
             // item too. Cancel() is the same safe unwind Escape already uses.
             if (!IsDown || e.Pointer.PointerId != _capturedPointer?.PointerId) return;
+            // The capture is already gone, so there is nothing to release - and releasing it
+            // anyway is not harmless. This target captures on every left press it sees, including
+            // a press that bubbles on to an ancestor which then captures the same pointer for its
+            // own gesture (CreateComponentTool on the DesignPanel, over a PanelMove overlay). That
+            // ancestor's capture is what took this one away, and Cancel's ReleasePointerCapture
+            // then took it from the ancestor in turn: measured in the walkthrough as the
+            // placement gesture receiving PointerCaptureLost ~27ms after the press, so
+            // click-to-place on a panel placed nothing.
+            _capturedPointer = null;
             Cancel();
         }
 
