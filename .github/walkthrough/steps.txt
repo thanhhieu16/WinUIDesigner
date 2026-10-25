@@ -76,7 +76,12 @@ shot 15-closed
 key ctrl+o
 wait 2500
 screen 16-open-dialog
+# Unlike Save As, the Open picker does not reliably start with focus in its File name box, so
+# click it first: (298,411) in client coordinates, read off 16-open-dialog.
+click 298 411
 type C:\wt\walk.xaml
+wait 300
+screen 17-open-typed
 key enter
 wait 2500
-shot 17-opened
+shot 18-opened
