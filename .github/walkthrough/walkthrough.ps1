@@ -24,7 +24,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Exe,
     [Parameter(Mandatory = $true)][string]$Steps,
-    [Parameter(Mandatory = $true)][string]$OutDir
+    [Parameter(Mandatory = $true)][string]$OutDir,
+    [string]$DragVariant = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +54,7 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 # TEMPORARY: the app's diagnostic trace (WinUIDesigner.Designer.DiagTrace) lands with the shots.
 $env:WINUIDESIGNER_TRACE = Join-Path $OutDir 'trace.txt'
+$env:WINUIDESIGNER_DRAGVARIANT = $DragVariant
 
 $process = Start-Process -FilePath $Exe -PassThru
 $deadline = (Get-Date).AddSeconds(60)

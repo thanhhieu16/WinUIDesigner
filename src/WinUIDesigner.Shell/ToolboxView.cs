@@ -64,7 +64,21 @@ namespace WinUIDesigner.Shell
                 {
                     var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
                     WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsStarting type={node?.Type?.Name} attached={toolService != null}");
-                    if (!BeginDrag(node?.Type, e.Data))
+                    var variant = Environment.GetEnvironmentVariable("WINUIDESIGNER_DRAGVARIANT");
+                    WinUIDesigner.Designer.DiagTrace.Write("drag variant " + variant);
+                    if (variant == "bare")
+                    {
+                        e.Data.SetText("x");
+                    }
+                    else if (variant == "defer")
+                    {
+                        var type = node?.Type;
+                        var data = e.Data;
+                        data.Properties[CreateComponentTool.ToolboxTypeKey] = type.AssemblyQualifiedName;
+                        data.RequestedOperation = DataPackageOperation.Copy;
+                        DispatcherQueue.TryEnqueue(() => { WinUIDesigner.Designer.DiagTrace.Write("deferred arm"); draggedTool = Arm(type); });
+                    }
+                    else if (!BeginDrag(node?.Type, e.Data))
                         e.Cancel = true;
                     WinUIDesigner.Designer.DiagTrace.Write("Toolbox.DragItemsStarting done");
                 }

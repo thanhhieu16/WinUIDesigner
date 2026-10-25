@@ -1,6 +1,4 @@
-# Diagnostic round with tracing: click-to-place, then drag-to-place.
-click 37 581
-click 330 420
-shot 01-click-place
+# Drag-to-place, once per drag variant (TEMP bisect of the 0xC0000409 crash).
 drag 37 581 450 300
-shot 02-drag-place
+wait 1500
+shot 01-drag-place
