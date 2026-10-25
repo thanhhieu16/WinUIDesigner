@@ -233,7 +233,7 @@ namespace WinUIDesigner.Designer.OutlineView
             // same empirically-confirmed-in-this-unpackaged-host API) that
             // DefaultSelectionService.ResolveAutoSelectionType already uses
             // (src/WinUIDesigner.Designer/Services/SelectionService.cs:117-126).
-            row.Tapped += (s, e) => HandleRowInvoked(node, IsExtendSelectionKeyDown());
+            row.Tapped += (s, e) => { DiagTrace.Write("Outline row Tapped"); HandleRowInvoked(node, IsExtendSelectionKeyDown()); };
 
             if (node.DesignItem != null) {
                 // Final-review fix (F3): DragListener registers its PointerPressed handler with

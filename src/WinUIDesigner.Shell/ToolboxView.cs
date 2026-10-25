@@ -61,10 +61,11 @@ namespace WinUIDesigner.Shell
             list.DragItemsStarting += (s, e) =>
             {
                 var node = e.Items.Count > 0 ? e.Items[0] as ControlNode : null;
+                WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsStarting type={node?.Type?.Name} attached={toolService != null}");
                 if (!BeginDrag(node?.Type, e.Data))
                     e.Cancel = true;
             };
-            list.DragItemsCompleted += (s, e) => CompleteDrag(e.DropResult);
+            list.DragItemsCompleted += (s, e) => { WinUIDesigner.Designer.DiagTrace.Write($"Toolbox.DragItemsCompleted result={e.DropResult}"); CompleteDrag(e.DropResult); };
 
             // A ListView already contains its own ScrollViewer. Wrapping it in another one
             // hands the inner list an infinite available height, so its virtualizing panel

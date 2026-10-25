@@ -81,6 +81,7 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnPointerPressed(object sender, PointerRoutedEventArgs e)
 		{
+			DiagTrace.Write($"CreateComponentTool.OnPointerPressed left={e.GetCurrentPoint(null).Properties.IsLeftButtonPressed}");
 			if (!e.GetCurrentPoint(null).Properties.IsLeftButtonPressed) return;
 			var designPanel = (DesignPanel)sender;
 			var point = e.GetCurrentPoint(designPanel).Position;
@@ -142,6 +143,7 @@ namespace WinUIDesigner.Designer.Services
 		{
 			var designPanel = (DesignPanel)sender;
 			e.AcceptedOperation = HandleDragOver(designPanel, e.GetPosition(designPanel), e.DataView.Properties);
+			DiagTrace.Write($"CreateComponentTool.OnDragOver point={e.GetPosition(designPanel)} accepted={e.AcceptedOperation} keys={string.Join(",", e.DataView.Properties.Keys)}");
 			e.Handled = true;
 		}
 
@@ -165,6 +167,7 @@ namespace WinUIDesigner.Designer.Services
 		void OnDrop(object sender, DragEventArgs e)
 		{
 			var designPanel = (DesignPanel)sender;
+			DiagTrace.Write($"CreateComponentTool.OnDrop point={e.GetPosition(designPanel)}");
 			e.AcceptedOperation = HandleDrop(designPanel, e.GetPosition(designPanel), e.DataView.Properties)
 				? DataPackageOperation.Copy
 				: DataPackageOperation.None;

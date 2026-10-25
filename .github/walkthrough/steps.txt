@@ -1,14 +1,15 @@
-# Diagnostic: give the root Canvas a visible Background through XAML mode, to see where it is
-# laid out, then try click-to-place on it.
-click 342 711
-wait 500
-click 450 300
-key ctrl+a
-type <Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="640" Height="480" Background="LightBlue" />
-shot 01-xaml-typed
-click 213 711
-wait 1000
-shot 02-design-blue
+# Diagnostic round with tracing: where does a click on the surface and on the outline go?
+shot 01-start
+# Plain click on the canvas with the pointer tool: should select it.
+click 400 400
+shot 02-canvas-clicked
+# Click the outline's Canvas row.
+click 853 97
+shot 03-outline-clicked
+# Click-to-place.
 click 37 581
 click 330 420
-shot 03-after-click-place
+shot 04-click-place
+# Drag-to-place.
+drag 37 621 450 300
+shot 05-drag-place

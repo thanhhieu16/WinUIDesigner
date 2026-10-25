@@ -50,6 +50,9 @@ public static class Native {
 [Native]::SetProcessDPIAware() | Out-Null
 
 New-Item -ItemType Directory -Force $OutDir | Out-Null
+$OutDir = (Resolve-Path $OutDir).Path
+# TEMPORARY: the app's diagnostic trace (WinUIDesigner.Designer.DiagTrace) lands with the shots.
+$env:WINUIDESIGNER_TRACE = Join-Path $OutDir 'trace.txt'
 
 $process = Start-Process -FilePath $Exe -PassThru
 $deadline = (Get-Date).AddSeconds(60)
