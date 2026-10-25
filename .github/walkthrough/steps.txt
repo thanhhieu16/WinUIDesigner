@@ -61,11 +61,12 @@ shot 11-xaml-typed
 click 213 711
 wait 1500
 shot 12-design-from-xaml
-# Save: a new document has no path, so Ctrl+S opens the Save As picker. C:\wt exists (workflow).
+# Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
+# File name box focused and holding "New1". The XAML filter adds the extension.
 key ctrl+s
 wait 2500
 screen 13-save-dialog
-type C:\wt\walk.xaml
+type walk
 key enter
 wait 2000
 shot 14-saved
@@ -76,15 +77,10 @@ shot 15-closed
 key ctrl+o
 wait 2500
 screen 16-open-dialog
-# On the runner the Open picker sends typed keys to its address bar, not its File name box
-# (measured: a click on the box and Alt+N both left focus there), and the address bar refuses a
-# file path ("You can't open this location using this program"). So navigate the address bar to
-# the folder (Alt+D focuses it) and double-click the file, the first row of the list.
-key alt+d
-type C:\wt
-key enter
-wait 1500
-screen 17-open-folder
-dblclick 242 160
+# Keys typed into the Open picker on the runner land unpredictably (measured over three runs:
+# lost, in the address bar, or refused there as "You can't open this location"), while mouse
+# input lands. So open by mouse alone: the picker starts in Documents, which lists the
+# "Visual Studio 18" folder first and walk.xaml second.
+dblclick 260 188
 wait 2500
-shot 18-opened
+shot 17-opened

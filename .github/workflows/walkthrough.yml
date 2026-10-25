@@ -26,10 +26,6 @@ jobs:
       - name: Build
         run: dotnet build WinUIDesigner.sln
 
-      - name: Prepare a folder for the save step
-        shell: pwsh
-        run: New-Item -ItemType Directory -Force C:\wt | Out-Null
-
       - name: Walk
         shell: pwsh
         run: >
@@ -42,7 +38,8 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if (Test-Path C:\wt\walk.xaml) { Get-Content C:\wt\walk.xaml; Copy-Item C:\wt\walk.xaml walkthrough-shots/ } else { Write-Host 'no saved file' }
+          $saved = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'walk.xaml'
+          if (Test-Path $saved) { Get-Content $saved; Copy-Item $saved walkthrough-shots/ } else { Write-Host 'no saved file' }
 
       - name: Upload screenshots
         if: always()
