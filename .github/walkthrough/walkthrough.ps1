@@ -139,21 +139,27 @@ foreach ($raw in Get-Content $Steps) {
         'drag' {
             $from = To-Screen $n[0] $n[1]
             $to = To-Screen $n[2] $n[3]
-            [Native]::SetCursorPos($from[0], $from[1]) | Out-Null; Start-Sleep -Milliseconds 200
-            [Native]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 300
-            # Small first moves cross the drag threshold before the long travel begins.
-            # Absolute moves (MOVE | ABSOLUTE, coordinates normalised to 0..65535) rather than
-            # SetCursorPos: a drag source needs real mouse-move input while the button is down.
-            foreach ($i in 1..40) {
-                $x = [int]($from[0] + ($to[0] - $from[0]) * $i / 40)
-                $y = [int]($from[1] + ($to[1] - $from[1]) * $i / 40)
+            function Move-Abs([int]$x, [int]$y) {
                 $nx = [uint32][Math]::Round($x * 65535 / ($screen.Width - 1))
                 $ny = [uint32][Math]::Round($y * 65535 / ($screen.Height - 1))
                 [Native]::mouse_event(0x8001, $nx, $ny, 0, [UIntPtr]::Zero)
+            }
+            # Absolute moves (MOVE | ABSOLUTE, normalised to 0..65535) rather than SetCursorPos:
+            # a drag source needs real mouse-move input while the button is down.
+            Move-Abs $from[0] $from[1]; Start-Sleep -Milliseconds 200
+            [Native]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 300
+            # Cross the drag threshold, then hold still while the system drag session starts:
+            # moves sent before it is running are not seen by the drop target.
+            foreach ($i in 1..5) { Move-Abs ($from[0] + 3 * $i) $from[1]; Start-Sleep -Milliseconds 40 }
+            Start-Sleep -Milliseconds 1000
+            foreach ($i in 1..60) {
+                $x = [int]($from[0] + 15 + ($to[0] - $from[0] - 15) * $i / 60)
+                $y = [int]($from[1] + ($to[1] - $from[1]) * $i / 60)
+                Move-Abs $x $y
                 Start-Sleep -Milliseconds 50
             }
-            Start-Sleep -Milliseconds 400
-            [Native]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 800
+            Start-Sleep -Milliseconds 600
+            [Native]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 1500
         }
         'key' { Press-Key $args1; Start-Sleep -Milliseconds 400 }
         'type' {

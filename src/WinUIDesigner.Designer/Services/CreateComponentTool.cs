@@ -328,7 +328,19 @@ namespace WinUIDesigner.Designer.Services
 			Stop();
 		}
 
-		void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e) { DiagTrace.Write("Gesture.OnPointerCaptureLost"); Cancel(); }
+		void OnPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+		{
+			DiagTrace.Write($"Gesture.OnPointerCaptureLost source={e.OriginalSource?.GetType().Name}");
+			// PointerCaptureLost is a routed event, and only the panel's own loss means this
+			// gesture lost anything. Over a panel, the PanelMove overlay's DragListener captures on
+			// the press before the press bubbles here, so the panel's own CapturePointer returns
+			// false and the overlay keeps the capture. On release the overlay loses it, that
+			// CaptureLost bubbles up to the panel, and treating it as the panel's own cancelled
+			// every click-to-place a few ms before PointerReleased arrived (measured in the
+			// walkthrough; a test cannot raise a routed pointer event, so nothing else caught it).
+			if (!ReferenceEquals(e.OriginalSource, sender)) return;
+			Cancel();
+		}
 
 		void OnKeyDown(object sender, KeyRoutedEventArgs e)
 		{
