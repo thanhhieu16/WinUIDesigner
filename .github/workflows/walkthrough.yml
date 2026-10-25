@@ -1,12 +1,12 @@
-# Runs .github/walkthrough/steps.txt against the real shell app with synthetic input and prints
-# each screenshot to the log as base64 (see walkthrough.ps1). Only runs when the walkthrough
-# itself changes, or on demand.
+# Runs .github/walkthrough/steps.txt against the real shell app with synthetic input, and
+# publishes the screenshots to refs/walkthrough/latest (see walkthrough.ps1). Runs when the app
+# or the walkthrough changes, or on demand.
 name: Walkthrough
 
 on:
   push:
     branches: ['claude/**']
-    paths: ['.github/walkthrough/**', '.github/workflows/walkthrough.yml']
+    paths: ['src/**', '.github/walkthrough/**', '.github/workflows/walkthrough.yml']
   workflow_dispatch:
 
 permissions:
