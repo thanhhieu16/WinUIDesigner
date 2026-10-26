@@ -26,10 +26,10 @@ namespace WinUIDesigner.Designer.Services
     /// <summary>The Windows clipboard, through the Win32 clipboard API.</summary>
     /// <remarks>
     /// Not Windows.ApplicationModel.DataTransfer.Clipboard. That was the first implementation, and
-    /// on the walkthrough runner every Clipboard.SetContent call failed with CO_E_NOTINITIALIZED
-    /// (0x800401F0), measured with a trace. Calling OleInitialize on the UI thread first changed
-    /// nothing. The Win32 API has no apartment or broker requirements and is what every
-    /// unpackaged desktop app can rely on.
+    /// on the walkthrough runner every Clipboard.SetContent failed with CO_E_NOTINITIALIZED
+    /// (0x800401F0). The cause turned out to be the UI thread running in the multithreaded
+    /// apartment, which Program.cs now prevents. The Win32 API was kept anyway: it is synchronous,
+    /// has no apartment or broker requirement, and is proven on the runner.
     /// </remarks>
     public sealed class SystemDesignerClipboard : IDesignerClipboard
     {

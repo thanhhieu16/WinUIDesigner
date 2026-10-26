@@ -62,7 +62,9 @@ machine running them.
 
 The first implementation used `Windows.ApplicationModel.DataTransfer.Clipboard`. On the
 walkthrough runner every `SetContent` failed with `CO_E_NOTINITIALIZED` (0x800401F0), measured
-with a temporary trace, and calling `OleInitialize` on the UI thread first changed nothing.
+with a temporary trace, and calling `OleInitialize` on the UI thread first changed nothing. The
+cause, found later, was the UI thread running in the multithreaded apartment; `Program.cs` now
+fixes that. The Win32 implementation stays, because it is synchronous and proven on the runner.
 `SystemDesignerClipboard` therefore uses the Win32 API: `OpenClipboard`, `SetClipboardData` with a
 registered `WinUIDesigner.Xaml` format plus `CF_UNICODETEXT`, `IsClipboardFormatAvailable` and
 `GetClipboardData`. This API has no apartment or broker requirement. The read is synchronous;

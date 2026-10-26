@@ -13,11 +13,12 @@ namespace WinUIDesigner.Shell
     /// <remarks>
     /// Measured on the walkthrough runner with the generated Main: the UI thread was in the
     /// multithreaded apartment (CoGetApartmentType type 1, managed ApartmentState MTA). OLE needs a
-    /// single-threaded apartment, so everything built on it failed - the WinRT clipboard threw
-    /// CO_E_NOTINITIALIZED, and drag-and-drop goes through the same OLE layer. So Main checks the
-    /// apartment it was given and, if it is not single-threaded, runs the application on a thread
-    /// that is: an apartment cannot be changed once a thread has joined one. The body is the
-    /// generated Main's, unchanged.
+    /// single-threaded apartment, so everything built on it failed: every toolbox drag fail-fasted
+    /// the app with 0xC0000409 the moment DragItemsStarting returned, and the WinRT clipboard threw
+    /// CO_E_NOTINITIALIZED. With this Main the same run measured MAINSTA (type 3), the drag placed
+    /// its control, and the walkthrough completed. Main checks the apartment it was given and, if
+    /// it is not single-threaded, runs the application on a thread that is, since an apartment
+    /// cannot be changed once a thread has joined one. The body is the generated Main's, unchanged.
     /// </remarks>
     public static class Program
     {
@@ -27,7 +28,6 @@ namespace WinUIDesigner.Shell
         [STAThread]
         static void Main(string[] args)
         {
-            App.Trace("Main: managed apartment=" + Thread.CurrentThread.GetApartmentState());
             if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
             {
                 Run();

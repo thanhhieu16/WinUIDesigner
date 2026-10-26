@@ -115,7 +115,9 @@ Four defects found on the way, none visible to a test with a fake clipboard, all
 
 1. **The WinRT clipboard fails on the runner.** `Clipboard.SetContent` threw `CO_E_NOTINITIALIZED`,
    and `OleInitialize` first did not help. `SystemDesignerClipboard` now uses the Win32 API
-   (spec Decision 2).
+   (spec Decision 2). The root cause, found the next day, was the UI thread running in the
+   multithreaded apartment. The same cause made every toolbox drag crash, and `Program.cs` fixes
+   both.
 2. **That exception was invisible.** Thrown from a `KeyboardAccelerator.Invoked` handler, it
    showed no dialog. It was found by a temporary file trace (since removed).
 3. **A hidden XAML editor kept focus after switching back to Design.** It made every guarded

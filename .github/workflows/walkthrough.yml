@@ -28,8 +28,6 @@ jobs:
 
       - name: Walk
         shell: pwsh
-        env:
-          WINUIDESIGNER_TRACE: ${{ runner.temp }}\trace.log
         run: >
           ./.github/walkthrough/walkthrough.ps1
           -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
@@ -42,13 +40,6 @@ jobs:
         run: |
           $saved = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'walk.xaml'
           if (Test-Path $saved) { Get-Content $saved; Copy-Item $saved walkthrough-shots/ } else { Write-Host 'no saved file' }
-
-      - name: Show the trace (temporary)
-        if: always()
-        shell: pwsh
-        run: |
-          $t = Join-Path $env:RUNNER_TEMP 'trace.log'
-          if (Test-Path $t) { Get-Content $t; Copy-Item $t walkthrough-shots/ } else { Write-Host 'no trace' }
 
       - name: Upload screenshots
         if: always()

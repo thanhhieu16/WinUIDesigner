@@ -2,9 +2,8 @@
 # Coordinates are read off the screenshots: toolbox "Button" at (37,581); the 640x480 root
 # Canvas spans roughly x 200-728, y 147-627.
 #
-# A toolbox drag is deliberately absent: on the GitHub runner any ListView item drag fail-fasts
-# the app with 0xC0000409, even a bare one with no handler code of ours (see the toolbox-drag
-# plan's walkthrough section), so drag-to-place needs a person at a real desktop.
+# The toolbox drag is the last step. It used to fail-fast the app with 0xC0000409 on the runner;
+# the cause was the UI thread running in the multithreaded apartment (see Program.cs).
 shot 01-start
 # Click-to-place a Button; it is selected and the property grid shows its properties.
 click 37 581
@@ -129,11 +128,14 @@ type <Broken
 click 213 711
 wait 1500
 shot 18-error-strip
-# TEMPORARY: one toolbox drag at the very end, on a fresh document, to see whether it still
-# fail-fasts the app now that the UI thread is single-threaded.
+# Drag-to-place, on a fresh document: drag Button from the toolbox and release on the canvas; it
+# lands at the release point, selected. One Ctrl+Z removes it.
 key ctrl+n
 wait 2000
 shot 19-before-drag
 drag 37 581 400 400
 wait 1500
-shot 20-after-drag
+shot 20-dragged
+key ctrl+z
+wait 1000
+shot 21-drag-undone
