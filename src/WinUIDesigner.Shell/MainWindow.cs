@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using Windows.System;
 using WinUIDesigner.DesignModel;
@@ -15,6 +16,7 @@ using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.Designer;
 using WinUIDesigner.Designer.OutlineView;
 using WinUIDesigner.Designer.PropertyGrid;
+using WinUIDesigner.Designer.Services;
 
 namespace WinUIDesigner.Shell
 {
@@ -98,6 +100,11 @@ namespace WinUIDesigner.Shell
             outlineFilter.TextChanged += (s, e) => outlineView.Filter = outlineFilter.Text;
 
             AppWindow.Closing += OnAppWindowClosing;
+
+            // Paste's enabled state follows the clipboard, which other applications change while
+            // this window is in the background; coming back to the foreground is when it can have
+            // gone stale. Clipboard spec Decision 8.
+            Activated += OnWindowActivated;
 
             // Before shell.New() below: New does Documents.Add then sets CurrentDocument, so
             // subscribing after it means the first document never gets a tab. Spec Decision 4.
@@ -222,9 +229,12 @@ namespace WinUIDesigner.Shell
 
             undoItem = Item("Undo", VirtualKey.Z, VirtualKeyModifiers.Control, (s, e) => WithUndo(u => u.Undo()));
             redoItem = Item("Redo", VirtualKey.Y, VirtualKeyModifiers.Control, (s, e) => WithUndo(u => u.Redo()));
-            cutItem = Item("Cut", VirtualKey.X, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); }));
-            copyItem = Item("Copy", VirtualKey.C, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); }));
-            pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); }));
+            cutItem = Item("Cut", VirtualKey.X, VirtualKeyModifiers.Control,
+                (s, e) => CutSelection(), Guarded(CutSelection));
+            copyItem = Item("Copy", VirtualKey.C, VirtualKeyModifiers.Control,
+                (s, e) => CopySelection(), Guarded(CopySelection));
+            pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control,
+                (s, e) => PasteClipboard(), Guarded(PasteClipboard));
             deleteItem = Item("Delete", VirtualKey.Delete, VirtualKeyModifiers.None,
                 (s, e) => DeleteSelection(), OnDeleteAcceleratorInvoked);
             selectAllItem = Item("Select All", VirtualKey.A, VirtualKeyModifiers.Control,
@@ -308,6 +318,52 @@ namespace WinUIDesigner.Shell
         }
 
         /// <summary>
+        /// Cut, Copy and Paste, each shared by its menu item and its accelerator. Same text-entry
+        /// guard as <see cref="DeleteSelection"/>: Ctrl+C/X/V in the XAML editor or the outline
+        /// filter act on that box's text, not on the controls. Clipboard spec Decision 9.
+        /// </summary>
+        void CutSelection()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); });
+        }
+
+        void CopySelection()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); });
+        }
+
+        void PasteClipboard()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); });
+        }
+
+        /// <summary>An accelerator handler with the Handled asymmetry of
+        /// <see cref="OnDeleteAcceleratorInvoked"/>: it declines while a text box has focus, so the
+        /// keystroke reaches the box, and marks the event handled only when it acts.</summary>
+        TypedEventHandler<KeyboardAccelerator, KeyboardAcceleratorInvokedEventArgs> Guarded(Action command)
+        {
+            return (sender, args) =>
+            {
+                if (IsTextEntryFocused())
+                    return;
+                command();
+                args.Handled = true;
+            };
+        }
+
+        void OnWindowActivated(object sender, WindowActivatedEventArgs e)
+        {
+            if (e.WindowActivationState != WindowActivationState.Deactivated)
+                RefreshCommands();
+        }
+
+        /// <summary>
         /// Select All's one implementation, shared by the menu item and the Ctrl+A accelerator.
         /// Same text-entry guard as <see cref="DeleteSelection"/>, for the same reason: Ctrl+A in
         /// the XAML editor or the outline filter selects that box's text, not the controls.
@@ -383,8 +439,22 @@ namespace WinUIDesigner.Shell
             if (Content == null || Content.XamlRoot == null)
                 return false;
 
-            var focused = FocusManager.GetFocusedElement(Content.XamlRoot);
-            return focused is TextBox || focused is RichEditBox || focused is NumberBox;
+            var focused = FocusManager.GetFocusedElement(Content.XamlRoot) as DependencyObject;
+            if (!(focused is TextBox || focused is RichEditBox || focused is NumberBox))
+                return false;
+
+            // A text box that is not on screen is not what the user is typing into. Switching a
+            // document from XAML to Design collapses its editor and leaves focus on it, and
+            // nothing on the surface takes focus when clicked, so without this the editor kept
+            // every guarded command - Delete, Select All, Cut, Copy, Paste - declining after any
+            // XAML round trip (found by the walkthrough, steps 12c-12f).
+            for (var element = focused; element != null; element = VisualTreeHelper.GetParent(element))
+            {
+                var ui = element as UIElement;
+                if (ui != null && ui.Visibility == Visibility.Collapsed)
+                    return false;
+            }
+            return true;
         }
 
         void WithUndo(Action<UndoService> action)
@@ -574,6 +644,12 @@ namespace WinUIDesigner.Shell
         internal MenuFlyoutItem SelectAllItemForTest { get { return selectAllItem; } }
 
         internal MenuFlyoutItem RefreshItemForTest { get { return refreshItem; } }
+
+        /// <summary>Test seam: Edit &gt; Cut.</summary>
+        internal MenuFlyoutItem CutItemForTest { get { return cutItem; } }
+
+        /// <summary>Test seam: Edit &gt; Copy.</summary>
+        internal MenuFlyoutItem CopyItemForTest { get { return copyItem; } }
 
         /// <summary>Runs Select All as the menu would. Test seam.</summary>
         internal void SelectAllForTest()

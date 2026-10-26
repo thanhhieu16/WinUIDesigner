@@ -154,3 +154,19 @@ of the root Canvas selects it.
 
 Still open and seen in passing: after Ctrl+Z removes the selected button, the property grid
 keeps showing the removed button's properties until the next selection change.
+
+## Walkthrough, 2026-10-26: item 1 verified
+
+The 0xC0000409 crash was never about elevation. The XAML compiler's generated `Main` left the UI
+thread in the multithreaded apartment. OLE, which drag-and-drop goes through, needs a
+single-threaded one. This was measured with `CoGetApartmentType` on the runner: type 1, MTA.
+
+`src/WinUIDesigner.Shell.App/Program.cs` now supplies an STA `Main`. On the same runner, the
+walkthrough's last steps then show:
+- dragging Button from the toolbox onto a fresh document's canvas places it at the release point,
+  selected (item 1);
+- one Ctrl+Z removes it (item 2).
+
+Items 3–6 still need a person: an Escape mid-drag, a drag from another application, a drag in XAML
+mode, and a `Grid`-rooted document. The synthetic input cannot press Escape mid-drag, and has no
+second application to drag from.

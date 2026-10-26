@@ -2,9 +2,8 @@
 # Coordinates are read off the screenshots: toolbox "Button" at (37,581); the 640x480 root
 # Canvas spans roughly x 200-728, y 147-627.
 #
-# A toolbox drag is deliberately absent: on the GitHub runner any ListView item drag fail-fasts
-# the app with 0xC0000409, even a bare one with no handler code of ours (see the toolbox-drag
-# plan's walkthrough section), so drag-to-place needs a person at a real desktop.
+# The toolbox drag is the last step. It used to fail-fast the app with 0xC0000409 on the runner;
+# the cause was the UI thread running in the multithreaded apartment (see Program.cs).
 shot 01-start
 # Click-to-place a Button; it is selected and the property grid shows its properties.
 click 37 581
@@ -61,6 +60,41 @@ shot 11-xaml-typed
 click 213 711
 wait 1500
 shot 12-design-from-xaml
+# Selection follows a mode switch: select the typed button, switch to XAML and its start tag is
+# selected in the editor; switch back and the button is selected on the surface again.
+click 270 126
+wait 800
+click 342 711
+wait 1500
+shot 12a-xaml-shows-selection
+click 213 711
+wait 1500
+shot 12b-design-keeps-selection
+# Copy and paste through the real clipboard, with the typed button still selected: Ctrl+C,
+# Ctrl+V adds a copy 10px right of and below it, selected; Ctrl+Z removes the copy; Ctrl+X cuts
+# the original; Ctrl+V brings it back at +10.
+# The Edit menu first, to see Cut/Copy/Paste's enabled state.
+click 75 21
+wait 800
+screen 12b2-edit-menu
+key escape
+wait 500
+key ctrl+c
+wait 500
+key ctrl+v
+wait 1500
+shot 12c-pasted
+key ctrl+z
+wait 1000
+shot 12d-paste-undone
+click 270 126
+wait 500
+key ctrl+x
+wait 1000
+shot 12e-cut
+key ctrl+v
+wait 1500
+shot 12f-pasted-back
 # Save: a new document has no path, so Ctrl+S opens the Save As picker, in Documents with the
 # File name box focused and holding "New1". The XAML filter adds the extension.
 key ctrl+s
@@ -84,3 +118,24 @@ screen 16-open-dialog
 dblclick 260 188
 wait 2500
 shot 17-opened
+# Error strip, last because it moves the mode bar up ~40px: break the XAML, switch to Design,
+# and the strip lists the error.
+click 342 711
+wait 1500
+click 460 350
+key ctrl+end
+type <Broken
+click 213 711
+wait 1500
+shot 18-error-strip
+# Drag-to-place, on a fresh document: drag Button from the toolbox and release on the canvas; it
+# lands at the release point, selected. One Ctrl+Z removes it.
+key ctrl+n
+wait 2000
+shot 19-before-drag
+drag 37 581 400 400
+wait 1500
+shot 20-dragged
+key ctrl+z
+wait 1000
+shot 21-drag-undone

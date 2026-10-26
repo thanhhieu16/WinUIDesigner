@@ -531,5 +531,34 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(window.RefreshItemForTest.IsEnabled, Is.True, "but a refresh still re-parses the text");
             });
         }
+    
+
+        [Test]
+        public void CutAndCopyAreEnabledExactlyWhileAChildIsSelected()
+        {
+            // Enablement only. Executing Copy here would write to the system clipboard of the
+            // machine running the tests; the service's behaviour is covered against a fake
+            // clipboard in CopyPasteServiceTests, and the real clipboard by the walkthrough.
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var doc = window.ShellForTest.CurrentDocument;
+                doc.Mode = WinUIDesigner.Shell.DocumentMode.Xaml;
+                doc.Text = CanvasWithNestedPanel;
+                doc.Mode = WinUIDesigner.Shell.DocumentMode.Design;
+
+                doc.SelectionService.SetSelectedComponents(new WinUIDesigner.DesignModel.DesignItem[0]);
+                Assert.That(window.CopyItemForTest.IsEnabled, Is.False, "nothing selected");
+                Assert.That(window.CutItemForTest.IsEnabled, Is.False);
+
+                doc.SelectionService.SetSelectedComponents(new[] { doc.DesignContext.RootItem });
+                Assert.That(window.CopyItemForTest.IsEnabled, Is.False, "the root cannot be copied out of its container");
+
+                var child = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+                doc.SelectionService.SetSelectedComponents(new[] { child });
+                Assert.That(window.CopyItemForTest.IsEnabled, Is.True);
+                Assert.That(window.CutItemForTest.IsEnabled, Is.True);
+            });
+        }
     }
 }
