@@ -60,3 +60,26 @@ Coordinates for Open Recent come from the first run's screenshot.
 
 - Mark the shell spec's gap closed.
 - Record the results here.
+
+## Results
+
+CI: all four suites are green from their `.exe`s on `windows-latest`. New in the Shell suite:
+- `RecentFileListTests` (7): the store round-trips, loads empty when missing or malformed, and the
+  list's ordering, dedupe, capacity, remove and clear.
+- `ShellModelTests.OpenAndSaveAsRecordTheFileAndAFailedOpenDoesNot`.
+- In `MainWindowDocumentTests`:
+  - `OpenRecentListsOpenedFilesMostRecentFirst`
+  - `ARecentEntryWhoseFileIsGoneIsRemovedWhenChosen`
+  - `ARecentEntryThatFailsToLoadButExistsStaysListed`
+  - `ClearRecentFilesLeavesTheNoneItem`
+
+Walkthrough, on the real app:
+- Step 17b: after the file was saved and opened again, File > Open Recent lists
+  `C:\Users\runneradmin\Documents\walk.xaml` and Clear Recent Files.
+- Step 22a: after the app was ended and relaunched, the same entry is still listed, read back
+  from the settings file.
+
+One walkthrough run failed for a reason unrelated to this change. The Save As picker showed its
+File name box focused with `New1` selected, yet the typed `walk` and Enter never reached it, so
+nothing was saved and every later step went wrong. The save step now clicks that box before
+typing; the next run saved normally.
