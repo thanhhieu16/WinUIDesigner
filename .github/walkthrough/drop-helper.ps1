@@ -57,6 +57,13 @@ public static class Dropper {
             string entry = ge.Effect + "@" + (p.X / 50 * 50) + "," + (p.Y / 50 * 50);
             if (seen.Count == 0 || seen[seen.Count - 1] != entry) seen.Add(entry);
         };
+        string ended = "";
+        form.QueryContinueDrag += (qs, qe) => {
+            if (qe.EscapePressed || (qe.KeyState & 1) == 0) {
+                var p = Cursor.Position;
+                ended = " ended: keyState=" + qe.KeyState + " escape=" + qe.EscapePressed + " at " + p.X + "," + p.Y;
+            }
+        };
         // The drag starts from the window's own MouseDown, as any drag source does: by then this
         // thread has processed the press, so OLE sees the button down. Called straight after
         // injecting the press, DoDragDrop read the button as up and dropped on the spot.
@@ -66,7 +73,7 @@ public static class Dropper {
             } catch (Exception ex) {
                 result = "failed: " + ex.Message;
             }
-            result += " feedback: " + string.Join(" ", seen);
+            result += " feedback: " + string.Join(" ", seen) + ended;
             form.BeginInvoke((Action)form.Close);
         };
         var mover = new Thread(() => {
