@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using Windows.System;
 using WinUIDesigner.DesignModel;
@@ -448,8 +449,22 @@ namespace WinUIDesigner.Shell
             if (Content == null || Content.XamlRoot == null)
                 return false;
 
-            var focused = FocusManager.GetFocusedElement(Content.XamlRoot);
-            return focused is TextBox || focused is RichEditBox || focused is NumberBox;
+            var focused = FocusManager.GetFocusedElement(Content.XamlRoot) as DependencyObject;
+            if (!(focused is TextBox || focused is RichEditBox || focused is NumberBox))
+                return false;
+
+            // A text box that is not on screen is not what the user is typing into. Switching a
+            // document from XAML to Design collapses its editor and leaves focus on it, and
+            // nothing on the surface takes focus when clicked, so without this the editor kept
+            // every guarded command - Delete, Select All, Cut, Copy, Paste - declining after any
+            // XAML round trip (found by the walkthrough, steps 12c-12f).
+            for (var element = focused; element != null; element = VisualTreeHelper.GetParent(element))
+            {
+                var ui = element as UIElement;
+                if (ui != null && ui.Visibility == Visibility.Collapsed)
+                    return false;
+            }
+            return true;
         }
 
         void WithUndo(Action<UndoService> action)

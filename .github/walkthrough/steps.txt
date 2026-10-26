@@ -74,6 +74,12 @@ shot 12b-design-keeps-selection
 # Copy and paste through the real clipboard, with the typed button still selected: Ctrl+C,
 # Ctrl+V adds a copy 10px right of and below it, selected; Ctrl+Z removes the copy; Ctrl+X cuts
 # the original; Ctrl+V brings it back at +10.
+# The Edit menu first, to see Cut/Copy/Paste's enabled state.
+click 75 21
+wait 800
+screen 12b2-edit-menu
+key escape
+wait 500
 key ctrl+c
 wait 500
 key ctrl+v

@@ -107,6 +107,22 @@ namespace WinUIDesigner.Designer.Services
             if (root == null)
                 return false;
 
+            // One group around everything, parse included: registering a pasted object whose
+            // x:Name is taken renames it, and outside a group that rename was an undo entry of its
+            // own, so undoing a paste left a second entry behind (caught by CI). The placement
+            // operation's own group nests inside this one, as CreateComponentTool's does.
+            var changeGroup = root.OpenGroup("Paste");
+            if (PasteInto(xamlContext, root, payload))
+            {
+                changeGroup.Commit();
+                return true;
+            }
+            changeGroup.Abort();
+            return false;
+        }
+
+        bool PasteInto(XamlDesignContext xamlContext, XamlDesignItem root, string payload)
+        {
             var items = new List<DesignItem>();
             foreach (var part in ClipboardPayload.Split(payload))
             {
@@ -137,7 +153,7 @@ namespace WinUIDesigner.Designer.Services
             // A selected control that is not a panel is pasted beside, never into: the reference
             // would make the paste the Content of an empty Button, so copying a freshly placed
             // Button and pasting it nested the copy inside the original.
-            var selection = designContext.Services.Selection;
+            var selection = xamlContext.Services.Selection;
             var start = selection.PrimarySelection ?? root;
             if (start != root && (start.ContentProperty == null || !start.ContentProperty.IsCollection))
                 start = start.Parent;
