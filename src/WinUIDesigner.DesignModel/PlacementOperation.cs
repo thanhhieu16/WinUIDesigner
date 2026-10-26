@@ -18,6 +18,10 @@ namespace WinUIDesigner.DesignModel
     /// </summary>
     public sealed class PlacementOperation
     {
+        /// <summary>How far a paste into a Canvas lands from where the copied item stood, on
+        /// each axis. Ported from the reference.</summary>
+        public const double PasteOffset = 10;
+
         public sealed class PlacementOperationException : InvalidOperationException
         {
             public PlacementOperationException(string message) : base(message) { }

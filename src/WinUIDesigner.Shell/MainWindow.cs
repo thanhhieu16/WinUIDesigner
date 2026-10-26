@@ -15,6 +15,7 @@ using WinUIDesigner.DesignModel.Services;
 using WinUIDesigner.Designer;
 using WinUIDesigner.Designer.OutlineView;
 using WinUIDesigner.Designer.PropertyGrid;
+using WinUIDesigner.Designer.Services;
 
 namespace WinUIDesigner.Shell
 {
@@ -98,6 +99,18 @@ namespace WinUIDesigner.Shell
             outlineFilter.TextChanged += (s, e) => outlineView.Filter = outlineFilter.Text;
 
             AppWindow.Closing += OnAppWindowClosing;
+
+            // A failure here only means Paste's enabled state is refreshed by the window's own
+            // actions instead of also by other applications' copies; it is not worth failing the
+            // window over.
+            try
+            {
+                SystemDesignerClipboard.Instance.ContentChanged += OnClipboardContentChanged;
+                Closed += (s, e) => SystemDesignerClipboard.Instance.ContentChanged -= OnClipboardContentChanged;
+            }
+            catch (Exception)
+            {
+            }
 
             // Before shell.New() below: New does Documents.Add then sets CurrentDocument, so
             // subscribing after it means the first document never gets a tab. Spec Decision 4.
@@ -222,9 +235,12 @@ namespace WinUIDesigner.Shell
 
             undoItem = Item("Undo", VirtualKey.Z, VirtualKeyModifiers.Control, (s, e) => WithUndo(u => u.Undo()));
             redoItem = Item("Redo", VirtualKey.Y, VirtualKeyModifiers.Control, (s, e) => WithUndo(u => u.Redo()));
-            cutItem = Item("Cut", VirtualKey.X, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); }));
-            copyItem = Item("Copy", VirtualKey.C, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); }));
-            pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control, (s, e) => WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); }));
+            cutItem = Item("Cut", VirtualKey.X, VirtualKeyModifiers.Control,
+                (s, e) => CutSelection(), Guarded(CutSelection));
+            copyItem = Item("Copy", VirtualKey.C, VirtualKeyModifiers.Control,
+                (s, e) => CopySelection(), Guarded(CopySelection));
+            pasteItem = Item("Paste", VirtualKey.V, VirtualKeyModifiers.Control,
+                (s, e) => PasteClipboard(), Guarded(PasteClipboard));
             deleteItem = Item("Delete", VirtualKey.Delete, VirtualKeyModifiers.None,
                 (s, e) => DeleteSelection(), OnDeleteAcceleratorInvoked);
             selectAllItem = Item("Select All", VirtualKey.A, VirtualKeyModifiers.Control,
@@ -305,6 +321,55 @@ namespace WinUIDesigner.Shell
 
             DeleteSelection();
             args.Handled = true;
+        }
+
+        /// <summary>
+        /// Cut, Copy and Paste, each shared by its menu item and its accelerator. Same text-entry
+        /// guard as <see cref="DeleteSelection"/>: Ctrl+C/X/V in the XAML editor or the outline
+        /// filter act on that box's text, not on the controls. Clipboard spec Decision 9.
+        /// </summary>
+        void CutSelection()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); });
+        }
+
+        void CopySelection()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); });
+        }
+
+        void PasteClipboard()
+        {
+            if (IsTextEntryFocused())
+                return;
+            WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); });
+        }
+
+        /// <summary>An accelerator handler with the Handled asymmetry of
+        /// <see cref="OnDeleteAcceleratorInvoked"/>: it declines while a text box has focus, so the
+        /// keystroke reaches the box, and marks the event handled only when it acts.</summary>
+        TypedEventHandler<KeyboardAccelerator, KeyboardAcceleratorInvokedEventArgs> Guarded(Action command)
+        {
+            return (sender, args) =>
+            {
+                if (IsTextEntryFocused())
+                    return;
+                command();
+                args.Handled = true;
+            };
+        }
+
+        /// <summary>
+        /// Paste's enabled state follows the clipboard, which other applications change at will.
+        /// Clipboard spec Decision 8.
+        /// </summary>
+        void OnClipboardContentChanged(object sender, EventArgs e)
+        {
+            DispatcherQueue.TryEnqueue(RefreshCommands);
         }
 
         /// <summary>
@@ -574,6 +639,12 @@ namespace WinUIDesigner.Shell
         internal MenuFlyoutItem SelectAllItemForTest { get { return selectAllItem; } }
 
         internal MenuFlyoutItem RefreshItemForTest { get { return refreshItem; } }
+
+        /// <summary>Test seam: Edit &gt; Cut.</summary>
+        internal MenuFlyoutItem CutItemForTest { get { return cutItem; } }
+
+        /// <summary>Test seam: Edit &gt; Copy.</summary>
+        internal MenuFlyoutItem CopyItemForTest { get { return copyItem; } }
 
         /// <summary>Runs Select All as the menu would. Test seam.</summary>
         internal void SelectAllForTest()

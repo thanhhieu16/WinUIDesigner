@@ -26,8 +26,8 @@ namespace WinUIDesigner.Designer.Extensions
     /// code. GetCanvasProperty operates on the live UIElement's real WinUI
     /// Canvas.LeftProperty/TopProperty DependencyProperty directly (not the string-keyed
     /// DesignItemProperty convention, which only applies to the undo-tracked SetValue side).
-    /// The PasteItem branch in the reference's EnterContainer is dropped - no clipboard/paste
-    /// feature exists anywhere in this port (spec's "Decisions already made").
+    /// EnterContainer's PasteItem branch, dropped in Phase 4b while nothing pasted, was restored
+    /// with Cut/Copy/Paste (docs/superpowers/specs/2026-10-26-clipboard-design.md, Decision 5).
     /// </summary>
     [ExtensionFor(typeof(Canvas), OverrideExtension = typeof(DefaultPlacementBehavior))]
     public class CanvasPlacementSupport : SnaplinePlacementBehavior
@@ -98,7 +98,23 @@ namespace WinUIDesigner.Designer.Extensions
                 info.Item.Properties["HorizontalAlignment"].Reset();
                 info.Item.Properties["VerticalAlignment"].Reset();
                 info.Item.Properties["Margin"].Reset();
+
+                // A paste lands PasteOffset to the right of and below where the copy stood, so a
+                // copy pasted into the same Canvas does not exactly cover its original.
+                if (operation.Type == PlacementType.PasteItem) {
+                    OffsetIfSet(info.Item.Properties.GetAttachedProperty(typeof(Canvas), "Left"));
+                    OffsetIfSet(info.Item.Properties.GetAttachedProperty(typeof(Canvas), "Top"));
+                }
             }
+        }
+
+        static void OffsetIfSet(DesignItemProperty property)
+        {
+            if (!property.IsSet)
+                return;
+            var value = property.ValueOnInstance;
+            if (value is double d && !double.IsNaN(d))
+                property.SetValue(d + PlacementOperation.PasteOffset);
         }
 
         public override void EndPlacement(PlacementOperation operation)
