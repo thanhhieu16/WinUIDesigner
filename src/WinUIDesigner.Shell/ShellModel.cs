@@ -121,14 +121,11 @@ namespace WinUIDesigner.Shell
             // same file, which is what the reference does (XamlDesigner/Shell.cs:141-146). Without
             // tabs this could not arise; with them, two copies means saving from either silently
             // clobbers the other. Spec Decision 6.
-            foreach (var alreadyOpen in Documents)
+            var alreadyOpen = FindOpen(fullPath);
+            if (alreadyOpen != null)
             {
-                if (alreadyOpen.FilePath != null
-                    && string.Equals(alreadyOpen.FilePath, fullPath, StringComparison.OrdinalIgnoreCase))
-                {
-                    CurrentDocument = alreadyOpen;
-                    return true;
-                }
+                CurrentDocument = alreadyOpen;
+                return true;
             }
 
             string text;
@@ -178,10 +175,42 @@ namespace WinUIDesigner.Shell
         {
             if (doc == null || path == null)
                 return false;
-            if (!WriteToDisk(doc, path))
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex)
+            {
+                RaiseError(ex.Message, null);
                 return false;
-            doc.FilePath = Path.GetFullPath(path);
+            }
+
+            // The other half of Open's dedupe: saving over a file another tab holds would leave
+            // two live trees over one path, and the next save from either clobbers the other.
+            // Refused before anything is written, so the other tab's file stays as it was.
+            var holder = FindOpen(fullPath);
+            if (holder != null && holder != doc)
+            {
+                RaiseError(Path.GetFileName(fullPath) + " is open in another tab. Close it there first, or save under another name.", null);
+                return false;
+            }
+
+            if (!WriteToDisk(doc, fullPath))
+                return false;
+            doc.FilePath = fullPath;
             return true;
+        }
+
+        Document FindOpen(string fullPath)
+        {
+            foreach (var doc in Documents)
+            {
+                if (doc.FilePath != null
+                    && string.Equals(doc.FilePath, fullPath, StringComparison.OrdinalIgnoreCase))
+                    return doc;
+            }
+            return null;
         }
 
         public bool Close(Document doc)

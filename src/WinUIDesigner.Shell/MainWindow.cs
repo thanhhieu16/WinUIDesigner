@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using Windows.System;
 using WinUIDesigner.DesignModel;
@@ -78,6 +79,15 @@ namespace WinUIDesigner.Shell
         MenuFlyoutItem closeItem, closeAllItem, saveAllItem;
 
         public MainWindow()
+            : this(null)
+        {
+        }
+
+        /// <summary>
+        /// A window that opens <paramref name="startupPaths"/> once it is on screen: the
+        /// command line's file arguments. Open-from-outside spec Decisions 3 and 4.
+        /// </summary>
+        public MainWindow(IEnumerable<string> startupPaths)
         {
             ShellMetadata.Register();
 
@@ -115,6 +125,135 @@ namespace WinUIDesigner.Shell
             tabStrip.TabCloseRequested += OnTabCloseRequested;
 
             shell.New();
+
+            // From the first Loaded rather than here: until then the window has no XamlRoot, so
+            // a file that fails to open could report only to Debug. Open-from-outside Decision 3.
+            var paths = startupPaths == null
+                ? new List<string>()
+                : startupPaths.Where(path => !string.IsNullOrWhiteSpace(path)).ToList();
+            var rootElement = Content as FrameworkElement;
+            if (paths.Count > 0 && rootElement != null)
+            {
+                RoutedEventHandler onLoaded = null;
+                onLoaded = (s, e) =>
+                {
+                    rootElement.Loaded -= onLoaded;
+                    OpenStartupFiles(paths);
+                };
+                rootElement.Loaded += onLoaded;
+            }
+        }
+
+        /// <summary>One report raised while <see cref="OpenFiles"/> ran, and the path it was opening.</summary>
+        internal sealed class BatchError
+        {
+            public string Path { get; set; }
+            public ShellErrorEventArgs Report { get; set; }
+        }
+
+        /// <summary>Non-null while <see cref="OpenFiles"/> runs; OnReportError collects into it.</summary>
+        List<BatchError> batchErrors;
+        string batchPath;
+
+        /// <summary>Test seam: the reports of the last <see cref="OpenFiles"/> call, which the
+        /// test process cannot show in a dialog.</summary>
+        internal IReadOnlyList<BatchError> BatchErrorsForTest { get; private set; }
+
+        /// <summary>
+        /// Opens each path in order; the last one opened becomes current, as File > Open does.
+        /// Every failure in the batch is shown in one dialog afterwards, since only one dialog
+        /// can be up at a time and a second report would otherwise be lost. Open-from-outside
+        /// Decisions 1 and 2.
+        /// </summary>
+        internal void OpenFiles(IEnumerable<string> paths)
+        {
+            if (paths == null)
+                return;
+            var collected = new List<BatchError>();
+            batchErrors = collected;
+            try
+            {
+                foreach (var path in paths)
+                {
+                    batchPath = path;
+                    shell.Open(path);
+                }
+            }
+            finally
+            {
+                batchErrors = null;
+                batchPath = null;
+            }
+            BatchErrorsForTest = collected;
+            if (collected.Count > 0)
+                Fire(() => ShowBatchErrorsAsync(collected));
+        }
+
+        /// <summary>
+        /// Opens the command line's files, then closes the blank document the window started
+        /// with if one of them opened and nothing has touched the blank one. Open-from-outside
+        /// Decision 4.
+        /// </summary>
+        internal void OpenStartupFiles(IList<string> paths)
+        {
+            var initial = shell.CurrentDocument;
+            OpenFiles(paths);
+            if (initial != null && shell.CurrentDocument != initial && IsUntouched(initial))
+                shell.Close(initial);
+        }
+
+        static bool IsUntouched(Document doc)
+        {
+            if (doc.FilePath != null || doc.IsDirty)
+                return false;
+            var undo = doc.UndoService;
+            return undo == null || (!undo.CanUndo && !undo.CanRedo);
+        }
+
+        /// <summary>
+        /// The paths a file drop opens: those ending in .xaml, in any case. A .dll would mean
+        /// "add to the toolbox", which this shell cannot do. Open-from-outside Decision 5.
+        /// </summary>
+        internal static IList<string> XamlPathsIn(IEnumerable<string> paths)
+        {
+            if (paths == null)
+                return new List<string>();
+            return paths
+                .Where(path => !string.IsNullOrEmpty(path)
+                    && path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        /// <summary>
+        /// Accepts any drag that carries files; which of them are XAML can only be read on drop.
+        /// A toolbox drag carries no storage items and never gets here as a copy.
+        /// </summary>
+        void OnFileDragOver(object sender, DragEventArgs e)
+        {
+            if (e.DataView.Contains(StandardDataFormats.StorageItems))
+                e.AcceptedOperation = DataPackageOperation.Copy;
+        }
+
+        async void OnFileDrop(object sender, DragEventArgs e)
+        {
+            if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+                return;
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            var deferral = e.GetDeferral();
+            try
+            {
+                var items = await e.DataView.GetStorageItemsAsync();
+                OpenFiles(XamlPathsIn(items.Select(item => item.Path)));
+            }
+            catch (Exception ex)
+            {
+                // async void: an exception escaping here would end the process.
+                System.Diagnostics.Debug.WriteLine("[MainWindow] file drop failed: " + ex);
+            }
+            finally
+            {
+                deferral.Complete();
+            }
         }
 
         UIElement BuildLayout()
@@ -128,6 +267,12 @@ namespace WinUIDesigner.Shell
             // does not resolve.
             if (Application.Current.Resources.TryGetValue("ApplicationPageBackgroundThemeBrush", out object pageBackground))
                 root.Background = pageBackground as Microsoft.UI.Xaml.Media.Brush;
+
+            // Files dragged from Explorer. Drag events bubble, so this sees a drag over every
+            // part of the window that does not handle it itself. Open-from-outside Decision 6.
+            root.AllowDrop = true;
+            root.DragOver += OnFileDragOver;
+            root.Drop += OnFileDrop;
 
             root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -1173,12 +1318,16 @@ namespace WinUIDesigner.Shell
 
         void OnReportError(object sender, ShellErrorEventArgs e)
         {
+            if (batchErrors != null)
+            {
+                batchErrors.Add(new BatchError { Path = batchPath, Report = e });
+                return;
+            }
             Fire(() => ShowErrorAsync(e));
         }
 
-        async Task ShowErrorAsync(ShellErrorEventArgs e)
+        static void AppendReport(StringBuilder text, ShellErrorEventArgs e)
         {
-            var text = new StringBuilder();
             text.AppendLine(e.Message);
 
             if (e.Errors != null && e.Errors.Count > 0)
@@ -1189,11 +1338,35 @@ namespace WinUIDesigner.Shell
                 if (e.Errors.Count > 10)
                     text.AppendLine("... and " + (e.Errors.Count - 10) + " more.");
             }
+        }
 
+        Task ShowBatchErrorsAsync(IList<BatchError> reports)
+        {
+            var text = new StringBuilder();
+            foreach (var report in reports)
+            {
+                if (text.Length > 0)
+                    text.AppendLine();
+                if (report.Path != null)
+                    text.AppendLine(System.IO.Path.GetFileName(report.Path) + ":");
+                AppendReport(text, report.Report);
+            }
+            return ShowErrorTextAsync(reports.Count == 1 ? "Error" : "Some files could not be opened", text.ToString());
+        }
+
+        Task ShowErrorAsync(ShellErrorEventArgs e)
+        {
+            var text = new StringBuilder();
+            AppendReport(text, e);
+            return ShowErrorTextAsync("Error", text.ToString());
+        }
+
+        async Task ShowErrorTextAsync(string title, string text)
+        {
             var dialog = new ContentDialog
             {
-                Title = "Error",
-                Content = new ScrollViewer { Content = new TextBlock { Text = text.ToString(), TextWrapping = TextWrapping.Wrap } },
+                Title = title,
+                Content = new ScrollViewer { Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap } },
                 CloseButtonText = "Close"
             };
 

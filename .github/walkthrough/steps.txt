@@ -148,3 +148,8 @@ shot 20-dragged
 key ctrl+z
 wait 1000
 shot 21-drag-undone
+# Command line: start the app again with the saved file as its argument. It opens as the only
+# tab - the blank New1 the window starts with is closed, since nothing touched it.
+launch {docs}\walk.xaml
+wait 2000
+shot 22-launched-with-file
