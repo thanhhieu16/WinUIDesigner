@@ -101,17 +101,10 @@ namespace WinUIDesigner.Shell
 
             AppWindow.Closing += OnAppWindowClosing;
 
-            // A failure here only means Paste's enabled state is refreshed by the window's own
-            // actions instead of also by other applications' copies; it is not worth failing the
-            // window over.
-            try
-            {
-                SystemDesignerClipboard.Instance.ContentChanged += OnClipboardContentChanged;
-                Closed += (s, e) => SystemDesignerClipboard.Instance.ContentChanged -= OnClipboardContentChanged;
-            }
-            catch (Exception)
-            {
-            }
+            // Paste's enabled state follows the clipboard, which other applications change while
+            // this window is in the background; coming back to the foreground is when it can have
+            // gone stale. Clipboard spec Decision 8.
+            Activated += OnWindowActivated;
 
             // Before shell.New() below: New does Documents.Add then sets CurrentDocument, so
             // subscribing after it means the first document never gets a tab. Spec Decision 4.
@@ -367,13 +360,10 @@ namespace WinUIDesigner.Shell
             };
         }
 
-        /// <summary>
-        /// Paste's enabled state follows the clipboard, which other applications change at will.
-        /// Clipboard spec Decision 8.
-        /// </summary>
-        void OnClipboardContentChanged(object sender, EventArgs e)
+        void OnWindowActivated(object sender, WindowActivatedEventArgs e)
         {
-            DispatcherQueue.TryEnqueue(RefreshCommands);
+            if (e.WindowActivationState != WindowActivationState.Deactivated)
+                RefreshCommands();
         }
 
         /// <summary>

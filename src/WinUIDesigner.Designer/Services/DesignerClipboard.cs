@@ -2,16 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
-using Windows.ApplicationModel.DataTransfer;
 
 namespace WinUIDesigner.Designer.Services
 {
     /// <summary>
-    /// The clipboard CopyPasteService reads and writes. A seam rather than direct calls for two
-    /// reasons (clipboard spec Decision 2): WinUI reads the clipboard asynchronously, and blocking
-    /// on that on the UI thread can deadlock; and no test may depend on the clipboard of the
-    /// machine it runs on.
+    /// The clipboard CopyPasteService reads and writes. A seam rather than direct calls so that no
+    /// test depends on the clipboard of the machine it runs on (clipboard spec Decision 2).
     /// </summary>
     public interface IDesignerClipboard
     {
@@ -23,110 +21,168 @@ namespace WinUIDesigner.Designer.Services
 
         /// <summary>The designer data on the clipboard, or null when there is none.</summary>
         Task<string> GetXamlAsync();
-
-        /// <summary>Raised when anything replaces the clipboard's content.</summary>
-        event EventHandler ContentChanged;
     }
 
-    /// <summary>The Windows clipboard, through Windows.ApplicationModel.DataTransfer.</summary>
+    /// <summary>The Windows clipboard, through the Win32 clipboard API.</summary>
+    /// <remarks>
+    /// Not Windows.ApplicationModel.DataTransfer.Clipboard. That was the first implementation, and
+    /// on the walkthrough runner every Clipboard.SetContent call failed with CO_E_NOTINITIALIZED
+    /// (0x800401F0), measured with a trace. Calling OleInitialize on the UI thread first changed
+    /// nothing. The Win32 API has no apartment or broker requirements and is what every
+    /// unpackaged desktop app can rely on.
+    /// </remarks>
     public sealed class SystemDesignerClipboard : IDesignerClipboard
     {
         /// <summary>
-        /// The data format id copied controls travel under. WinUI's DataPackage has no XAML
-        /// format, where the reference used WPF's TextDataFormat.Xaml.
+        /// The registered clipboard format copied controls travel under. WinUI has no XAML format,
+        /// where the reference used WPF's TextDataFormat.Xaml.
         /// </summary>
-        public const string Format = "WinUIDesigner.Xaml";
+        public const string FormatName = "WinUIDesigner.Xaml";
 
         public static readonly SystemDesignerClipboard Instance = new SystemDesignerClipboard();
 
-        EventHandler contentChanged;
+        const uint CF_UNICODETEXT = 13;
+        const uint GMEM_MOVEABLE = 0x0002;
+
+        readonly uint format;
 
         SystemDesignerClipboard()
         {
-        }
-
-        [ThreadStatic]
-        static bool oleInitialized;
-
-        [DllImport("ole32.dll")]
-        static extern int OleInitialize(IntPtr reserved);
-
-        /// <summary>
-        /// The Windows clipboard goes through OLE, and OLE is per thread. The generated Main of a
-        /// WinUI app marks the UI thread [STAThread], which initializes COM but not OLE, so every
-        /// clipboard call failed with CO_E_NOTINITIALIZED (0x800401F0) - measured on the walkthrough
-        /// runner, where Ctrl+C did nothing. OleInitialize on an already-initialized thread only
-        /// returns S_FALSE, so calling it once per thread is safe.
-        /// </summary>
-        static void EnsureOle()
-        {
-            if (oleInitialized)
-                return;
-            OleInitialize(IntPtr.Zero);
-            oleInitialized = true;
+            format = RegisterClipboardFormat(FormatName);
         }
 
         public void SetXaml(string xaml)
         {
-            EnsureOle();
-            var package = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
-            package.SetData(Format, xaml);
-            // Also as text, so copied controls can be pasted into the XAML editor or anywhere else.
-            package.SetText(xaml);
-            Clipboard.SetContent(package);
+            if (xaml == null)
+                throw new ArgumentNullException(nameof(xaml));
+            Open();
+            try
+            {
+                if (!EmptyClipboard())
+                    throw new InvalidOperationException("EmptyClipboard failed: " + Marshal.GetLastWin32Error());
+                SetString(format, xaml);
+                // Also as text, so copied controls can be pasted into the XAML editor or anywhere else.
+                SetString(CF_UNICODETEXT, xaml);
+            }
+            finally
+            {
+                CloseClipboard();
+            }
         }
 
         public bool ContainsXaml
         {
-            get
+            get { return format != 0 && IsClipboardFormatAvailable(format); }
+        }
+
+        public Task<string> GetXamlAsync()
+        {
+            if (!ContainsXaml)
+                return Task.FromResult<string>(null);
+            Open();
+            try
             {
+                var handle = GetClipboardData(format);
+                if (handle == IntPtr.Zero)
+                    return Task.FromResult<string>(null);
+                var pointer = GlobalLock(handle);
+                if (pointer == IntPtr.Zero)
+                    return Task.FromResult<string>(null);
                 try
                 {
-                    EnsureOle();
-                    return Clipboard.GetContent().Contains(Format);
+                    return Task.FromResult(Marshal.PtrToStringUni(pointer));
                 }
-                catch (Exception)
+                finally
                 {
-                    // Another process can hold the clipboard open; reading then fails. Nothing to
-                    // paste is the right answer for that moment.
-                    return false;
+                    GlobalUnlock(handle);
                 }
             }
-        }
-
-        public async Task<string> GetXamlAsync()
-        {
-            EnsureOle();
-            var content = Clipboard.GetContent();
-            if (!content.Contains(Format))
-                return null;
-            return await content.GetDataAsync(Format) as string;
-        }
-
-        /// <summary>Forwards Clipboard.ContentChanged, subscribing to it only once someone listens.</summary>
-        public event EventHandler ContentChanged
-        {
-            add
+            finally
             {
-                EnsureOle();
-                if (contentChanged == null)
-                    Clipboard.ContentChanged += OnClipboardContentChanged;
-                contentChanged += value;
-            }
-            remove
-            {
-                contentChanged -= value;
-                if (contentChanged == null)
-                    Clipboard.ContentChanged -= OnClipboardContentChanged;
+                CloseClipboard();
             }
         }
 
-        void OnClipboardContentChanged(object sender, object e)
+        /// <summary>
+        /// Opens the clipboard, retrying briefly: another process holding it open for a moment
+        /// (a clipboard manager, a remote-desktop client) is ordinary, and makes a single attempt
+        /// fail.
+        /// </summary>
+        static void Open()
         {
-            var handler = contentChanged;
-            if (handler != null)
-                handler(this, EventArgs.Empty);
+            for (int attempt = 0; attempt < 10; attempt++)
+            {
+                if (OpenClipboard(IntPtr.Zero))
+                    return;
+                Thread.Sleep(20);
+            }
+            throw new InvalidOperationException("The clipboard is in use by another application.");
         }
+
+        static void SetString(uint clipboardFormat, string value)
+        {
+            int bytes = (value.Length + 1) * 2;
+            var memory = GlobalAlloc(GMEM_MOVEABLE, (UIntPtr)bytes);
+            if (memory == IntPtr.Zero)
+                throw new OutOfMemoryException();
+            try
+            {
+                var pointer = GlobalLock(memory);
+                if (pointer == IntPtr.Zero)
+                    throw new InvalidOperationException("GlobalLock failed: " + Marshal.GetLastWin32Error());
+                try
+                {
+                    Marshal.Copy(value.ToCharArray(), 0, pointer, value.Length);
+                    Marshal.WriteInt16(pointer, value.Length * 2, 0);
+                }
+                finally
+                {
+                    GlobalUnlock(memory);
+                }
+                if (SetClipboardData(clipboardFormat, memory) == IntPtr.Zero)
+                    throw new InvalidOperationException("SetClipboardData failed: " + Marshal.GetLastWin32Error());
+                // The system owns the memory now.
+                memory = IntPtr.Zero;
+            }
+            finally
+            {
+                if (memory != IntPtr.Zero)
+                    GlobalFree(memory);
+            }
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool OpenClipboard(IntPtr newOwner);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool CloseClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern bool EmptyClipboard();
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr GetClipboardData(uint format);
+
+        [DllImport("user32.dll")]
+        static extern bool IsClipboardFormatAvailable(uint format);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern uint RegisterClipboardFormat(string name);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalLock(IntPtr memory);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GlobalUnlock(IntPtr memory);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GlobalFree(IntPtr memory);
     }
 
     /// <summary>

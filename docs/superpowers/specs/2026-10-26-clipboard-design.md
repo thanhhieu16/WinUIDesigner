@@ -54,16 +54,19 @@ the XAML editor or any text editor. Paste reads only the private format: plain t
 clipboard could be anything, and treating every `<`-prefixed string as markup to insert is out of
 scope (Decision 9 and the list at the end).
 
-**2. The clipboard sits behind a small interface.** `IDesignerClipboard` in
-`WinUIDesigner.Designer`: `void SetXaml(string)`, `bool ContainsXaml`, `Task<string> GetXamlAsync()`,
-and an `event EventHandler ContentChanged`. The default implementation, `SystemDesignerClipboard`,
-uses `Windows.ApplicationModel.DataTransfer.Clipboard`. There are two reasons:
-- WinUI's clipboard read is asynchronous (`DataPackageView.GetDataAsync`), and blocking on it on the
-  UI thread is the classic deadlock.
-- Tests must not depend on the real clipboard of the machine running them.
+**2. The clipboard sits behind a small interface, implemented on the Win32 clipboard API.**
+`IDesignerClipboard` in `WinUIDesigner.Designer` has three members: `void SetXaml(string)`,
+`bool ContainsXaml` and `Task<string> GetXamlAsync()`. The default implementation is
+`SystemDesignerClipboard`. Tests use a fake, so they never depend on the real clipboard of the
+machine running them.
 
-`CopyPasteService` takes the clipboard in an optional constructor argument and defaults to the
-system one.
+The first implementation used `Windows.ApplicationModel.DataTransfer.Clipboard`. On the
+walkthrough runner every `SetContent` failed with `CO_E_NOTINITIALIZED` (0x800401F0), measured
+with a temporary trace, and calling `OleInitialize` on the UI thread first changed nothing.
+`SystemDesignerClipboard` therefore uses the Win32 API: `OpenClipboard`, `SetClipboardData` with a
+registered `WinUIDesigner.Xaml` format plus `CF_UNICODETEXT`, `IsClipboardFormatAvailable` and
+`GetClipboardData`. This API has no apartment or broker requirement. The read is synchronous;
+`GetXamlAsync` keeps an asynchronous shape so the seam could take an asynchronous clipboard again.
 
 **3. `Paste` starts an asynchronous read and inserts when it completes.** `ICopyPasteService.Paste`
 is synchronous (ported interface, unchanged). It calls `GetXamlAsync` and awaits it. The
@@ -112,9 +115,11 @@ so a paste can be moved or pasted again at once.
 - `CanCut`: `CanCopy`, and `ModelTools.CanDeleteComponents` agrees.
 - `CanPaste`: the context has a root item and `IDesignerClipboard.ContainsXaml`.
 
-`MainWindow` re-runs `RefreshCommands` on `IDesignerClipboard.ContentChanged`, so Paste becomes
-enabled when another WinUIDesigner window copies, and disabled when another application replaces
-the clipboard.
+`MainWindow` re-runs `RefreshCommands` whenever the window is activated. Another application can
+replace the clipboard only while this window is in the background, so Paste's enabled state is
+re-read the moment the user comes back. The Win32 clipboard has a change notification
+(`AddClipboardFormatListener`), but it needs a window procedure hook that this shell does not
+otherwise have.
 
 **9. The text-entry guard covers Cut, Copy and Paste.** Each of the three accelerators declines,
 leaving `Handled` false, while `IsTextEntryFocused()` is true, exactly as Delete and Select All do.

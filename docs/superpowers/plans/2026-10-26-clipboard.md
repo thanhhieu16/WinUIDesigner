@@ -15,14 +15,16 @@ New `src/WinUIDesigner.Designer/Services/DesignerClipboard.cs`:
   - `void SetXaml(string xaml)`
   - `bool ContainsXaml { get; }`
   - `Task<string> GetXamlAsync()`
-  - `event EventHandler ContentChanged`
-- `public sealed class SystemDesignerClipboard : IDesignerClipboard`, a singleton `Instance` over
-  `Windows.ApplicationModel.DataTransfer.Clipboard`:
-  - `SetXaml` builds a `DataPackage` with `SetData("WinUIDesigner.Xaml", xaml)` and `SetText(xaml)`,
-    then calls `Clipboard.SetContent`.
-  - `ContainsXaml` is `GetContent().Contains(format)`.
-  - `GetXamlAsync` awaits `GetDataAsync(format)` and returns null when the format is missing.
-  - `ContentChanged` forwards `Clipboard.ContentChanged`, subscribed on first `+=`.
+- `public sealed class SystemDesignerClipboard : IDesignerClipboard`, a singleton `Instance` over the
+  Win32 clipboard API:
+  - It registers the `WinUIDesigner.Xaml` format.
+  - `SetXaml` opens the clipboard (retrying briefly while another process holds it), empties it, and
+    sets the payload under that format and as `CF_UNICODETEXT`.
+  - `ContainsXaml` is `IsClipboardFormatAvailable`.
+  - `GetXamlAsync` reads the format through `GetClipboardData`.
+
+  The first version used `Windows.ApplicationModel.DataTransfer.Clipboard` and failed on the runner;
+  see the spec, Decision 2.
 - `internal static class ClipboardPayload`, with `Join(IEnumerable<string>)` and
   `Split(string)` around the delimiter `<!--WinUIDesigner.Delimiter-->`. `Split` drops empty and
   whitespace-only parts.
@@ -80,8 +82,8 @@ Tests, `tests/WinUIDesigner.Designer.Tests/CopyPasteServiceTests.cs` (new), with
 - Give Cut, Copy and Paste the same declining accelerator handler shape Delete and Select All use,
   so they do nothing while `IsTextEntryFocused()`. The menu click paths route through the same
   guarded methods.
-- Subscribe to `SystemDesignerClipboard.Instance.ContentChanged` → `RefreshCommands`, marshalled to
-  the window's `DispatcherQueue`, and unsubscribe on close.
+- Re-run `RefreshCommands` on `Window.Activated`, so Paste's enabled state is re-read after another
+  application has had the clipboard.
 
 `tests/WinUIDesigner.Shell.Tests`: a Copy/Paste through the menu seam on a real document, using the
 window's own service, would hit the system clipboard. So the shell test covers only enablement:

@@ -79,7 +79,6 @@ namespace WinUIDesigner.Designer.Tests
             public void SetXaml(string xaml) { Content = xaml; }
             public bool ContainsXaml { get { return Content != null; } }
             public System.Threading.Tasks.Task<string> GetXamlAsync() { return System.Threading.Tasks.Task.FromResult(Content); }
-            public event System.EventHandler ContentChanged { add { } remove { } }
         }
 
         static DesignSurface LoadSurface(Microsoft.UI.Xaml.Window window)
