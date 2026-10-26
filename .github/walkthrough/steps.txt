@@ -1,12 +1,21 @@
 # Shell walkthrough, driven by synthetic input on a 1024x768 runner (client area 1008x729).
-# Coordinates are read off the screenshots: toolbox "Button" at (37,581); the 640x480 root
+# Coordinates are read off the screenshots: toolbox "Button" at (37,621), below the toolbox search box at (100,60); the 640x480 root
 # Canvas spans roughly x 200-728, y 147-627.
 #
 # The toolbox drag is the last step. It used to fail-fast the app with 0xC0000409 on the runner;
 # the cause was the UI thread running in the multithreaded apartment (see Program.cs).
 shot 01-start
+# The toolbox search box narrows the list; clearing it brings every entry back.
+click 100 60
+type button
+wait 800
+shot 01a-toolbox-search
+key ctrl+a
+key delete
+wait 800
+shot 01b-toolbox-search-cleared
 # Click-to-place a Button; it is selected and the property grid shows its properties.
-click 37 581
+click 37 621
 click 330 420
 wait 1500
 shot 02-click-placed
@@ -23,7 +32,7 @@ click 600 560
 wait 1000
 shot 05-canvas-selected
 # Select All: place a second Button, select the canvas, Ctrl+A selects both buttons.
-click 37 581
+click 37 621
 click 520 250
 wait 1500
 click 600 560
@@ -133,7 +142,7 @@ shot 18-error-strip
 key ctrl+n
 wait 2000
 shot 19-before-drag
-drag 37 581 400 400
+drag 37 621 400 400
 wait 1500
 shot 20-dragged
 key ctrl+z
