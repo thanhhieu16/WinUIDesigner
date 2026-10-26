@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.DataTransfer;
 
@@ -44,8 +45,30 @@ namespace WinUIDesigner.Designer.Services
         {
         }
 
+        [ThreadStatic]
+        static bool oleInitialized;
+
+        [DllImport("ole32.dll")]
+        static extern int OleInitialize(IntPtr reserved);
+
+        /// <summary>
+        /// The Windows clipboard goes through OLE, and OLE is per thread. The generated Main of a
+        /// WinUI app marks the UI thread [STAThread], which initializes COM but not OLE, so every
+        /// clipboard call failed with CO_E_NOTINITIALIZED (0x800401F0) - measured on the walkthrough
+        /// runner, where Ctrl+C did nothing. OleInitialize on an already-initialized thread only
+        /// returns S_FALSE, so calling it once per thread is safe.
+        /// </summary>
+        static void EnsureOle()
+        {
+            if (oleInitialized)
+                return;
+            OleInitialize(IntPtr.Zero);
+            oleInitialized = true;
+        }
+
         public void SetXaml(string xaml)
         {
+            EnsureOle();
             var package = new DataPackage { RequestedOperation = DataPackageOperation.Copy };
             package.SetData(Format, xaml);
             // Also as text, so copied controls can be pasted into the XAML editor or anywhere else.
@@ -59,6 +82,7 @@ namespace WinUIDesigner.Designer.Services
             {
                 try
                 {
+                    EnsureOle();
                     return Clipboard.GetContent().Contains(Format);
                 }
                 catch (Exception)
@@ -72,6 +96,7 @@ namespace WinUIDesigner.Designer.Services
 
         public async Task<string> GetXamlAsync()
         {
+            EnsureOle();
             var content = Clipboard.GetContent();
             if (!content.Contains(Format))
                 return null;
@@ -83,6 +108,7 @@ namespace WinUIDesigner.Designer.Services
         {
             add
             {
+                EnsureOle();
                 if (contentChanged == null)
                     Clipboard.ContentChanged += OnClipboardContentChanged;
                 contentChanged += value;
