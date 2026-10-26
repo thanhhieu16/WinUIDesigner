@@ -25,8 +25,25 @@ namespace WinUIDesigner.Shell
             UnhandledException += OnUnhandledException;
         }
 
+        // TEMPORARY walkthrough diagnostic: which COM apartment the UI thread is in.
+        [System.Runtime.InteropServices.DllImport("ole32.dll")]
+        static extern int CoGetApartmentType(out int type, out int qualifier);
+
+        internal static void Trace(string message)
+        {
+            var path = Environment.GetEnvironmentVariable("WINUIDESIGNER_TRACE");
+            if (string.IsNullOrEmpty(path))
+                return;
+            try { System.IO.File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss.fff") + " " + message + Environment.NewLine); } catch { }
+        }
+
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
+            int type, qualifier;
+            int hr = CoGetApartmentType(out type, out qualifier);
+            Trace("OnLaunched: managed apartment=" + System.Threading.Thread.CurrentThread.GetApartmentState()
+                + " CoGetApartmentType hr=0x" + hr.ToString("X8") + " type=" + type + " qualifier=" + qualifier
+                + " elevated=" + new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator));
             window = new MainWindow();
             window.Activate();
         }

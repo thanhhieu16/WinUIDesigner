@@ -129,3 +129,8 @@ type <Broken
 click 213 711
 wait 1500
 shot 18-error-strip
+# TEMPORARY: one toolbox drag at the very end, to see whether it still fail-fasts the app.
+shot 19-before-drag
+drag 37 581 400 400
+wait 1500
+shot 20-after-drag
