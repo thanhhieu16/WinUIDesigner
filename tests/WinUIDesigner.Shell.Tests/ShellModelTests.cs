@@ -367,5 +367,42 @@ namespace WinUIDesigner.Shell.Tests
                 }
             });
         }
+
+        [Test]
+        public void SavingAsAPathAnotherTabHoldsIsRefusedAndLeavesThatFileAlone()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var shell = new ShellModel();
+                string reported = null;
+                shell.ReportError += (s, e) => reported = e.Message;
+                var path = WriteTemp(GoodXaml);
+                try
+                {
+                    Assert.That(shell.Open(path), Is.True);
+                    var holder = shell.CurrentDocument;
+                    var other = shell.New();
+
+                    Assert.That(shell.SaveAs(other, path), Is.False);
+                    Assert.That(reported, Does.Contain("open in another tab"));
+                    Assert.That(other.FilePath, Is.Null);
+                    Assert.That(File.ReadAllText(path), Is.EqualTo(GoodXaml),
+                        "the refused save must not have written over the other tab's file");
+
+                    // Saving a document as its own path is an ordinary save.
+                    reported = null;
+                    Assert.That(shell.SaveAs(holder, path), Is.True);
+                    Assert.That(reported, Is.Null);
+
+                    shell.Close(other);
+                    shell.Close(holder);
+                }
+                finally
+                {
+                    if (File.Exists(path))
+                        File.Delete(path);
+                }
+            });
+        }
     }
 }

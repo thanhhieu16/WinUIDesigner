@@ -362,7 +362,7 @@ matching the three existing suites. `dotnet test` is not a substitute.
 - No Run and no render-to-bitmap.
 - No opening files from command-line arguments, and no drag-drop of `.xaml` or `.dll` onto the window.
 - No runtime assembly loading into the toolbox. Consequently Decision 14's "resolve against the toolbox's assemblies" has exactly one assembly to resolve against; the override is written for the general case but is not exercised beyond it.
-- No already-open-path dedupe in `Open` — single-document mode makes it moot, and it becomes necessary the moment tabs arrive.
+- ~~No already-open-path dedupe in `Open` — single-document mode makes it moot, and it becomes necessary the moment tabs arrive.~~ **Closed** by the document-tabs phase (Decision 6): opening a path that is already open makes that tab current. Since 2026-10-26 `ShellModel.SaveAs` also refuses a path another tab holds, the other way two tabs could end up over one file.
 - No recent-files list and no settings persistence; the reference's `Settings.Default` is a WPF `ApplicationSettingsBase` facility with no direct port.
 - ~~No error list pane and no jump-to-error; errors appear once, in a dialog capped at ten entries plus a count.~~ **Closed** by the document-tabs phase (the error strip and `DocumentView.JumpToError`).
 - No Behaviors or Triggers editors; `WpfDesign.Designer.ExpressionBlendInteractionAddon` is not ported.
@@ -378,5 +378,5 @@ matching the three existing suites. `dotnet test` is not a substitute.
 ## Out of scope
 
 - Any change to `XamlDom`, `DesignModel`, or `Designer`, unless implementing the shell exposes a defect in them.
-- The remaining Phase A and B gaps: `RectangleGeometry`/`EllipseGeometry`/`LineGeometry`/`GeometryGroup` and `LinearGradientBrush` still save as empty elements, `Vector2` has no formatter, and `IXamlErrorSink.ReportError` is still called with line and column 0.
+- The remaining Phase A and B gaps: `Vector2` has no formatter, and `IXamlErrorSink.ReportError` is still called with line and column 0 on some paths. (This entry used to say that `RectangleGeometry`/`EllipseGeometry`/`LineGeometry`/`GeometryGroup` and `LinearGradientBrush` save as empty elements; Phase C closed that, `2026-09-07-xamldom-element-serialization-design.md`, and `XamlInstanceWriter` lists all five.)
 - Multi-document support, a text editor, docking, toolbox drag, and settings persistence — each is additive and none is required to prove the engine.
