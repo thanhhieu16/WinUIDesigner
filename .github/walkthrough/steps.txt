@@ -153,17 +153,3 @@ shot 21-drag-undone
 launch {docs}\walk.xaml
 wait 2000
 shot 22-launched-with-file
-# A file dragged from Explorer, simulated by drop-helper.ps1's OLE DoDragDrop: a copy of the
-# saved file dropped on the canvas opens as a second tab.
-copy {docs}\walk.xaml {docs}\walk-copy.xaml
-dropfile 860 600 400 400 {docs}\walk-copy.xaml
-wait 2000
-shot 23-dropped
-# Dropping a file that is already open only switches back to its tab.
-dropfile 860 600 400 400 {docs}\walk.xaml
-wait 1500
-shot 24-dropped-open-file
-# TEMPORARY diagnosis: the same drop onto the empty tab strip, outside the design surface.
-dropfile 860 600 600 64 {docs}\walk-copy.xaml
-wait 1500
-shot 25-dropped-on-tab-strip

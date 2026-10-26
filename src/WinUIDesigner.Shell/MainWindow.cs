@@ -228,30 +228,14 @@ namespace WinUIDesigner.Shell
         /// Accepts any drag that carries files; which of them are XAML can only be read on drop.
         /// A toolbox drag carries no storage items and never gets here as a copy.
         /// </summary>
-        // TEMPORARY drop trace, removed once the walkthrough's drop is diagnosed.
-        static void DropTrace(string what, DragEventArgs e)
-        {
-            try
-            {
-                System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "wd-drop.log"),
-                    DateTime.Now.ToString("HH:mm:ss.fff") + " " + what + " formats=" + string.Join(",", e.DataView.AvailableFormats)
-                    + " source=" + (e.OriginalSource == null ? "null" : e.OriginalSource.GetType().Name) + Environment.NewLine);
-            }
-            catch (Exception)
-            {
-            }
-        }
-
         void OnFileDragOver(object sender, DragEventArgs e)
         {
-            DropTrace("DragOver", e);
             if (e.DataView.Contains(StandardDataFormats.StorageItems))
                 e.AcceptedOperation = DataPackageOperation.Copy;
         }
 
         async void OnFileDrop(object sender, DragEventArgs e)
         {
-            DropTrace("Drop", e);
             if (!e.DataView.Contains(StandardDataFormats.StorageItems))
                 return;
             e.AcceptedOperation = DataPackageOperation.Copy;

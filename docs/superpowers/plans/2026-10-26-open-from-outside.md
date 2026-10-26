@@ -52,8 +52,43 @@ Tests: `XamlPathsIn` with `.xaml`, `.XAML`, `.dll`, `.txt`, no extension and nul
   a `powershell.exe -STA` helper doing `DoDragDrop` with a `FileDrop` `DataObject`.
 - `steps.txt`: after the save steps, `launch` with `Documents\walk.xaml`, then a screenshot. Then
   a `dropfile` of the same file onto the canvas, which should only switch to its tab (dedupe), and
-  of a second saved copy, which should add a tab.
+  of a second saved copy, which should add a tab. (The `dropfile` half was tried and removed; see
+  Results.)
 
 ## Task 5 — docs
 
 Mark the shell spec's gap closed for `.xaml` and record the results here.
+
+## Results
+
+CI: all four suites are green from their `.exe`s on `windows-latest`. New in the Shell suite:
+- `OpenFilesOpensEachPathAsATabAndTheLastBecomesCurrent`
+- `ABatchOpensWhatItCanAndCollectsEveryFailureWithItsPath`
+- `AStartupOpenClosesTheUntouchedBlankDocument`
+- `AStartupOpenKeepsABlankDocumentThatHasChanges`
+- `AStartupOpenThatOpensNothingKeepsTheBlankDocument`
+- `ADropOpensOnlyXamlFiles`
+
+Walkthrough, step 22, on the real app: launched with `Documents\walk.xaml` as its argument, the
+window shows one tab, `walk.xaml`, with the saved design (the typed button). The blank `New1` was
+closed.
+
+**The file drop is not verified on the real app.** Four walkthrough runs tried to simulate a drag
+from Explorer with an OLE `DoDragDrop` from a helper `powershell.exe -STA` process, using the same
+`mouse_event` input that drives the in-app toolbox drag. They measured, with a temporary file
+trace in `MainWindow`'s `DragOver`/`Drop` and the helper's own `GiveFeedback`/`QueryContinueDrag`:
+
+1. Calling `DoDragDrop` right after injecting the button press ended the drag on the spot: the
+   source thread had not yet processed the press. Starting the drag from the helper window's own
+   `MouseDown` fixed that.
+2. After that, the drag ran its whole path and ended by the button's release over the target, at
+   the expected screen points on the canvas and on the tab strip (`keyState=0`, no Escape). The
+   result was `None` every time, and the app's trace recorded **no** `DragOver` or `Drop` at all,
+   over the design surface or outside it. The same trace did record the in-app toolbox drag.
+
+So on the runner, an OLE drag from another process never reaches this WinUI window as a drop
+target. Why is not established. Both processes run under the runner's same account, so a UIPI
+integrity mismatch is not the obvious cause. The helper and its walkthrough step were removed.
+The drop handlers stay, covered by `XamlPathsIn` and `OpenFiles` (the logic) and by the
+`CreateComponentTool` change (a drag that is not the tool's is no longer marked handled). A
+manual check is the remaining verification: drag a `.xaml` from Explorer onto the window.

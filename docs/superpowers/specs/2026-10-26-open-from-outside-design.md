@@ -98,6 +98,8 @@ Walkthrough (real app on the runner):
   left button and starts an OLE `DoDragDrop` with a `FileDrop` data object; a timer moves the
   cursor onto the target and releases the button. This is untried. If it cannot be made to
   work on the runner, the drop is recorded as verified only through its seams, not claimed.
+  **Outcome:** it could not; see the plan's Results. The drop is verified only through
+  `XamlPathsIn` and `OpenFiles`.
 
 ## Out of scope
 

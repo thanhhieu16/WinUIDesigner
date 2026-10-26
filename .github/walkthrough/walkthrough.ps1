@@ -18,10 +18,6 @@
 #   key <name>[+<name>...]      e.g. key ctrl+z, key escape
 #   type <text>
 #   launch [<path>...]          end the app and start it again with these arguments
-#   copy <from> <to>            copy a file
-#   dropfile <x1> <y1> <x2> <y2> <path>...
-#                               drag files from a helper window at (x1,y1) and drop them at
-#                               (x2,y2), the way a drag from Explorer does (drop-helper.ps1)
 #
 # In a path, {docs} stands for the Documents folder.
 #
@@ -196,27 +192,6 @@ foreach ($raw in Get-Content $Steps) {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
             $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
             Start-App $paths
-        }
-        'copy' {
-            $p = @($args1 -split '\s+' | ForEach-Object { Expand-Path $_ })
-            Copy-Item -Force $p[0] $p[1]
-        }
-        'dropfile' {
-            $words = @($args1 -split '\s+')
-            $from = To-Screen ([int]$words[0]) ([int]$words[1])
-            $to = To-Screen ([int]$words[2]) ([int]$words[3])
-            $paths = ($words[4..($words.Count - 1)] | ForEach-Object { Expand-Path $_ }) -join '|'
-            # Windows PowerShell, not pwsh: OLE drag and drop needs a single-threaded apartment,
-            # and -STA gives one.
-            $helper = Join-Path $PSScriptRoot 'drop-helper.ps1'
-            Remove-Item -ErrorAction SilentlyContinue (Join-Path $env:TEMP 'wd-drop.log')
-            $out = & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $helper `
-                -FromX $from[0] -FromY $from[1] -ToX $to[0] -ToY $to[1] -Paths $paths `
-                -ScreenWidth $screen.Width -ScreenHeight $screen.Height 2>&1
-            Write-Host "drop helper: $out"
-            $trace = Join-Path $env:TEMP 'wd-drop.log'
-            if (Test-Path $trace) { Get-Content $trace | Select-Object -Last 20 | ForEach-Object { Write-Host "app trace: $_" } } else { Write-Host 'app trace: none' }
-            [Native]::SetForegroundWindow($hwnd) | Out-Null
         }
         default { throw "unknown step: $line" }
     }
