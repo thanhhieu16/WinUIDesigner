@@ -331,6 +331,7 @@ namespace WinUIDesigner.Shell
         /// </summary>
         void CutSelection()
         {
+            DiagTrace.Write("CutSelection: textEntry=" + IsTextEntryFocused() + " focused=" + (Content != null && Content.XamlRoot != null ? FocusManager.GetFocusedElement(Content.XamlRoot) : null));
             if (IsTextEntryFocused())
                 return;
             WithClipboard((svc, ctx) => { if (svc.CanCut(ctx)) svc.Cut(ctx); });
@@ -338,6 +339,7 @@ namespace WinUIDesigner.Shell
 
         void CopySelection()
         {
+            DiagTrace.Write("CopySelection: textEntry=" + IsTextEntryFocused() + " focused=" + (Content != null && Content.XamlRoot != null ? FocusManager.GetFocusedElement(Content.XamlRoot) : null));
             if (IsTextEntryFocused())
                 return;
             WithClipboard((svc, ctx) => { if (svc.CanCopy(ctx)) svc.Copy(ctx); });
@@ -345,6 +347,7 @@ namespace WinUIDesigner.Shell
 
         void PasteClipboard()
         {
+            DiagTrace.Write("PasteClipboard: textEntry=" + IsTextEntryFocused() + " focused=" + (Content != null && Content.XamlRoot != null ? FocusManager.GetFocusedElement(Content.XamlRoot) : null));
             if (IsTextEntryFocused())
                 return;
             WithClipboard((svc, ctx) => { if (svc.CanPaste(ctx)) svc.Paste(ctx); });

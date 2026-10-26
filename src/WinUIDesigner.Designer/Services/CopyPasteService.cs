@@ -43,12 +43,22 @@ namespace WinUIDesigner.Designer.Services
         /// nothing in the document.</summary>
         public void Copy(DesignContext designContext)
         {
+            DiagTrace.Write("Copy: CanCopy=" + CanCopy(designContext));
             if (!CanCopy(designContext))
                 return;
             var xamls = designContext.Services.Selection.SelectedItems
                 .OfType<XamlDesignItem>()
                 .Select(item => XamlStaticTools.GetXaml(item.XamlObject));
-            clipboard.SetXaml(ClipboardPayload.Join(xamls));
+            try
+            {
+                clipboard.SetXaml(ClipboardPayload.Join(xamls));
+                DiagTrace.Write("Copy: SetXaml ok, ContainsXaml=" + clipboard.ContainsXaml);
+            }
+            catch (Exception ex)
+            {
+                DiagTrace.Write("Copy: SetXaml threw " + ex);
+                throw;
+            }
         }
 
         public bool CanCut(DesignContext designContext)
@@ -80,17 +90,20 @@ namespace WinUIDesigner.Designer.Services
             if (!CanPaste(designContext))
                 return;
             string payload;
+            DiagTrace.Write("Paste: start");
             try
             {
                 payload = await clipboard.GetXamlAsync();
+                DiagTrace.Write("Paste: read " + (payload == null ? "null" : payload.Length + " chars"));
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                DiagTrace.Write("Paste: read threw " + ex);
                 // The clipboard can be held open by another process; there is nothing to paste
                 // then, and an exception escaping an async void would take the process down.
                 return;
             }
-            PasteXaml(designContext, payload);
+            DiagTrace.Write("Paste: PasteXaml=" + PasteXaml(designContext, payload));
         }
 
         /// <summary>
