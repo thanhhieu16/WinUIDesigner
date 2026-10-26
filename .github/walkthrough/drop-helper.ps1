@@ -68,12 +68,19 @@ public static class Dropper {
             mover.IsBackground = true;
             mover.Start();
             var data = new DataObject(DataFormats.FileDrop, paths);
+            var seen = new System.Collections.Generic.List<string>();
+            form.GiveFeedback += (gs, ge) => {
+                var p = Cursor.Position;
+                string entry = ge.Effect + "@" + (p.X / 50 * 50) + "," + (p.Y / 50 * 50);
+                if (seen.Count == 0 || seen[seen.Count - 1] != entry) seen.Add(entry);
+            };
             try {
                 result = form.DoDragDrop(data, DragDropEffects.Copy | DragDropEffects.Link).ToString();
             } catch (Exception ex) {
                 result = "failed: " + ex.Message;
             }
             mover.Join(5000);
+            result += " feedback: " + string.Join(" ", seen);
             form.Close();
         }));
         Application.Run(form);

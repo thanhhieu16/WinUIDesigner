@@ -213,6 +213,8 @@ foreach ($raw in Get-Content $Steps) {
                 -FromX $from[0] -FromY $from[1] -ToX $to[0] -ToY $to[1] -Paths $paths `
                 -ScreenWidth $screen.Width -ScreenHeight $screen.Height 2>&1
             Write-Host "drop helper: $out"
+            $trace = Join-Path $env:TEMP 'wd-drop.log'
+            if (Test-Path $trace) { Get-Content $trace | Select-Object -Last 20 | ForEach-Object { Write-Host "app trace: $_" } } else { Write-Host 'app trace: none' }
             [Native]::SetForegroundWindow($hwnd) | Out-Null
         }
         default { throw "unknown step: $line" }
