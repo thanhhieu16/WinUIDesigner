@@ -321,5 +321,56 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(tools.CurrentTool, Is.SameAs(armed));
             });
         }
+
+        [Test]
+        public void TheFilterNarrowsTheListIgnoringCaseAndEmptyShowsEverything()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var view = new ToolboxView();
+                int all = view.VisibleTypesForTest.Count;
+
+                view.Filter = "bUtToN";
+                var shown = view.VisibleTypesForTest;
+                Assert.That(shown, Does.Contain(typeof(Button)));
+                Assert.That(shown, Does.Contain(typeof(RadioButton)), "a match anywhere in the name, not only a prefix");
+                Assert.That(shown.All(t => t.Name.IndexOf("button", StringComparison.OrdinalIgnoreCase) >= 0), Is.True);
+                Assert.That(shown.Count, Is.LessThan(all));
+
+                view.Filter = "  ";
+                Assert.That(view.VisibleTypesForTest.Count, Is.EqualTo(all), "whitespace is no filter");
+
+                view.Filter = "NoControlIsCalledThis";
+                Assert.That(view.VisibleTypesForTest, Is.Empty);
+
+                view.Filter = null;
+                Assert.That(view.VisibleTypesForTest.Count, Is.EqualTo(all));
+            });
+        }
+
+        [Test]
+        public void FilteringNeitherArmsNorDisarmsAndKeepsAVisibleSelection()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var tools = new FakeToolService(new FakePointerTool());
+                var view = new ToolboxView();
+                view.Attach(tools);
+                view.SelectForTest(typeof(Button));
+                var armed = tools.CurrentTool;
+
+                view.Filter = "Butt";
+                Assert.That(tools.CurrentTool, Is.SameAs(armed), "replacing the list's items must not reach Arm");
+                Assert.That(view.SelectedTypeForTest, Is.EqualTo(typeof(Button)), "still visible, so still selected");
+
+                view.Filter = "CheckBox";
+                Assert.That(tools.CurrentTool, Is.SameAs(armed), "filtered out, but the user's armed tool is theirs to change");
+                Assert.That(view.SelectedTypeForTest, Is.Null);
+
+                view.Filter = "";
+                view.SelectForTest(typeof(Button));
+                Assert.That(tools.CurrentTool, Is.Not.SameAs(armed), "once back, clicking the entry arms it again");
+            });
+        }
     }
 }

@@ -35,6 +35,7 @@ namespace WinUIDesigner.Shell
         readonly ListView list = new ListView();
         readonly List<ControlNode> nodes;
         IToolService toolService;
+        string filter = string.Empty;
         bool suppressSelectionChanged;
         CreateComponentTool draggedTool;
 
@@ -109,6 +110,53 @@ namespace WinUIDesigner.Shell
             {
                 suppressSelectionChanged = false;
             }
+        }
+
+        /// <summary>
+        /// Shows only the entries whose name contains this text, ignoring case; empty shows every
+        /// entry. The text box that supplies it lives in MainWindow, like the outline's filter:
+        /// a TextBox inside this view would make it unusable in a second test window, where a
+        /// TextBox fail-fasts the host (CLAUDE.md).
+        /// </summary>
+        /// <remarks>
+        /// Filtering arms and disarms nothing. An armed entry that stays visible stays selected;
+        /// one filtered out leaves its tool armed, and clicking it again once it is back re-arms
+        /// it, as for any unselected entry.
+        /// </remarks>
+        public string Filter
+        {
+            get { return filter; }
+            set
+            {
+                var text = (value ?? string.Empty).Trim();
+                if (text == filter)
+                    return;
+                filter = text;
+
+                var selected = list.SelectedItem as ControlNode;
+                var visible = filter.Length == 0
+                    ? nodes
+                    : nodes.Where(n => n.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+
+                // Replacing ItemsSource clears the selection, which must not reach Arm.
+                suppressSelectionChanged = true;
+                try
+                {
+                    list.ItemsSource = visible;
+                    if (selected != null && visible.Contains(selected))
+                        list.SelectedItem = selected;
+                }
+                finally
+                {
+                    suppressSelectionChanged = false;
+                }
+            }
+        }
+
+        /// <summary>The types the list currently shows, in order. Test seam.</summary>
+        internal IList<Type> VisibleTypesForTest
+        {
+            get { return ((IEnumerable<ControlNode>)list.ItemsSource).Select(n => n.Type).ToList(); }
         }
 
         /// <summary>The type the list currently has selected, or null. Test seam.</summary>

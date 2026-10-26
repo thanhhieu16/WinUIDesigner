@@ -46,6 +46,7 @@ namespace WinUIDesigner.Shell
         readonly ToolboxView toolboxView = new ToolboxView();
         readonly OutlineViewControl outlineView = new OutlineViewControl();
         readonly TextBox outlineFilter = new TextBox { PlaceholderText = "Filter", Margin = new Thickness(4) };
+        readonly TextBox toolboxFilter = new TextBox { PlaceholderText = "Search controls", Margin = new Thickness(4) };
         readonly TabView tabStrip = new TabView
         {
             IsAddTabButtonVisible = false,
@@ -98,6 +99,7 @@ namespace WinUIDesigner.Shell
             };
 
             outlineFilter.TextChanged += (s, e) => outlineView.Filter = outlineFilter.Text;
+            toolboxFilter.TextChanged += (s, e) => toolboxView.Filter = toolboxFilter.Text;
 
             AppWindow.Closing += OnAppWindowClosing;
 
@@ -140,8 +142,17 @@ namespace WinUIDesigner.Shell
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
 
-            Grid.SetColumn(toolboxView, 0);
-            columns.Children.Add(toolboxView);
+            // The search box sits above the toolbox in the same column, as the outline's filter
+            // sits above the outline.
+            var left = new Grid();
+            left.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            left.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(toolboxFilter, 0);
+            Grid.SetRow(toolboxView, 1);
+            left.Children.Add(toolboxFilter);
+            left.Children.Add(toolboxView);
+            Grid.SetColumn(left, 0);
+            columns.Children.Add(left);
 
             // TabView is a header strip only. Measured: its template never applies in the test
             // process - zero visual children, a selected item's Content never enters the visual

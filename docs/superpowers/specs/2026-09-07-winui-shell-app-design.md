@@ -154,6 +154,7 @@ The project convention has been zero `.xaml` files in `src/`. It is relaxed by e
 **2. The entry point is the generated one.**
 `App.xaml` gives the XamlCompiler an application definition, and it generates `Main` with `InitializeComWrappers()` and a `DispatcherQueueSynchronizationContext`. The shell does not define `Main` and does not set `DISABLE_XAML_GENERATED_MAIN`.
 *Cost if wrong:* a hand-written `Main` that omits either step fail-fasts before any managed line runs, which is unusually hard to diagnose — it was the longest-lived false trail in this phase's investigation.
+*Superseded 2026-10-26.* The generated `Main` left the UI thread in the multithreaded apartment (measured on the walkthrough runner), which breaks OLE: every toolbox drag fail-fasted the app, and the WinRT clipboard failed. `src/WinUIDesigner.Shell.App/Program.cs` now supplies `Main` under `DISABLE_XAML_GENERATED_MAIN`. Its body keeps both steps named above and runs them on an STA thread.
 
 **3. No hand-written `app.manifest`.**
 The generated apphost manifest carries the registration-free WinRT activation entries that make `WindowsAppSDKSelfContained` work without an installed runtime; a project-supplied `app.manifest` replaces it.
@@ -351,21 +352,21 @@ matching the three existing suites. `dotnet test` is not a substitute.
 
 ## Known gaps
 
-- No document tabs; one document at a time.
-- No XAML text view and no text editing.
+- ~~No document tabs; one document at a time.~~ **Closed** by the document-tabs phase (`2026-09-07-shell-document-tabs-design.md`).
+- ~~No XAML text view and no text editing.~~ **Closed** by the document-tabs phase. Since 2026-10-25, the selection also follows a Design/XAML switch (`XamlSelectionSync`).
 - No dockable, floatable, or resizable panes.
-- No drag from the toolbox onto the surface. The WinUI mechanism a later phase needs is `UIElement.StartDragAsync(PointerPoint)` — verified to exist — with the `CreateComponentTool` travelling in the `DataPackage` that `CreateComponentTool.HandleDragOver`/`HandleDrop` already expect.
-- No Select All. `ICopyPasteService` has no member for it.
-- No Refresh command (the reference's F5 → `Document.Refresh` = `UpdateXaml` + `UpdateDesign`).
+- ~~No drag from the toolbox onto the surface. The WinUI mechanism a later phase needs is `UIElement.StartDragAsync(PointerPoint)` — verified to exist — with the `CreateComponentTool` travelling in the `DataPackage` that `CreateComponentTool.HandleDragOver`/`HandleDrop` already expect.~~ **Closed** by the toolbox-drag phase (`2026-10-24-toolbox-drag-design.md`), which uses the list's own item drag rather than `StartDragAsync`. It worked on a real app only once the UI thread ran in an STA (2026-10-26, Decision 2's note).
+- ~~No Select All. `ICopyPasteService` has no member for it.~~ **Closed** 2026-10-25: Edit > Select All (Ctrl+A), in `MainWindow`.
+- ~~No Refresh command (the reference's F5 → `Document.Refresh` = `UpdateXaml` + `UpdateDesign`).~~ **Closed** 2026-10-25: Edit > Refresh (F5) → `Document.Refresh`.
 - No thumbnail pane; no `ThumbnailView` equivalent exists in `src/` at all.
 - No Run and no render-to-bitmap.
 - No opening files from command-line arguments, and no drag-drop of `.xaml` or `.dll` onto the window.
 - No runtime assembly loading into the toolbox. Consequently Decision 14's "resolve against the toolbox's assemblies" has exactly one assembly to resolve against; the override is written for the general case but is not exercised beyond it.
 - No already-open-path dedupe in `Open` — single-document mode makes it moot, and it becomes necessary the moment tabs arrive.
 - No recent-files list and no settings persistence; the reference's `Settings.Default` is a WPF `ApplicationSettingsBase` facility with no direct port.
-- No error list pane and no jump-to-error; errors appear once, in a dialog capped at ten entries plus a count.
+- ~~No error list pane and no jump-to-error; errors appear once, in a dialog capped at ten entries plus a count.~~ **Closed** by the document-tabs phase (the error strip and `DocumentView.JumpToError`).
 - No Behaviors or Triggers editors; `WpfDesign.Designer.ExpressionBlendInteractionAddon` is not ported.
-- The toolbox lists all 159 activatable controls flat, grouped only by assembly. The reference has the same shape; its `Metadata.IsPopularControl` filter is commented out there.
+- The toolbox lists all 159 activatable controls flat, grouped only by assembly. The reference has the same shape; its `Metadata.IsPopularControl` filter is commented out there. Since 2026-10-26 a search box above the toolbox narrows the list by name (`ToolboxView.Filter`).
 - A control that fails to activate is dropped from the toolbox silently.
 - `ShellMetadata` seeds only what DoD item 15 exercises. Popular properties beyond the listed ones, value ranges, hidden properties and disabled placements are all still empty.
 - **The per-open memory cost is set by the platform, and no byte budget for it is writable here.** Phase 5 shipped a deliberately red soak test reporting roughly **73,000 bytes of private-byte growth per document open/dispose cycle** and attributed the remainder to "the engine's own load path", pointing the next reader at extension and adorner teardown in `DesignSurface.UnloadDesigner()`. That attribution was wrong. Bisecting the load path measured 5,448 bytes/iteration for a bare `XamlParser.Parse`, 8,617 with a full `XamlDesignContext` on top, 6,400 for the entire service set plus a `DesignPanel` but no extensions, and 42,752 once the Designer assembly's extensions attach. Removing every line of designer code then reproduced the same growth from WinUI alone: ten `Button`s constructed and dropped per iteration cost **14,981** bytes/iteration, ten `Border`s **9,288**, ten `SolidColorBrush`es **4,296**, and ten `Windows.Foundation.Collections.ValueSet`s — a plain WinRT runtime class rather than a `DependencyObject` — **nothing at all**. Constructing any `DependencyObject` in a Windows App SDK 1.7.250606001 process commits native memory that is never returned: about **430 bytes** for a brush, **900** for a Border or Grid, **1,500** for a Button. It does not plateau — 5,000 iterations of ten Borders held a slope of 15,499 then 17,575 then 16,939 bytes/iteration while private bytes went from 37 MB to 113 MB. Four explanations were tested and ruled out rather than assumed: extension teardown retains nothing (after `UnloadDesigner`, weak references to the `DesignContext`, the root `DesignItem`, its view and all five of its extensions were dead); the confound the soak test itself recorded is not the cause (one dispatcher turn per iteration measured 15,068 against 14,981 unpumped, closing that open question); neither is the absence of a rendering window (with the shared live window created first, 9,042 against 9,288); and nothing roots the objects on the managed side the way microsoft-ui-xaml#4005 describes (20 bare `Border`s, 0 alive after a full collect). The shell-side saving recorded earlier still stands and is still worth having: dropping the `DesignerAssemblies` registration loop from `Document.UpdateDesign` cut 11,700 bytes per cycle (85,066 with, 73,286 without). What this port controls is how many `DependencyObject`s a document open builds, which is what `DocumentObjectBudgetTests` now pins.
