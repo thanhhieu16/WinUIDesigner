@@ -51,10 +51,27 @@ namespace WinUIDesigner.Shell
         static int nonameIndex = 1;
 
         Document currentDocument;
+        readonly RecentFileList recentFiles;
 
         public ShellModel()
+            : this(null)
         {
+        }
+
+        /// <summary>
+        /// A model that adds each file it opens, or saves under a new name, to
+        /// <paramref name="recentFiles"/>. Null keeps no list. Recent-files spec Decision 3.
+        /// </summary>
+        public ShellModel(RecentFileList recentFiles)
+        {
+            this.recentFiles = recentFiles;
             Documents = new ObservableCollection<Document>();
+        }
+
+        /// <summary>The list this model records into, or null.</summary>
+        public RecentFileList RecentFiles
+        {
+            get { return recentFiles; }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;
@@ -125,6 +142,7 @@ namespace WinUIDesigner.Shell
             if (alreadyOpen != null)
             {
                 CurrentDocument = alreadyOpen;
+                AddRecent(fullPath);
                 return true;
             }
 
@@ -155,6 +173,7 @@ namespace WinUIDesigner.Shell
                 RaiseError("The document loaded with errors.", doc.LoadErrors);
 
             Add(doc);
+            AddRecent(fullPath);
             return true;
         }
 
@@ -199,7 +218,14 @@ namespace WinUIDesigner.Shell
             if (!WriteToDisk(doc, fullPath))
                 return false;
             doc.FilePath = fullPath;
+            AddRecent(fullPath);
             return true;
+        }
+
+        void AddRecent(string fullPath)
+        {
+            if (recentFiles != null)
+                recentFiles.Add(fullPath);
         }
 
         Document FindOpen(string fullPath)

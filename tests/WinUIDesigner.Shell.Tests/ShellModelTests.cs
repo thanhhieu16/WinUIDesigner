@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Microsoft.UI.Xaml.Controls;
 using NUnit.Framework;
 using WinUIDesigner.TestHost;
@@ -401,6 +402,49 @@ namespace WinUIDesigner.Shell.Tests
                 {
                     if (File.Exists(path))
                         File.Delete(path);
+                }
+            });
+        }
+            [Test]
+        public void OpenAndSaveAsRecordTheFileAndAFailedOpenDoesNot()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var store = Path.Combine(Path.GetTempPath(), "wd-recent-" + Guid.NewGuid().ToString("N") + ".json");
+                var recent = new RecentFileList(store);
+                var shell = new ShellModel(recent);
+                var opened = WriteTemp(GoodXaml);
+                var savedAs = Path.Combine(Path.GetTempPath(), "wd-saveas-" + Guid.NewGuid().ToString("N") + ".xaml");
+                try
+                {
+                    Assert.That(shell.Open(opened), Is.True);
+                    Assert.That(recent.Items, Is.EqualTo(new[] { opened }));
+
+                    Assert.That(shell.Open(opened + ".missing"), Is.False);
+                    Assert.That(recent.Items, Is.EqualTo(new[] { opened }), "a failed open adds nothing");
+
+                    var doc = shell.New();
+                    Assert.That(shell.SaveAs(doc, savedAs), Is.True);
+                    Assert.That(recent.Items, Is.EqualTo(new[] { savedAs, opened }));
+
+                    // A plain save keeps the path it already has, which is already listed.
+                    Assert.That(shell.Save(shell.Documents[0]), Is.True);
+                    Assert.That(recent.Items, Is.EqualTo(new[] { savedAs, opened }));
+
+                    // Opening an already-open file moves it up, though it only switches tabs.
+                    Assert.That(shell.Open(opened), Is.True);
+                    Assert.That(recent.Items, Is.EqualTo(new[] { opened, savedAs }));
+
+                    foreach (var d in shell.Documents.ToList())
+                        shell.Close(d);
+                }
+                finally
+                {
+                    foreach (var path in new[] { store, opened, savedAs })
+                    {
+                        if (File.Exists(path))
+                            File.Delete(path);
+                    }
                 }
             });
         }

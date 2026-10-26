@@ -40,7 +40,7 @@ namespace WinUIDesigner.Shell
     {
         const string ApplicationTitle = "WinUI Designer";
 
-        readonly ShellModel shell = new ShellModel();
+        readonly ShellModel shell;
 
         /// <summary>Test seam: the model this window drives. Not for production callers.</summary>
         internal ShellModel ShellForTest { get { return shell; } }
@@ -77,6 +77,48 @@ namespace WinUIDesigner.Shell
 
         MenuFlyoutItem undoItem, redoItem, cutItem, copyItem, pasteItem, deleteItem, selectAllItem, refreshItem;
         MenuFlyoutItem closeItem, closeAllItem, saveAllItem;
+        MenuFlyoutSubItem openRecentItem;
+
+        /// <summary>Test seam: File > Open Recent.</summary>
+        internal MenuFlyoutSubItem OpenRecentItemForTest { get { return openRecentItem; } }
+
+        /// <summary>
+        /// Refills File > Open Recent: full paths, most recent first (two MainPage.xaml files in
+        /// different folders must be told apart), then Clear Recent Files, or one disabled
+        /// "(none)" when the list is empty. Recent-files spec Decision 5.
+        /// </summary>
+        void RebuildRecentMenu()
+        {
+            openRecentItem.Items.Clear();
+            var recent = shell.RecentFiles.Items;
+            if (recent.Count == 0)
+            {
+                openRecentItem.Items.Add(new MenuFlyoutItem { Text = "(none)", IsEnabled = false });
+                return;
+            }
+            foreach (var path in recent)
+            {
+                var target = path;
+                var item = new MenuFlyoutItem { Text = path };
+                item.Click += (s, e) => OpenRecent(target);
+                openRecentItem.Items.Add(item);
+            }
+            openRecentItem.Items.Add(new MenuFlyoutSeparator());
+            var clear = new MenuFlyoutItem { Text = "Clear Recent Files" };
+            clear.Click += (s, e) => shell.RecentFiles.Clear();
+            openRecentItem.Items.Add(clear);
+        }
+
+        /// <summary>
+        /// Opens a recent entry. One whose file is gone is also dropped from the list; one that
+        /// exists but fails to load stays, since the user may fix it. Recent-files spec Decision 4.
+        /// </summary>
+        internal void OpenRecent(string path)
+        {
+            OpenFiles(new[] { path });
+            if (LastBatchErrors.Count > 0 && !System.IO.File.Exists(path))
+                shell.RecentFiles.Remove(path);
+        }
 
         public MainWindow()
             : this(null)
@@ -89,6 +131,7 @@ namespace WinUIDesigner.Shell
         /// </summary>
         public MainWindow(IEnumerable<string> startupPaths)
         {
+            shell = new ShellModel(new RecentFileList(ShellSettings.DefaultPath));
             ShellMetadata.Register();
 
             Title = ApplicationTitle;
@@ -155,9 +198,9 @@ namespace WinUIDesigner.Shell
         List<BatchError> batchErrors;
         string batchPath;
 
-        /// <summary>Test seam: the reports of the last <see cref="OpenFiles"/> call, which the
-        /// test process cannot show in a dialog.</summary>
-        internal IReadOnlyList<BatchError> BatchErrorsForTest { get; private set; }
+        /// <summary>The reports of the last <see cref="OpenFiles"/> call. OpenRecent reads it, and
+        /// tests do, since the test process cannot show the dialog.</summary>
+        internal IReadOnlyList<BatchError> LastBatchErrors { get; private set; }
 
         /// <summary>
         /// Opens each path in order; the last one opened becomes current, as File > Open does.
@@ -184,7 +227,7 @@ namespace WinUIDesigner.Shell
                 batchErrors = null;
                 batchPath = null;
             }
-            BatchErrorsForTest = collected;
+            LastBatchErrors = collected;
             if (collected.Count > 0)
                 Fire(() => ShowBatchErrorsAsync(collected));
         }
@@ -369,6 +412,10 @@ namespace WinUIDesigner.Shell
             var file = new MenuBarItem { Title = "File" };
             file.Items.Add(Item("New", VirtualKey.N, VirtualKeyModifiers.Control, (s, e) => Fire(NewAsync)));
             file.Items.Add(Item("Open...", VirtualKey.O, VirtualKeyModifiers.Control, (s, e) => Fire(OpenAsync)));
+            openRecentItem = new MenuFlyoutSubItem { Text = "Open Recent" };
+            file.Items.Add(openRecentItem);
+            RebuildRecentMenu();
+            shell.RecentFiles.Changed += (s, e) => RebuildRecentMenu();
             closeItem = Item("Close", VirtualKey.None, VirtualKeyModifiers.None,
                 (s, e) => Fire(() => RequestCloseAsync(shell.CurrentDocument, PrepareForCloseAsync)));
             closeAllItem = Item("Close All", VirtualKey.None, VirtualKeyModifiers.None,
