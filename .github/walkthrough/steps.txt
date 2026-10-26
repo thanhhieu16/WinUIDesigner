@@ -82,11 +82,6 @@ key escape
 wait 500
 key ctrl+c
 wait 500
-click 75 21
-wait 800
-screen 12b3-edit-menu-after-copy
-key escape
-wait 500
 key ctrl+v
 wait 1500
 shot 12c-pasted
