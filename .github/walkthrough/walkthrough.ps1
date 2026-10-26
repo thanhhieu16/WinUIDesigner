@@ -209,6 +209,7 @@ foreach ($raw in Get-Content $Steps) {
             # Windows PowerShell, not pwsh: OLE drag and drop needs a single-threaded apartment,
             # and -STA gives one.
             $helper = Join-Path $PSScriptRoot 'drop-helper.ps1'
+            Remove-Item -ErrorAction SilentlyContinue (Join-Path $env:TEMP 'wd-drop.log')
             $out = & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $helper `
                 -FromX $from[0] -FromY $from[1] -ToX $to[0] -ToY $to[1] -Paths $paths `
                 -ScreenWidth $screen.Width -ScreenHeight $screen.Height 2>&1

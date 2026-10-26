@@ -50,39 +50,43 @@ public static class Dropper {
             ShowInTaskbar = false,
             BackColor = System.Drawing.Color.Orange
         };
-        form.Shown += (s, e) => form.BeginInvoke((Action)(() => {
-            Application.DoEvents();
-            MoveAbs(fromX, fromY);
-            Thread.Sleep(200);
-            mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
-            Thread.Sleep(200);
-            var mover = new Thread(() => {
-                Thread.Sleep(800);
-                for (int i = 1; i <= 40; i++) {
-                    MoveAbs(fromX + (toX - fromX) * i / 40, fromY + (toY - fromY) * i / 40);
-                    Thread.Sleep(50);
-                }
-                Thread.Sleep(800);
-                mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
-            });
-            mover.IsBackground = true;
-            mover.Start();
-            var data = new DataObject(DataFormats.FileDrop, paths);
-            var seen = new System.Collections.Generic.List<string>();
-            form.GiveFeedback += (gs, ge) => {
-                var p = Cursor.Position;
-                string entry = ge.Effect + "@" + (p.X / 50 * 50) + "," + (p.Y / 50 * 50);
-                if (seen.Count == 0 || seen[seen.Count - 1] != entry) seen.Add(entry);
-            };
+        var data = new DataObject(DataFormats.FileDrop, paths);
+        var seen = new System.Collections.Generic.List<string>();
+        form.GiveFeedback += (gs, ge) => {
+            var p = Cursor.Position;
+            string entry = ge.Effect + "@" + (p.X / 50 * 50) + "," + (p.Y / 50 * 50);
+            if (seen.Count == 0 || seen[seen.Count - 1] != entry) seen.Add(entry);
+        };
+        // The drag starts from the window's own MouseDown, as any drag source does: by then this
+        // thread has processed the press, so OLE sees the button down. Called straight after
+        // injecting the press, DoDragDrop read the button as up and dropped on the spot.
+        form.MouseDown += (s, e) => {
             try {
                 result = form.DoDragDrop(data, DragDropEffects.Copy | DragDropEffects.Link).ToString();
             } catch (Exception ex) {
                 result = "failed: " + ex.Message;
             }
-            mover.Join(5000);
             result += " feedback: " + string.Join(" ", seen);
-            form.Close();
-        }));
+            form.BeginInvoke((Action)form.Close);
+        };
+        var mover = new Thread(() => {
+            Thread.Sleep(500);
+            MoveAbs(fromX, fromY);
+            Thread.Sleep(200);
+            mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(800);
+            for (int i = 1; i <= 40; i++) {
+                MoveAbs(fromX + (toX - fromX) * i / 40, fromY + (toY - fromY) * i / 40);
+                Thread.Sleep(50);
+            }
+            Thread.Sleep(800);
+            mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+            Thread.Sleep(3000);
+            // Nothing started a drag: close the window so the step does not hang.
+            try { form.BeginInvoke((Action)form.Close); } catch (Exception) { }
+        });
+        mover.IsBackground = true;
+        form.Shown += (s, e) => mover.Start();
         Application.Run(form);
         return result;
     }
