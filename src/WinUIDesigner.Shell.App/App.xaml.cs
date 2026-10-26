@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 
@@ -27,7 +28,9 @@ namespace WinUIDesigner.Shell
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
-            window = new MainWindow();
+            // Environment's split arguments rather than args.Arguments: for an unpackaged app
+            // that is one unsplit string. Open-from-outside spec Decision 3.
+            window = new MainWindow(Environment.GetCommandLineArgs().Skip(1));
             window.Activate();
         }
 

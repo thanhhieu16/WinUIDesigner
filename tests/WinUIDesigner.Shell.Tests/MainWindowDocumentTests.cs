@@ -560,5 +560,166 @@ namespace WinUIDesigner.Shell.Tests
                 Assert.That(window.CutItemForTest.IsEnabled, Is.True);
             });
         }
+
+        static string WriteTempXaml(string name)
+        {
+            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "wd-" + name + "-" + Guid.NewGuid().ToString("N") + ".xaml");
+            System.IO.File.WriteAllText(path, NewDocumentTemplate.Xaml);
+            return path;
+        }
+
+        static string MissingPath()
+        {
+            return System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                "wd-missing-" + Guid.NewGuid().ToString("N") + ".xaml");
+        }
+
+        static void DeleteAll(params string[] paths)
+        {
+            foreach (var path in paths)
+            {
+                if (System.IO.File.Exists(path))
+                    System.IO.File.Delete(path);
+            }
+        }
+
+        [Test]
+        public void OpenFilesOpensEachPathAsATabAndTheLastBecomesCurrent()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var first = WriteTempXaml("first");
+                var second = WriteTempXaml("second");
+                try
+                {
+                    var window = NewWindow();
+                    var shell = window.ShellForTest;
+                    var before = shell.Documents.Count;
+
+                    window.OpenFiles(new[] { first, second });
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(before + 2));
+                    Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before + 2));
+                    Assert.That(shell.CurrentDocument.FilePath, Is.EqualTo(second));
+                    Assert.That(window.BatchErrorsForTest, Is.Empty);
+                }
+                finally
+                {
+                    DeleteAll(first, second);
+                }
+            });
+        }
+
+        [Test]
+        public void ABatchOpensWhatItCanAndCollectsEveryFailureWithItsPath()
+        {
+            // Outside a batch a second report while the first dialog is up is lost, so the batch
+            // must collect them: both missing files are named, not just the first.
+            WinUITestHost.Run(() =>
+            {
+                var good = WriteTempXaml("good");
+                var missingA = MissingPath();
+                var missingB = MissingPath();
+                try
+                {
+                    var window = NewWindow();
+                    var shell = window.ShellForTest;
+                    var before = shell.Documents.Count;
+
+                    window.OpenFiles(new[] { missingA, good, missingB });
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(before + 1));
+                    Assert.That(shell.CurrentDocument.FilePath, Is.EqualTo(good));
+                    Assert.That(window.BatchErrorsForTest.Select(error => error.Path),
+                        Is.EqualTo(new[] { missingA, missingB }));
+                }
+                finally
+                {
+                    DeleteAll(good);
+                }
+            });
+        }
+
+        [Test]
+        public void AStartupOpenClosesTheUntouchedBlankDocument()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var path = WriteTempXaml("startup");
+                try
+                {
+                    var window = NewWindow();
+                    var shell = window.ShellForTest;
+                    var blank = shell.CurrentDocument;
+                    Assert.That(shell.Documents.Count, Is.EqualTo(1));
+
+                    window.OpenStartupFiles(new[] { path });
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(1));
+                    Assert.That(shell.Documents.Contains(blank), Is.False);
+                    Assert.That(shell.CurrentDocument.FilePath, Is.EqualTo(path));
+                    Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(1));
+                }
+                finally
+                {
+                    DeleteAll(path);
+                }
+            });
+        }
+
+        [Test]
+        public void AStartupOpenKeepsABlankDocumentThatHasChanges()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var path = WriteTempXaml("startup-dirty");
+                try
+                {
+                    var window = NewWindow();
+                    var shell = window.ShellForTest;
+                    var blank = shell.CurrentDocument;
+                    blank.MarkSuspect();
+
+                    window.OpenStartupFiles(new[] { path });
+
+                    Assert.That(shell.Documents.Count, Is.EqualTo(2));
+                    Assert.That(shell.Documents.Contains(blank), Is.True);
+                }
+                finally
+                {
+                    DeleteAll(path);
+                }
+            });
+        }
+
+        [Test]
+        public void AStartupOpenThatOpensNothingKeepsTheBlankDocument()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var shell = window.ShellForTest;
+                var blank = shell.CurrentDocument;
+
+                window.OpenStartupFiles(new[] { MissingPath() });
+
+                Assert.That(shell.Documents.Count, Is.EqualTo(1));
+                Assert.That(shell.CurrentDocument, Is.SameAs(blank), "the window is never left empty");
+                Assert.That(window.BatchErrorsForTest, Has.Count.EqualTo(1));
+            });
+        }
+
+        [Test]
+        public void ADropOpensOnlyXamlFiles()
+        {
+            var paths = MainWindow.XamlPathsIn(new[]
+            {
+                @"C:\a\One.xaml", @"C:\a\Two.XAML", @"C:\a\Controls.dll", @"C:\a\notes.txt",
+                @"C:\a\xaml", null, ""
+            });
+
+            Assert.That(paths, Is.EqualTo(new[] { @"C:\a\One.xaml", @"C:\a\Two.XAML" }));
+        }
     }
 }

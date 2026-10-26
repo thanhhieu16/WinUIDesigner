@@ -148,3 +148,18 @@ shot 20-dragged
 key ctrl+z
 wait 1000
 shot 21-drag-undone
+# Command line: start the app again with the saved file as its argument. It opens as the only
+# tab - the blank New1 the window starts with is closed, since nothing touched it.
+launch {docs}\walk.xaml
+wait 2000
+shot 22-launched-with-file
+# A file dragged from Explorer, simulated by drop-helper.ps1's OLE DoDragDrop: a copy of the
+# saved file dropped on the canvas opens as a second tab.
+copy {docs}\walk.xaml {docs}\walk-copy.xaml
+dropfile 860 600 400 400 {docs}\walk-copy.xaml
+wait 2000
+shot 23-dropped
+# Dropping a file that is already open only switches back to its tab.
+dropfile 860 600 400 400 {docs}\walk.xaml
+wait 1500
+shot 24-dropped-open-file

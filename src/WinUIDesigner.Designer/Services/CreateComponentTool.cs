@@ -138,8 +138,12 @@ namespace WinUIDesigner.Designer.Services
 			return true;
 		}
 
+		// Both handlers leave a drag that is not this tool's unhandled, so it bubbles on: a file
+		// dragged from Explorer over the surface reaches the shell window's own drop handler.
+		// Open-from-outside spec Decision 7.
 		void OnDragOver(object sender, DragEventArgs e)
 		{
+			if (!CarriesThisTool(e.DataView.Properties)) return;
 			var designPanel = (DesignPanel)sender;
 			e.AcceptedOperation = HandleDragOver(designPanel, e.GetPosition(designPanel), e.DataView.Properties);
 			e.Handled = true;
@@ -164,6 +168,7 @@ namespace WinUIDesigner.Designer.Services
 
 		void OnDrop(object sender, DragEventArgs e)
 		{
+			if (!CarriesThisTool(e.DataView.Properties)) return;
 			var designPanel = (DesignPanel)sender;
 			e.AcceptedOperation = HandleDrop(designPanel, e.GetPosition(designPanel), e.DataView.Properties)
 				? DataPackageOperation.Copy

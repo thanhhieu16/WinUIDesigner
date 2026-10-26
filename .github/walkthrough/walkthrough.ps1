@@ -17,6 +17,13 @@
 #   drag <x1> <y1> <x2> <y2>    press, move in steps, release
 #   key <name>[+<name>...]      e.g. key ctrl+z, key escape
 #   type <text>
+#   launch [<path>...]          end the app and start it again with these arguments
+#   copy <from> <to>            copy a file
+#   dropfile <x1> <y1> <x2> <y2> <path>...
+#                               drag files from a helper window at (x1,y1) and drop them at
+#                               (x2,y2), the way a drag from Explorer does (drop-helper.ps1)
+#
+# In a path, {docs} stands for the Documents folder.
 #
 # Screenshots are written to the output directory and also printed to the log as base64
 # between "BEGIN-SHOT <name>" and "END-SHOT" lines.
@@ -52,20 +59,34 @@ public static class Native {
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
 
-$process = Start-Process -FilePath $Exe -PassThru
-$deadline = (Get-Date).AddSeconds(60)
-while ($process.MainWindowHandle -eq [IntPtr]::Zero) {
-    if ($process.HasExited) { throw "the app exited during startup with code $($process.ExitCode)" }
-    if ((Get-Date) -gt $deadline) { throw 'no main window within 60s' }
-    Start-Sleep -Milliseconds 250
-    $process.Refresh()
-}
-$hwnd = $process.MainWindowHandle
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Write-Host "primary screen: $($screen.Width)x$($screen.Height)"
-[Native]::MoveWindow($hwnd, 0, 0, [Math]::Min(1400, $screen.Width), [Math]::Min(900, $screen.Height), $true) | Out-Null
-[Native]::SetForegroundWindow($hwnd) | Out-Null
-Start-Sleep -Seconds 3
+$docs = [Environment]::GetFolderPath('MyDocuments')
+$Exe = (Resolve-Path $Exe).Path
+
+function Start-App([string[]]$arguments) {
+    if ($arguments -and $arguments.Count -gt 0) {
+        $quoted = $arguments | ForEach-Object { '"' + $_ + '"' }
+        $script:process = Start-Process -FilePath $Exe -ArgumentList $quoted -PassThru
+    } else {
+        $script:process = Start-Process -FilePath $Exe -PassThru
+    }
+    $deadline = (Get-Date).AddSeconds(60)
+    while ($script:process.MainWindowHandle -eq [IntPtr]::Zero) {
+        if ($script:process.HasExited) { throw "the app exited during startup with code $($script:process.ExitCode)" }
+        if ((Get-Date) -gt $deadline) { throw 'no main window within 60s' }
+        Start-Sleep -Milliseconds 250
+        $script:process.Refresh()
+    }
+    $script:hwnd = $script:process.MainWindowHandle
+    [Native]::MoveWindow($script:hwnd, 0, 0, [Math]::Min(1400, $screen.Width), [Math]::Min(900, $screen.Height), $true) | Out-Null
+    [Native]::SetForegroundWindow($script:hwnd) | Out-Null
+    Start-Sleep -Seconds 3
+}
+
+function Expand-Path([string]$path) { return $path.Replace('{docs}', $docs) }
+
+Start-App @()
 
 function Get-ClientOrigin {
     $p = New-Object Native+POINT
@@ -170,6 +191,29 @@ foreach ($raw in Get-Content $Steps) {
                 if ($shift) { [Native]::keybd_event(0x10, 0, 2, [UIntPtr]::Zero) }
                 Start-Sleep -Milliseconds 30
             }
+        }
+        'launch' {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+            $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
+            Start-App $paths
+        }
+        'copy' {
+            $p = @($args1 -split '\s+' | ForEach-Object { Expand-Path $_ })
+            Copy-Item -Force $p[0] $p[1]
+        }
+        'dropfile' {
+            $words = @($args1 -split '\s+')
+            $from = To-Screen ([int]$words[0]) ([int]$words[1])
+            $to = To-Screen ([int]$words[2]) ([int]$words[3])
+            $paths = ($words[4..($words.Count - 1)] | ForEach-Object { Expand-Path $_ }) -join '|'
+            # Windows PowerShell, not pwsh: OLE drag and drop needs a single-threaded apartment,
+            # and -STA gives one.
+            $helper = Join-Path $PSScriptRoot 'drop-helper.ps1'
+            $out = & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File $helper `
+                -FromX $from[0] -FromY $from[1] -ToX $to[0] -ToY $to[1] -Paths $paths `
+                -ScreenWidth $screen.Width -ScreenHeight $screen.Height 2>&1
+            Write-Host "drop helper: $out"
+            [Native]::SetForegroundWindow($hwnd) | Out-Null
         }
         default { throw "unknown step: $line" }
     }
