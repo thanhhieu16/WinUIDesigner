@@ -18,8 +18,10 @@
 #   key <name>[+<name>...]      e.g. key ctrl+z, key escape
 #   type <text>
 #   launch [<path>...]          end the app and start it again with these arguments
+#   toolboxassembly <path>      remember an assembly in the app's settings file, as File > Add
+#                               Controls Assembly... does; it is loaded on the next launch
 #
-# In a path, {docs} stands for the Documents folder.
+# In a path, {docs} stands for the Documents folder and {home} for the user folder.
 #
 # Screenshots are written to the output directory and also printed to the log as base64
 # between "BEGIN-SHOT <name>" and "END-SHOT" lines.
@@ -80,7 +82,7 @@ function Start-App([string[]]$arguments) {
     Start-Sleep -Seconds 3
 }
 
-function Expand-Path([string]$path) { return $path.Replace('{docs}', $docs) }
+function Expand-Path([string]$path) { return $path.Replace('{docs}', $docs).Replace('{home}', $env:USERPROFILE) }
 
 Start-App @()
 
@@ -192,6 +194,14 @@ foreach ($raw in Get-Content $Steps) {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
             $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
             Start-App $paths
+        }
+        'toolboxassembly' {
+            $settingsPath = Join-Path $env:LOCALAPPDATA 'WinUIDesigner\settings.json'
+            $settings = if (Test-Path $settingsPath) { Get-Content -Raw $settingsPath | ConvertFrom-Json } else { [pscustomobject]@{ RecentFiles = @(); ToolboxAssemblies = @() } }
+            $list = @($settings.ToolboxAssemblies) + @(Expand-Path $args1)
+            $settings | Add-Member -Force -NotePropertyName ToolboxAssemblies -NotePropertyValue $list
+            $settings | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $settingsPath
+            Write-Host "toolbox assemblies: $($list -join ', ')"
         }
         default { throw "unknown step: $line" }
     }

@@ -42,13 +42,44 @@ jobs:
           }
           Get-ChildItem $docs | Select-Object Name
 
+      # A real NuGet control library, CommunityToolkit's Segmented, with the two packages it
+      # depends on: lib/<tfm> only, as a package carries it (a .dll and a .pri, no XAML text).
+      # In the user folder, not Documents: a folder there sorts first in the pickers and moves
+      # every row the walkthrough double-clicks.
+      - name: Put CommunityToolkit's Segmented in the user folder
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:USERPROFILE 'Toolkit'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          $packages = @(
+            @('communitytoolkit.winui.controls.segmented', '8.2.251219', 'net8.0-windows10.0.19041'),
+            @('communitytoolkit.winui.extensions', '8.2.251219', 'net8.0-windows10.0.19041'),
+            @('communitytoolkit.common', '8.2.1', 'netstandard2.0')
+          )
+          foreach ($p in $packages) {
+            $zip = Join-Path $env:RUNNER_TEMP "$($p[0]).zip"
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/$($p[0])/$($p[1])/$($p[0]).$($p[1]).nupkg" -OutFile $zip
+            $x = Join-Path $env:RUNNER_TEMP $p[0]
+            Expand-Archive $zip $x -Force
+            Get-ChildItem -File "$x/lib/$($p[2])" | Where-Object { $_.Extension -in '.dll', '.pri' } | Copy-Item -Destination $dest
+          }
+          Get-ChildItem $dest | Select-Object Name, Length
+
       - name: Walk
         shell: pwsh
+        env:
+          WINUIDESIGNER_RESOURCE_TRACE: ${{ runner.temp }}/resource-trace.txt
         run: >
           ./.github/walkthrough/walkthrough.ps1
           -Exe src/WinUIDesigner.Shell.App/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.App.exe
           -Steps .github/walkthrough/steps.txt
           -OutDir walkthrough-shots
+
+      # The resource lookups the app routed to library .pri files (WINUIDESIGNER_RESOURCE_TRACE).
+      - name: Show the resource trace
+        if: always()
+        shell: pwsh
+        run: if (Test-Path "$env:RUNNER_TEMP/resource-trace.txt") { Get-Content "$env:RUNNER_TEMP/resource-trace.txt" } else { Write-Host 'no trace' }
 
       - name: Show the saved file
         if: always()
