@@ -49,6 +49,25 @@ namespace WinUIDesigner.Shell
             if (!File.Exists(path))
                 return null;
 
+            string text;
+            try
+            {
+                text = File.ReadAllText(path);
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+
+            // Checked as XML before XamlReader ever sees it. A XamlReader.Load that fails throws
+            // a catchable exception and still leaves a stowed error behind: measured, the Shell
+            // suite's host died with 0xC000027B a few tests after a malformed theme was caught
+            // here, and passed with that one test left out. A file that is not even well-formed
+            // XML - the likeliest broken theme - is therefore refused here instead.
+            var notXml = WellFormedError(text);
+            if (notXml != null)
+                return notXml;
+
             var registered = RegisterProviders(assembly);
             if (registered != null)
                 return registered;
@@ -56,7 +75,7 @@ namespace WinUIDesigner.Shell
             ResourceDictionary dictionary;
             try
             {
-                dictionary = XamlReader.Load(File.ReadAllText(path)) as ResourceDictionary;
+                dictionary = XamlReader.Load(text) as ResourceDictionary;
             }
             catch (Exception ex)
             {
@@ -68,6 +87,25 @@ namespace WinUIDesigner.Shell
 
             Application.Current.Resources.MergedDictionaries.Add(dictionary);
             return null;
+        }
+
+        static string WellFormedError(string text)
+        {
+            try
+            {
+                var settings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Prohibit };
+                using (var reader = System.Xml.XmlReader.Create(new StringReader(text), settings))
+                {
+                    while (reader.Read())
+                    {
+                    }
+                }
+                return null;
+            }
+            catch (System.Xml.XmlException ex)
+            {
+                return ex.Message;
+            }
         }
 
         /// <summary>
