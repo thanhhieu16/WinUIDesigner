@@ -46,6 +46,23 @@ jobs:
             exit 1
           }
 
+      # TEMPORARY: bisects the Shell suite's 0xC000027B to the library-resources tests.
+      - name: Bisect the Shell host crash
+        if: always()
+        shell: pwsh
+        run: |
+          $exe = "tests/WinUIDesigner.Shell.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.Tests.exe"
+          $runs = @(
+            @('without LibraryResourcesTests', '--where=class != WinUIDesigner.Shell.Tests.LibraryResourcesTests'),
+            @('only the theme test', '--test=WinUIDesigner.Shell.Tests.LibraryResourcesTests.ALibrarysThemeGivesItsTemplatedControlItsTemplate'),
+            @('only the malformed test', '--test=WinUIDesigner.Shell.Tests.LibraryResourcesTests.AMalformedThemeIsReportedAndMergesNothing'),
+            @('only the no-theme test', '--test=WinUIDesigner.Shell.Tests.LibraryResourcesTests.ALibraryWithoutAThemeIsNotAProblem')
+          )
+          foreach ($run in $runs) {
+            & $exe $run[1] --noresult | Select-String -Pattern 'Overall result|Test Count|Failed :|Error :' | ForEach-Object { Write-Host $_.Line }
+            Write-Host "BISECT $($run[0]): exit $LASTEXITCODE"
+          }
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
