@@ -138,9 +138,17 @@ namespace WinUIDesigner.Shell
                 RaiseError(name + " contains no controls that can be placed." + SkippedText(result), null);
                 return false;
             }
-            else if (result.Skipped.Count > 0)
+            else
             {
-                RaiseError(name + " was added to the toolbox." + SkippedText(result), null);
+                if (result.Skipped.Count > 0)
+                    RaiseError(name + " was added to the toolbox." + SkippedText(result), null);
+
+                // Only for a library that is new to the toolbox, so its theme is merged once.
+                // A failure keeps the controls: they place and save, just without their look.
+                // Library-resources spec Decisions 3 and 4.
+                var themeError = LibraryResources.Load(assembly, fullPath);
+                if (themeError != null)
+                    RaiseError(name + "'s styles could not be loaded, so its templated controls will not show: " + themeError, null);
             }
 
             if (remember && settingsPath != null)

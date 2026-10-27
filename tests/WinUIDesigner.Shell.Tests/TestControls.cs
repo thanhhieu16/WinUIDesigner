@@ -43,4 +43,16 @@ namespace WinUIDesigner.Shell.Tests
             throw new InvalidOperationException("ThrowingControl cannot be created.");
         }
     }
+
+    /// <summary>
+    /// A templated control with no template of its own, like a library control whose look is in
+    /// its Themes/Generic.xaml. Library-resources spec, Verification.
+    /// </summary>
+    public class TestCard : Control
+    {
+        public TestCard()
+        {
+            DefaultStyleKey = typeof(TestCard);
+        }
+    }
 }
