@@ -44,10 +44,12 @@ jobs:
 
       # A real NuGet control library, CommunityToolkit's Segmented, with the two packages it
       # depends on: lib/<tfm> only, as a package carries it (a .dll and a .pri, no XAML text).
-      - name: Put CommunityToolkit's Segmented in Documents
+      # In the user folder, not Documents: a folder there sorts first in the pickers and moves
+      # every row the walkthrough double-clicks.
+      - name: Put CommunityToolkit's Segmented in the user folder
         shell: pwsh
         run: |
-          $dest = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Toolkit'
+          $dest = Join-Path $env:USERPROFILE 'Toolkit'
           New-Item -ItemType Directory -Force $dest | Out-Null
           $packages = @(
             @('communitytoolkit.winui.controls.segmented', '8.2.251219', 'net8.0-windows10.0.19041'),
@@ -73,7 +75,7 @@ jobs:
           -Steps .github/walkthrough/steps.txt
           -OutDir walkthrough-shots
 
-      # TEMPORARY: the resource lookups the app routed to library .pri files.
+      # The resource lookups the app routed to library .pri files (WINUIDESIGNER_RESOURCE_TRACE).
       - name: Show the resource trace
         if: always()
         shell: pwsh

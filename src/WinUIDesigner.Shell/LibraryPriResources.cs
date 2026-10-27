@@ -33,8 +33,10 @@ namespace WinUIDesigner.Shell
         public static bool IsActive { get; set; }
 
         /// <summary>
-        /// TEMPORARY diagnostics: every lookup that reaches here, written to this file when set.
-        /// Set from the WINUIDESIGNER_RESOURCE_TRACE environment variable.
+        /// Diagnostics: every lookup that reaches here, appended to this file when set. App sets
+        /// it from the WINUIDESIGNER_RESOURCE_TRACE environment variable; the walkthrough does,
+        /// and prints the file. Kept because a lookup that silently resolves nothing is otherwise
+        /// invisible.
         /// </summary>
         public static string TracePath { get; set; }
 

@@ -215,11 +215,11 @@ wait 1500
 launch {docs}\walk.xaml
 wait 3000
 shot 28-relaunched-with-library
-# A library whose theme is well-formed XML but merges a dictionary from ms-appx:///, which a
-# library added at runtime cannot resolve, so XamlReader.Load fails on it. The add should report
-# that and keep the app alive; a failed XamlReader.Load was measured leaving a stowed error that
-# killed the test host later. SampleBrokenTheme.dll is the fourth row. If the app dies, the next
-# step fails with its exit code (error.txt).
+# A library whose theme merges a dictionary from ms-appx:///. Loaded as text, XamlReader.Load
+# failed on it, and the app was measured surviving that (broken-theme measurement). Since the
+# library-PRI change, the app resolves that ms-appx:/// from the library's .pri, so the theme
+# loads and SampleBrokenCard renders red. SampleBrokenTheme.dll is the fourth row. If the app
+# dies, the next step fails with its exit code (error.txt).
 click 24 21
 wait 800
 click 70 152
@@ -254,7 +254,7 @@ shot 33-still-running
 # A real NuGet library: CommunityToolkit's Segmented, from its package (a .dll and a .pri with the
 # XAML embedded as .xbf, no XAML text). Remembered in the settings, loaded on the next launch; its
 # template comes from its .pri through the app's resource manager (library-PRI spec).
-toolboxassembly {docs}\Toolkit\CommunityToolkit.WinUI.Controls.Segmented.dll
+toolboxassembly {home}\Toolkit\CommunityToolkit.WinUI.Controls.Segmented.dll
 launch
 wait 3000
 shot 34-toolkit-loaded

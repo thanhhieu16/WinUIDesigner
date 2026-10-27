@@ -21,7 +21,7 @@
 #   toolboxassembly <path>      remember an assembly in the app's settings file, as File > Add
 #                               Controls Assembly... does; it is loaded on the next launch
 #
-# In a path, {docs} stands for the Documents folder.
+# In a path, {docs} stands for the Documents folder and {home} for the user folder.
 #
 # Screenshots are written to the output directory and also printed to the log as base64
 # between "BEGIN-SHOT <name>" and "END-SHOT" lines.
@@ -82,7 +82,7 @@ function Start-App([string[]]$arguments) {
     Start-Sleep -Seconds 3
 }
 
-function Expand-Path([string]$path) { return $path.Replace('{docs}', $docs) }
+function Expand-Path([string]$path) { return $path.Replace('{docs}', $docs).Replace('{home}', $env:USERPROFILE) }
 
 Start-App @()
 
