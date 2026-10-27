@@ -62,5 +62,80 @@ namespace WinUIDesigner.Shell.Tests
                 }
             });
         }
+    
+
+        [Test]
+        public void APlacedControlGetsItsDefaultContentAndAShapeAFill()
+        {
+            // The path CreateComponentTool takes for a control placed from the toolbox: register
+            // it, then apply the table's defaults.
+            WinUITestHost.Run(() =>
+            {
+                ShellMetadata.Register();
+
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var components = doc.DesignContext.Services.Component;
+
+                    var button = components.RegisterComponentForDesigner(new Button());
+                    components.SetDefaultPropertyValues(button);
+                    Assert.That(((Button)button.Component).Content, Is.EqualTo("Button"));
+
+                    var text = components.RegisterComponentForDesigner(new TextBlock());
+                    components.SetDefaultPropertyValues(text);
+                    Assert.That(((TextBlock)text.Component).Text, Is.EqualTo("TextBlock"));
+
+                    var rectangle = components.RegisterComponentForDesigner(new Microsoft.UI.Xaml.Shapes.Rectangle());
+                    components.SetDefaultPropertyValues(rectangle);
+                    var fill = ((Microsoft.UI.Xaml.Shapes.Rectangle)rectangle.Component).Fill as Microsoft.UI.Xaml.Media.SolidColorBrush;
+                    Assert.That(fill, Is.Not.Null, "a placed Rectangle is visible");
+                    Assert.That(fill.Color, Is.EqualTo(Microsoft.UI.Colors.LightGray));
+                }
+            });
+        }
+
+        [Test]
+        public void NumberPropertiesAreBoundedAndFocusNavigationIsHidden()
+        {
+            WinUITestHost.Run(() =>
+            {
+                ShellMetadata.Register();
+
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var button = doc.DesignContext.RootItem.ContentProperty.CollectionElements[0];
+
+                    var opacity = Metadata.GetValueRange(button.Properties["Opacity"]);
+                    Assert.That(opacity, Is.Not.Null);
+                    Assert.That(opacity.Min, Is.EqualTo(0));
+                    Assert.That(opacity.Max, Is.EqualTo(1));
+                    Assert.That(Metadata.GetValueRange(button.Properties["Width"]).Min, Is.EqualTo(0),
+                        "a negative Width is not offered");
+
+                    Assert.That(Metadata.IsBrowsable(button.Properties["XYFocusUp"]), Is.False);
+                    Assert.That(Metadata.IsBrowsable(button.Properties["FocusVisualPrimaryBrush"]), Is.False);
+                    Assert.That(Metadata.IsBrowsable(button.Properties["Width"]), Is.True);
+                }
+            });
+        }
+
+        [Test]
+        public void ATextBlocksOwnLookPropertiesArePopular()
+        {
+            // TextBlock is not a Control: its Foreground and FontSize are its own dependency
+            // properties, which Control's do not cover.
+            WinUITestHost.Run(() =>
+            {
+                ShellMetadata.Register();
+
+                using (var doc = new Document(null, CanvasWithButton))
+                {
+                    var text = doc.DesignContext.Services.Component.RegisterComponentForDesigner(new TextBlock());
+                    Assert.That(Metadata.IsPopularProperty(text.Properties["Foreground"]), Is.True);
+                    Assert.That(Metadata.IsPopularProperty(text.Properties["FontSize"]), Is.True);
+                    Assert.That(Metadata.IsPopularProperty(text.Properties["Text"]), Is.True);
+                }
+            });
+        }
     }
 }
