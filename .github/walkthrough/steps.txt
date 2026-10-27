@@ -251,3 +251,21 @@ shot 32-broken-control-placed
 key ctrl+z
 wait 5000
 shot 33-still-running
+# A real NuGet library: CommunityToolkit's Segmented, from its package (a .dll and a .pri with the
+# XAML embedded as .xbf, no XAML text). Remembered in the settings, loaded on the next launch; its
+# template comes from its .pri through the app's resource manager (library-PRI spec).
+toolboxassembly {docs}\Toolkit\CommunityToolkit.WinUI.Controls.Segmented.dll
+launch
+wait 3000
+shot 34-toolkit-loaded
+key escape
+wait 500
+click 342 711
+wait 1500
+click 460 350
+key ctrl+a
+type <Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:ct="using:CommunityToolkit.WinUI.Controls"><ct:Segmented Canvas.Left="40" Canvas.Top="40"><ct:SegmentedItem Content="One"/><ct:SegmentedItem Content="Two"/><ct:SegmentedItem Content="Three"/></ct:Segmented></Canvas>
+wait 500
+click 213 711
+wait 3000
+shot 35-segmented

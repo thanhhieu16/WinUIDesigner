@@ -22,6 +22,18 @@ namespace WinUIDesigner.Shell
 
         public App()
         {
+            // Before InitializeComponent, so it is in place for the framework's first resource
+            // lookup: XAML resolves ms-appx:/// through this manager, and what the app's own
+            // resources.pri lacks is tried against the .pri files of libraries added at runtime.
+            // Library-PRI spec Decision 1.
+            LibraryPriResources.TracePath = Environment.GetEnvironmentVariable("WINUIDESIGNER_RESOURCE_TRACE");
+            ResourceManagerRequested += (sender, args) =>
+            {
+                var manager = new Microsoft.Windows.ApplicationModel.Resources.ResourceManager();
+                manager.ResourceNotFound += LibraryPriResources.OnResourceNotFound;
+                args.CustomResourceManager = manager;
+                LibraryPriResources.IsActive = true;
+            };
             InitializeComponent();
             UnhandledException += OnUnhandledException;
         }

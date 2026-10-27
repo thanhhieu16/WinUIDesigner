@@ -37,14 +37,33 @@ namespace WinUIDesigner.Shell
         internal static string Load(Assembly assembly, string assemblyPath)
         {
             string path;
+            string folder;
             try
             {
                 path = ThemePath(assembly, assemblyPath);
+                folder = Path.GetDirectoryName(assemblyPath);
             }
             catch (Exception ex)
             {
                 return ex.Message;
             }
+
+            // The library's .pri, when the app routes failed resource lookups to it: the XAML
+            // framework then finds the library's Generic.xbf, and anything else it addresses as
+            // ms-appx:///, itself. Every .pri beside the .dll is registered, since the library's
+            // dependencies (CommunityToolkit's Extensions, for one) sit there too and carry their
+            // own. Library-PRI spec Decision 2.
+            var pri = Path.ChangeExtension(assemblyPath, ".pri");
+            if (LibraryPriResources.IsActive && File.Exists(pri))
+            {
+                var registered = RegisterProviders(assembly);
+                if (registered != null)
+                    return registered;
+                foreach (var file in Directory.GetFiles(folder, "*.pri"))
+                    LibraryPriResources.Register(file);
+                return null;
+            }
+
             // A library built in code has no theme, which is not a problem.
             if (!File.Exists(path))
                 return null;
@@ -68,9 +87,9 @@ namespace WinUIDesigner.Shell
             if (notXml != null)
                 return notXml;
 
-            var registered = RegisterProviders(assembly);
-            if (registered != null)
-                return registered;
+            var providers = RegisterProviders(assembly);
+            if (providers != null)
+                return providers;
 
             ResourceDictionary dictionary;
             try

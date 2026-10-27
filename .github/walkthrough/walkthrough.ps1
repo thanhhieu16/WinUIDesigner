@@ -18,6 +18,8 @@
 #   key <name>[+<name>...]      e.g. key ctrl+z, key escape
 #   type <text>
 #   launch [<path>...]          end the app and start it again with these arguments
+#   toolboxassembly <path>      remember an assembly in the app's settings file, as File > Add
+#                               Controls Assembly... does; it is loaded on the next launch
 #
 # In a path, {docs} stands for the Documents folder.
 #
@@ -192,6 +194,14 @@ foreach ($raw in Get-Content $Steps) {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
             $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
             Start-App $paths
+        }
+        'toolboxassembly' {
+            $settingsPath = Join-Path $env:LOCALAPPDATA 'WinUIDesigner\settings.json'
+            $settings = if (Test-Path $settingsPath) { Get-Content -Raw $settingsPath | ConvertFrom-Json } else { [pscustomobject]@{ RecentFiles = @(); ToolboxAssemblies = @() } }
+            $list = @($settings.ToolboxAssemblies) + @(Expand-Path $args1)
+            $settings | Add-Member -Force -NotePropertyName ToolboxAssemblies -NotePropertyValue $list
+            $settings | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 $settingsPath
+            Write-Host "toolbox assemblies: $($list -join ', ')"
         }
         default { throw "unknown step: $line" }
     }
