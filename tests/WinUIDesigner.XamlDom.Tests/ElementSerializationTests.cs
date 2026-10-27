@@ -82,6 +82,38 @@ namespace WinUIDesigner.XamlDom.Tests
             });
         }
 
+        /// <summary>
+        /// The prefix written for such a namespace is the one a person would choose - its last
+        /// segment in lower case - not the reference's "Controls0". Namespace-prefix spec
+        /// Decision 1.
+        /// </summary>
+        [Test]
+        public void AClrNamespaceGetsItsLastSegmentAsItsPrefix()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Border xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Child", new ExampleControl());
+                var saved = SaveToString(document);
+
+                Assert.That(saved, Does.Contain("xmlns:tests=\"using:WinUIDesigner.XamlDom.Tests\""), saved);
+                Assert.That(saved, Does.Contain("<tests:ExampleControl"), saved);
+            });
+        }
+
+        [Test]
+        public void ATakenPrefixGetsANumber()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Border xmlns='" + PresentationNs + "' xmlns:tests='using:Some.Other.Tests'/>");
+                SetThroughTheDocument(document, "Child", new ExampleControl());
+                var saved = SaveToString(document);
+
+                Assert.That(saved, Does.Contain("xmlns:tests2=\"using:WinUIDesigner.XamlDom.Tests\""), saved);
+                var reparsed = (Microsoft.UI.Xaml.Controls.Border)ParseDocument(saved).RootInstance;
+                Assert.That(reparsed.Child, Is.InstanceOf<ExampleControl>(), saved);
+            });
+        }
+
         [Test]
         public void ASkewTransformKeepsBothAnglesAcrossASaveAndReload()
         {
