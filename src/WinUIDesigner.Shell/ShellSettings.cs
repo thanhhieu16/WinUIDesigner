@@ -31,6 +31,10 @@ namespace WinUIDesigner.Shell
         /// Toolbox-assemblies spec Decision 5.</summary>
         public List<string> ToolboxAssemblies { get; set; } = new List<string>();
 
+        /// <summary>The main window's last bounds, or null before it has ever closed.
+        /// Window-placement spec Decision 1.</summary>
+        public WindowBounds Window { get; set; }
+
         /// <summary>Loads the file at <paramref name="path"/>, applies <paramref name="change"/>, and
         /// saves it, so a change to one setting keeps the others as they are on disk.</summary>
         public static void Update(string path, Action<ShellSettings> change)

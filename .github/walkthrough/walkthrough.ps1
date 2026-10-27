@@ -18,6 +18,11 @@
 #   key <name>[+<name>...]      e.g. key ctrl+z, key escape
 #   type <text>
 #   launch [<path>...]          end the app and start it again with these arguments
+#   movewindow <x> <y> <w> <h>  move and resize the window, as a user dragging it would
+#   close                       close the window normally (WM_CLOSE), so the app saves what it
+#                               saves on close, and wait for the process to end
+#   launchkeep [<path>...]      launch without placing the window: it opens where the app puts it
+#   windowrect <name>           record the window's screen rectangle in <name>.txt
 #   toolboxassembly <path>      remember an assembly in the app's settings file, as File > Add
 #                               Controls Assembly... does; it is loaded on the next launch
 #
@@ -50,6 +55,8 @@ public static class Native {
     [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int w, int h, bool repaint);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
 '@
 [Native]::SetProcessDPIAware() | Out-Null
@@ -62,7 +69,7 @@ Write-Host "primary screen: $($screen.Width)x$($screen.Height)"
 $docs = [Environment]::GetFolderPath('MyDocuments')
 $Exe = (Resolve-Path $Exe).Path
 
-function Start-App([string[]]$arguments) {
+function Start-App([string[]]$arguments, [switch]$KeepPlacement) {
     if ($arguments -and $arguments.Count -gt 0) {
         $quoted = $arguments | ForEach-Object { '"' + $_ + '"' }
         $script:process = Start-Process -FilePath $Exe -ArgumentList $quoted -PassThru
@@ -77,7 +84,9 @@ function Start-App([string[]]$arguments) {
         $script:process.Refresh()
     }
     $script:hwnd = $script:process.MainWindowHandle
-    [Native]::MoveWindow($script:hwnd, 0, 0, [Math]::Min(1400, $screen.Width), [Math]::Min(900, $screen.Height), $true) | Out-Null
+    if (-not $KeepPlacement) {
+        [Native]::MoveWindow($script:hwnd, 0, 0, [Math]::Min(1400, $screen.Width), [Math]::Min(900, $screen.Height), $true) | Out-Null
+    }
     [Native]::SetForegroundWindow($script:hwnd) | Out-Null
     Start-Sleep -Seconds 3
 }
@@ -124,7 +133,8 @@ try {
 foreach ($raw in Get-Content $Steps) {
     $line = $raw.Trim()
     if ($line -eq '' -or $line.StartsWith('#')) { continue }
-    if ($process.HasExited) { throw "the app exited with code $($process.ExitCode) before: $line" }
+    if ($process.HasExited -and -not $closedOnPurpose) { throw "the app exited with code $($process.ExitCode) before: $line" }
+    $closedOnPurpose = $false
     Write-Host "> $line"
     $parts = $line -split '\s+', 2
     $args1 = if ($parts.Count -gt 1) { $parts[1] } else { '' }
@@ -194,6 +204,27 @@ foreach ($raw in Get-Content $Steps) {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
             $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
             Start-App $paths
+        }
+        'movewindow' {
+            [Native]::MoveWindow($hwnd, $n[0], $n[1], $n[2], $n[3], $true) | Out-Null
+        }
+        'close' {
+            [Native]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            if (-not $process.WaitForExit(15000)) { throw 'the app did not close within 15s of WM_CLOSE' }
+            Write-Host "closed with exit code $($process.ExitCode)"
+            $closedOnPurpose = $true
+        }
+        'launchkeep' {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force; $process.WaitForExit() }
+            $paths = @($args1 -split '\s+' | Where-Object { $_ -ne '' } | ForEach-Object { Expand-Path $_ })
+            Start-App $paths -KeepPlacement
+        }
+        'windowrect' {
+            $r = New-Object Native+RECT
+            [Native]::GetWindowRect($hwnd, [ref]$r) | Out-Null
+            $text = "$($r.Left) $($r.Top) $($r.Right - $r.Left) $($r.Bottom - $r.Top)"
+            Write-Host "window rect $($args1): $text"
+            $text | Out-File (Join-Path $OutDir "$args1.txt")
         }
         'toolboxassembly' {
             $settingsPath = Join-Path $env:LOCALAPPDATA 'WinUIDesigner\settings.json'

@@ -269,3 +269,16 @@ wait 500
 click 213 711
 wait 3000
 shot 35-segmented
+# Window placement: a fresh app is moved and resized, closed normally (WM_CLOSE, not killed, so it
+# saves its bounds), and started again without the walkthrough placing it. It should come back
+# at the same rectangle (window-placement spec).
+launch
+key escape
+movewindow 120 90 900 640
+wait 1500
+windowrect 36-before-close
+close
+launchkeep
+wait 2000
+windowrect 37-after-relaunch
+screen 37-relaunched-in-place
