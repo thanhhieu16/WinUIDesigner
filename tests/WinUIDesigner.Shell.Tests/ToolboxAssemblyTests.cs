@@ -61,7 +61,8 @@ namespace WinUIDesigner.Shell.Tests
                 var toolbox = Toolbox.Instance;
                 toolbox.RemoveAssemblyForTest(TestAssemblyName);
                 var view = new ToolboxView();
-                view.Filter = "Badge";
+                // "TestBadge", not "Badge": WinUI's own InfoBadge matches that.
+                view.Filter = "TestBadge";
                 Assert.That(view.VisibleTypesForTest, Does.Not.Contain(typeof(TestBadge)));
 
                 toolbox.AddAssembly(typeof(TestBadge).Assembly);
