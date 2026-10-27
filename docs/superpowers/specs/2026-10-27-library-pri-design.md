@@ -73,3 +73,33 @@ cover only the unchanged text-theme path.
 - Resolving a library's dependencies from NuGet. The user points at a folder that already holds
   them.
 - Libraries whose resources are only in a `resources.pri` merged into some other app.
+
+## Results
+
+Measured on the real app (walkthrough runs on `cea40d2` and `7894c86`). Build and test is green
+on `windows-latest`.
+
+- **CommunityToolkit's `Segmented` renders from its NuGet package** (step 35). The package held
+  only a `.dll` and a `.pri`. The document was typed in the XAML editor with a `Segmented` of
+  three `SegmentedItem`s, and Design shows the segmented control "One | Two | Three". The outline
+  holds the `Segmented` and its three items.
+- **The trace shows the mechanism.** XAML asked the app's manager for these names:
+  - `Files/CommunityToolkit.WinUI.Controls.Segmented/themes/generic.xbf`;
+  - `.../Segmented/Segmented.xbf`;
+  - `.../SegmentedItem/SegmentedItem.xbf`.
+
+  Each was resolved from `CommunityToolkit.WinUI.Controls.Segmented.pri`. The names are
+  lower-case `themes/generic`, and a library `.pri` resolves them as asked.
+- **`SampleCard` still renders** (steps 27–28), now through its `.pri`, because the text path is
+  not taken when the routing is active.
+- **`SampleBrokenTheme` now loads too.** Its `ms-appx:///WinUIDesigner.SampleBrokenTheme/Themes/Colors.xaml`,
+  which failed as text, resolves as `Files/.../Themes/Colors.xbf` from its `.pri`.
+  `SampleBrokenCard` renders red (step 32). The survival measurement that used it stays valid as
+  history: it was made on the text path, before this change.
+
+One walkthrough-only problem was fixed along the way. The `Toolkit` folder, first placed in
+Documents, sorted first in the pickers and moved every row the walkthrough double-clicks, so
+step 23 added the wrong library. It now lives in the user folder.
+
+The trace (`WINUIDESIGNER_RESOURCE_TRACE`) is kept as a documented diagnostic, and the
+walkthrough prints it.
