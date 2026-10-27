@@ -181,6 +181,9 @@ key escape
 # first and the .dll second, as the Open picker lists walk.xaml).
 click 24 21
 wait 800
+# A MenuFlyoutItem can take the first click as hover only (CLAUDE.md), and this one did.
+click 70 152
+wait 300
 click 70 152
 wait 2500
 screen 23-add-assembly-dialog
