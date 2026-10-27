@@ -98,7 +98,8 @@ badge". `SampleCard`, a templated `Control` whose template is in its library's
 So the library's `Generic.xaml` is not found when the library is loaded at runtime into this
 unpackaged app, as predicted. The control is still usable, in that it can be placed, edited in
 the property grid and saved, but it cannot be seen. Showing such controls would mean loading the
-library's own `.pri`, which remains out of scope.
+library's own `.pri`, which remains out of scope. *(Superseded: `2026-10-27-library-resources-design.md`
+loads the library layout's `Themes/Generic.xaml` instead, and `SampleCard` now renders.)*
 
 Three walkthrough-only problems were fixed on the way, none of them in the product:
 - The menu item needed the documented second click.
