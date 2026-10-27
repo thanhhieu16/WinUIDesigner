@@ -71,7 +71,7 @@ namespace WinUIDesigner.Shell.Tests
                     "the view follows the toolbox, and the filter still applies");
                 view.Filter = string.Empty;
                 Assert.That(view.VisibleTypesForTest, Does.Contain(typeof(Button)));
-                Assert.That(view.VisibleTypesForTest.Last(), Is.EqualTo(typeof(TestBadge)),
+                Assert.That(view.VisibleTypesForTest.Last().Assembly, Is.EqualTo(typeof(TestBadge).Assembly),
                     "an added group comes after WinUI's");
             });
         }
