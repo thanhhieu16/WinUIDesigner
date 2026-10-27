@@ -56,6 +56,16 @@ namespace WinUIDesigner.XamlDom.Tests
         }
 
         [Test]
+        public void AnUnmappedNamespaceIsWrittenAsUsingAndClrNamespaceOnlyOnRequest()
+        {
+            var assembly = typeof(ExampleClass).Assembly;
+            Assert.AreEqual(XamlDomTestsNamespace,
+                typeFinder.GetXmlNamespaceFor(assembly, "WinUIDesigner.XamlDom.Tests"));
+            Assert.AreEqual("clr-namespace:WinUIDesigner.XamlDom.Tests;assembly=WinUIDesigner.XamlDom.Tests",
+                typeFinder.GetXmlNamespaceFor(assembly, "WinUIDesigner.XamlDom.Tests", true));
+        }
+
+        [Test]
         public void ClrNamespaceSchemeStillResolves()
         {
             Assert.AreEqual(typeof(ExampleClass),

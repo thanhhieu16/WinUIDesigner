@@ -131,7 +131,7 @@ namespace WinUIDesigner.Shell
         /// </summary>
         public MainWindow(IEnumerable<string> startupPaths)
         {
-            shell = new ShellModel(new RecentFileList(ShellSettings.DefaultPath));
+            shell = new ShellModel(new RecentFileList(ShellSettings.DefaultPath), ShellSettings.DefaultPath);
             ShellMetadata.Register();
 
             Title = ApplicationTitle;
@@ -167,40 +167,80 @@ namespace WinUIDesigner.Shell
             tabStrip.SelectionChanged += OnTabSelectionChanged;
             tabStrip.TabCloseRequested += OnTabCloseRequested;
 
+            // Before any document: a recent or command-line file naming one of these assemblies'
+            // using: namespaces must find it. Toolbox-assemblies spec Decision 5.
+            var startupErrors = LoadRememberedAssemblies(ShellSettings.Load(ShellSettings.DefaultPath).ToolboxAssemblies);
+
             shell.New();
 
             // From the first Loaded rather than here: until then the window has no XamlRoot, so
             // a file that fails to open could report only to Debug. Open-from-outside Decision 3.
+            // An assembly that failed to load is reported in the same dialog.
             var paths = startupPaths == null
                 ? new List<string>()
                 : startupPaths.Where(path => !string.IsNullOrWhiteSpace(path)).ToList();
             var rootElement = Content as FrameworkElement;
-            if (paths.Count > 0 && rootElement != null)
+            if ((paths.Count > 0 || startupErrors.Count > 0) && rootElement != null)
             {
                 RoutedEventHandler onLoaded = null;
                 onLoaded = (s, e) =>
                 {
                     rootElement.Loaded -= onLoaded;
-                    OpenStartupFiles(paths);
+                    OpenStartupFiles(paths, startupErrors);
                 };
                 rootElement.Loaded += onLoaded;
             }
         }
 
-        /// <summary>One report raised while <see cref="OpenFiles"/> ran, and the path it was opening.</summary>
+        /// <summary>One report raised during a batch, and the path it was working on.</summary>
         internal sealed class BatchError
         {
             public string Path { get; set; }
             public ShellErrorEventArgs Report { get; set; }
         }
 
-        /// <summary>Non-null while <see cref="OpenFiles"/> runs; OnReportError collects into it.</summary>
+        /// <summary>Non-null while a batch runs; OnReportError collects into it.</summary>
         List<BatchError> batchErrors;
         string batchPath;
 
-        /// <summary>The reports of the last <see cref="OpenFiles"/> call. OpenRecent reads it, and
-        /// tests do, since the test process cannot show the dialog.</summary>
+        /// <summary>The reports of the last batch. OpenRecent reads it, and tests do, since the
+        /// test process cannot show the dialog.</summary>
         internal IReadOnlyList<BatchError> LastBatchErrors { get; private set; }
+
+        /// <summary>
+        /// Runs <paramref name="perPath"/> for each path, collecting what it reports instead of
+        /// showing it: only one dialog can be up at a time, so a second report would otherwise be
+        /// lost. Open-from-outside Decision 2.
+        /// </summary>
+        List<BatchError> Collect(IEnumerable<string> paths, Action<string> perPath)
+        {
+            var collected = new List<BatchError>();
+            if (paths == null)
+                return collected;
+            batchErrors = collected;
+            try
+            {
+                foreach (var path in paths)
+                {
+                    batchPath = path;
+                    perPath(path);
+                }
+            }
+            finally
+            {
+                batchErrors = null;
+                batchPath = null;
+            }
+            return collected;
+        }
+
+        /// <summary>Shows a batch's reports in one dialog, and keeps them for LastBatchErrors.</summary>
+        void Report(List<BatchError> collected)
+        {
+            LastBatchErrors = collected;
+            if (collected.Count > 0)
+                Fire(() => ShowBatchErrorsAsync(collected));
+        }
 
         /// <summary>
         /// Opens each path in order; the last one opened becomes current, as File > Open does.
@@ -212,24 +252,54 @@ namespace WinUIDesigner.Shell
         {
             if (paths == null)
                 return;
-            var collected = new List<BatchError>();
-            batchErrors = collected;
-            try
-            {
-                foreach (var path in paths)
-                {
-                    batchPath = path;
-                    shell.Open(path);
-                }
-            }
-            finally
-            {
-                batchErrors = null;
-                batchPath = null;
-            }
+            Report(Collect(paths, path => shell.Open(path)));
+        }
+
+        /// <summary>
+        /// Adds each assembly's controls to the toolbox and remembers it for the next start,
+        /// reporting every failure in one dialog. Toolbox-assemblies spec Decisions 2 and 5.
+        /// </summary>
+        internal void AddAssemblies(IEnumerable<string> paths)
+        {
+            if (paths == null)
+                return;
+            Report(Collect(paths, path => shell.AddAssembly(path, true)));
+        }
+
+        /// <summary>
+        /// Loads the assemblies remembered from earlier runs, without remembering them again.
+        /// One that is missing or fails is reported and stays remembered: a library on a
+        /// removable drive or mid-rebuild should not drop out of the list. Returns the reports
+        /// for the caller to show once the window can. Toolbox-assemblies spec Decision 5.
+        /// </summary>
+        internal List<BatchError> LoadRememberedAssemblies(IEnumerable<string> paths)
+        {
+            var collected = Collect(paths, path => shell.AddAssembly(path, false));
             LastBatchErrors = collected;
-            if (collected.Count > 0)
-                Fire(() => ShowBatchErrorsAsync(collected));
+            return collected;
+        }
+
+        /// <summary>
+        /// What a file drop does: assemblies first, so a .xaml dropped with the library it uses
+        /// finds its controls, then the .xaml files, reported together.
+        /// </summary>
+        internal void OpenDropped(IEnumerable<string> paths)
+        {
+            var all = paths == null ? new List<string>() : paths.ToList();
+            var collected = Collect(AssemblyPathsIn(all), path => shell.AddAssembly(path, true));
+            collected.AddRange(Collect(XamlPathsIn(all), path => shell.Open(path)));
+            Report(collected);
+        }
+
+        /// <summary>The .dll files among dropped paths. Toolbox-assemblies spec Decision 6.</summary>
+        internal static IList<string> AssemblyPathsIn(IEnumerable<string> paths)
+        {
+            if (paths == null)
+                return new List<string>();
+            return paths
+                .Where(path => !string.IsNullOrEmpty(path)
+                    && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                .ToList();
         }
 
         /// <summary>
@@ -239,8 +309,19 @@ namespace WinUIDesigner.Shell
         /// </summary>
         internal void OpenStartupFiles(IList<string> paths)
         {
+            OpenStartupFiles(paths, null);
+        }
+
+        /// <summary>
+        /// As above, showing <paramref name="earlier"/> - the startup assembly load's reports -
+        /// in the same dialog as the files'.
+        /// </summary>
+        internal void OpenStartupFiles(IList<string> paths, IEnumerable<BatchError> earlier)
+        {
             var initial = shell.CurrentDocument;
-            OpenFiles(paths);
+            var collected = earlier == null ? new List<BatchError>() : earlier.ToList();
+            collected.AddRange(Collect(paths, path => shell.Open(path)));
+            Report(collected);
             if (initial != null && shell.CurrentDocument != initial && IsUntouched(initial))
                 shell.Close(initial);
         }
@@ -254,8 +335,8 @@ namespace WinUIDesigner.Shell
         }
 
         /// <summary>
-        /// The paths a file drop opens: those ending in .xaml, in any case. A .dll would mean
-        /// "add to the toolbox", which this shell cannot do. Open-from-outside Decision 5.
+        /// The paths a file drop opens: those ending in .xaml, in any case. A dropped .dll goes
+        /// to the toolbox instead (AssemblyPathsIn). Open-from-outside Decision 5.
         /// </summary>
         internal static IList<string> XamlPathsIn(IEnumerable<string> paths)
         {
@@ -286,7 +367,7 @@ namespace WinUIDesigner.Shell
             try
             {
                 var items = await e.DataView.GetStorageItemsAsync();
-                OpenFiles(XamlPathsIn(items.Select(item => item.Path)));
+                OpenDropped(items.Select(item => item.Path));
             }
             catch (Exception ex)
             {
@@ -414,6 +495,7 @@ namespace WinUIDesigner.Shell
             file.Items.Add(Item("Open...", VirtualKey.O, VirtualKeyModifiers.Control, (s, e) => Fire(OpenAsync)));
             openRecentItem = new MenuFlyoutSubItem { Text = "Open Recent" };
             file.Items.Add(openRecentItem);
+            file.Items.Add(Item("Add Controls Assembly...", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(AddAssemblyAsync)));
             RebuildRecentMenu();
             shell.RecentFiles.Changed += (s, e) => RebuildRecentMenu();
             closeItem = Item("Close", VirtualKey.None, VirtualKeyModifiers.None,
@@ -1190,6 +1272,19 @@ namespace WinUIDesigner.Shell
             return Task.CompletedTask;
         }
 
+        async Task AddAssemblyAsync()
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeFilter.Add(".dll");
+
+            var file = await picker.PickSingleFileAsync();
+            if (file == null)
+                return;
+
+            AddAssemblies(new[] { file.Path });
+        }
+
         async Task OpenAsync()
         {
             var picker = new Windows.Storage.Pickers.FileOpenPicker();
@@ -1398,7 +1493,7 @@ namespace WinUIDesigner.Shell
                     text.AppendLine(System.IO.Path.GetFileName(report.Path) + ":");
                 AppendReport(text, report.Report);
             }
-            return ShowErrorTextAsync(reports.Count == 1 ? "Error" : "Some files could not be opened", text.ToString());
+            return ShowErrorTextAsync(reports.Count == 1 ? "Error" : "Errors", text.ToString());
         }
 
         Task ShowErrorAsync(ShellErrorEventArgs e)

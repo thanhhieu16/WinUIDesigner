@@ -33,7 +33,7 @@ namespace WinUIDesigner.Shell
     public sealed class ToolboxView : UserControl
     {
         readonly ListView list = new ListView();
-        readonly List<ControlNode> nodes;
+        List<ControlNode> nodes;
         IToolService toolService;
         string filter = string.Empty;
         bool suppressSelectionChanged;
@@ -47,9 +47,8 @@ namespace WinUIDesigner.Shell
             // DisplayMemberPath of "Name" against a RuntimeType instance never resolves, so
             // every row rendered as an empty band. ControlNode (Task 2) is public and has a
             // public Name, so the same DisplayMemberPath now works. Fix per code review.
-            nodes = Toolbox.Instance.AssemblyNodes
-                .SelectMany(n => n.Controls)
-                .ToList();
+            nodes = AllControls();
+            ListenForAddedAssemblies(this);
 
             list.SelectionMode = ListViewSelectionMode.Single;
             list.ItemsSource = nodes;
@@ -132,24 +131,60 @@ namespace WinUIDesigner.Shell
                 if (text == filter)
                     return;
                 filter = text;
+                ApplyFilter();
+            }
+        }
 
-                var selected = list.SelectedItem as ControlNode;
-                var visible = filter.Length == 0
-                    ? nodes
-                    : nodes.Where(n => n.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+        static List<ControlNode> AllControls()
+        {
+            return Toolbox.Instance.AssemblyNodes
+                .SelectMany(n => n.Controls)
+                .ToList();
+        }
 
-                // Replacing ItemsSource clears the selection, which must not reach Arm.
-                suppressSelectionChanged = true;
-                try
+        /// <summary>
+        /// Rebuilds the list when an assembly is added to the toolbox, which outlives every view.
+        /// The handler holds the view weakly, so the process-wide toolbox does not keep every
+        /// window's view alive; a collected view's handler removes itself on the next change.
+        /// Toolbox-assemblies spec Decision 4.
+        /// </summary>
+        static void ListenForAddedAssemblies(ToolboxView view)
+        {
+            var weak = new WeakReference<ToolboxView>(view);
+            var assemblies = Toolbox.Instance.AssemblyNodes;
+            System.Collections.Specialized.NotifyCollectionChangedEventHandler handler = null;
+            handler = (s, e) =>
+            {
+                ToolboxView target;
+                if (!weak.TryGetTarget(out target))
                 {
-                    list.ItemsSource = visible;
-                    if (selected != null && visible.Contains(selected))
-                        list.SelectedItem = selected;
+                    assemblies.CollectionChanged -= handler;
+                    return;
                 }
-                finally
-                {
-                    suppressSelectionChanged = false;
-                }
+                target.nodes = AllControls();
+                target.ApplyFilter();
+            };
+            assemblies.CollectionChanged += handler;
+        }
+
+        void ApplyFilter()
+        {
+            var selected = list.SelectedItem as ControlNode;
+            var visible = filter.Length == 0
+                ? nodes
+                : nodes.Where(n => n.Name.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+
+            // Replacing ItemsSource clears the selection, which must not reach Arm.
+            suppressSelectionChanged = true;
+            try
+            {
+                list.ItemsSource = visible;
+                if (selected != null && visible.Contains(selected))
+                    list.SelectedItem = selected;
+            }
+            finally
+            {
+                suppressSelectionChanged = false;
             }
         }
 
