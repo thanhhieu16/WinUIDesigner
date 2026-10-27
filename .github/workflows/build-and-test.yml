@@ -46,6 +46,21 @@ jobs:
             exit 1
           }
 
+      # TEMPORARY: which library-resources test leaves the Shell host to die later.
+      - name: Bisect the Shell host crash
+        if: always()
+        shell: pwsh
+        run: |
+          $exe = "tests/WinUIDesigner.Shell.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.Shell.Tests.exe"
+          $runs = @(
+            @('without the malformed test', '--where=test != WinUIDesigner.Shell.Tests.LibraryResourcesTests.AMalformedThemeIsReportedAndMergesNothing'),
+            @('without the parse test', '--where=test != WinUIDesigner.Shell.Tests.LibraryResourcesTests.ALibrarysThemeIsParsedAndMergedIntoTheApplication')
+          )
+          foreach ($run in $runs) {
+            & $exe $run[1] --noresult --labels=Before | Select-Object -Last 12 | ForEach-Object { Write-Host $_ }
+            Write-Host "BISECT $($run[0]): exit $LASTEXITCODE"
+          }
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
