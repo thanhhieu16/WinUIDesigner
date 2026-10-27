@@ -68,3 +68,13 @@ Shell suite (`ShellMetadataTests`):
 - A TextBlock's Foreground, FontSize and Text are popular.
 
 Walkthrough: step 02 already places a Button by click, so its screenshot shows the label.
+
+## Results
+
+- CI is green on `windows-latest`, with all four suites run from their `.exe`s. `ShellMetadataTests`
+  has 3 new tests.
+- Walkthrough, on the real app:
+  - **Step 02:** the click-placed Button reads "Button".
+  - **Step 06:** both placed Buttons do too.
+  - **Popular category:** the selected Button's now lists BorderBrush, BorderThickness, Content,
+    CornerRadius, FontFamily, FontSize and FontWeight.
