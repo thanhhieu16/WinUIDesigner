@@ -35,3 +35,11 @@ XamlDom suite (`ElementSerializationTests`):
   type.
 
 The walkthrough's saved `walk.xaml` will show `samplecontrols`.
+
+## Results
+
+- CI is green on `windows-latest`, with all four suites run from their `.exe`s, including the two
+  new `ElementSerializationTests`.
+- The walkthrough's saved `walk.xaml`, on the real app, now reads
+  `xmlns:samplecontrols="using:WinUIDesigner.SampleControls"`, with
+  `<samplecontrols:SampleBadge .../>` and `<samplecontrols:SampleCard .../>`.

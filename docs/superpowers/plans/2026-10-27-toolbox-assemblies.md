@@ -105,4 +105,4 @@ Three walkthrough-only problems were fixed on the way, none of them in the produ
 - The menu item needed the documented second click.
 - The workflow first copied WebView2's native `.dll`s along with the library.
 - The prefix XamlDom picks for the new namespace is `Controls0`. It is valid XAML, but a
-  hand-written file would say `local` or `controls`. That is cosmetic and left as is.
+  hand-written file would say `local` or `controls`. That was cosmetic and left as is here; `2026-10-27-namespace-prefix-design.md` since writes `samplecontrols`.
