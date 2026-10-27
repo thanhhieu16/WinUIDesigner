@@ -27,13 +27,13 @@ jobs:
         run: dotnet build WinUIDesigner.sln
 
       # The sample control library, where File > Add Controls Assembly... finds it: Documents is
-      # the picker's start folder. Top-level files only, so no subfolder pushes the .dll down
-      # the picker's list.
+      # the picker's start folder. Only the library's own files: the build output also holds
+      # WebView2's native .dlls, which sort first in the picker and are (rightly) refused.
       - name: Put the sample controls in Documents
         shell: pwsh
         run: |
           $docs = [Environment]::GetFolderPath('MyDocuments')
-          Get-ChildItem -File samples/WinUIDesigner.SampleControls/bin/Debug/net10.0-windows10.0.19041.0/win-x64 | Copy-Item -Destination $docs
+          Get-ChildItem -File samples/WinUIDesigner.SampleControls/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.SampleControls.* | Copy-Item -Destination $docs
           Get-ChildItem $docs | Select-Object Name
 
       - name: Walk
