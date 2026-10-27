@@ -26,6 +26,15 @@ jobs:
       - name: Build
         run: dotnet build WinUIDesigner.sln
 
+      # TEMPORARY: what the XAML compiler generated for App's metadata provider.
+      - name: Show the generated XAML metadata provider
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse src/WinUIDesigner.Shell.App/obj -Include *.g.cs,*.g.i.cs | ForEach-Object {
+            Write-Host "== $($_.Name)"
+            Select-String -Path $_.FullName -Pattern 'Provider|partial class App' | ForEach-Object { Write-Host $_.Line.Trim() }
+          }
+
       # The sample control library, where File > Add Controls Assembly... finds it: Documents is
       # the picker's start folder. Only the library's own files: the build output also holds
       # WebView2's native .dlls, which sort first in the picker and are (rightly) refused. The

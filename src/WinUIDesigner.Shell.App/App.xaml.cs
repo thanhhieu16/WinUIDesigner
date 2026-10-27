@@ -28,12 +28,25 @@ namespace WinUIDesigner.Shell
 
         /// <summary>
         /// Registers a library's metadata provider with the one the XAML compiler generated for
-        /// this app, through the partial method that generated code declares for it.
-        /// Library-resources spec Decision 2.
+        /// this app. Library-resources spec Decision 2.
         /// </summary>
+        /// <remarks>
+        /// Through reflection, because the generated code offers no public way in. The compiler's
+        /// C# template does define a partial <c>_AddOtherProvider</c> for this, but measured on
+        /// the runner, this project's generated App has no such member (CS0103). What the template
+        /// does give the App is a private <c>_AppProvider</c> whose provider type has an
+        /// <c>AddOtherProvider</c> method, which is what is looked up here. If a future SDK
+        /// renames either, this throws and the add dialog says so.
+        /// </remarks>
         public void AddProvider(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
         {
-            _AddOtherProvider(provider);
+            const System.Reflection.BindingFlags Any =
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            var appProvider = GetType().GetProperty("_AppProvider", Any)?.GetValue(this);
+            var add = appProvider?.GetType().GetMethod("AddOtherProvider", Any);
+            if (add == null)
+                throw new InvalidOperationException("This build's generated XAML metadata provider has no AddOtherProvider.");
+            add.Invoke(appProvider, new object[] { provider });
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
