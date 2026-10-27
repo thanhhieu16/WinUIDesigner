@@ -28,12 +28,18 @@ jobs:
 
       # The sample control library, where File > Add Controls Assembly... finds it: Documents is
       # the picker's start folder. Only the library's own files: the build output also holds
-      # WebView2's native .dlls, which sort first in the picker and are (rightly) refused.
+      # WebView2's native .dlls, which sort first in the picker and are (rightly) refused. The
+      # library-layout folder named after the library holds its processed XAML
+      # (Themes/Generic.xaml), which the shell loads for the library's templated controls.
       - name: Put the sample controls in Documents
         shell: pwsh
         run: |
           $docs = [Environment]::GetFolderPath('MyDocuments')
-          Get-ChildItem -File samples/WinUIDesigner.SampleControls/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.SampleControls.* | Copy-Item -Destination $docs
+          $out = 'samples/WinUIDesigner.SampleControls/bin/Debug/net10.0-windows10.0.19041.0/win-x64'
+          Get-ChildItem -Recurse $out | Where-Object { $_.Name -notlike 'Microsoft.*' } | ForEach-Object { Write-Host $_.FullName.Substring((Resolve-Path $out).Path.Length) }
+          Get-ChildItem -File "$out/WinUIDesigner.SampleControls.*" | Copy-Item -Destination $docs
+          if (Test-Path "$out/WinUIDesigner.SampleControls") { Copy-Item -Recurse "$out/WinUIDesigner.SampleControls" $docs }
+          Get-ChildItem $docs | Select-Object Name
           Get-ChildItem $docs | Select-Object Name
 
       - name: Walk

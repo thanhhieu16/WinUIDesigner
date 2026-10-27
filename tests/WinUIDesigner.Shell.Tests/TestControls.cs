@@ -43,4 +43,19 @@ namespace WinUIDesigner.Shell.Tests
             throw new InvalidOperationException("ThrowingControl cannot be created.");
         }
     }
+
+    /// <summary>
+    /// A templated control with no template of its own, like a library control whose look is in
+    /// its Themes/Generic.xaml. Library-resources spec, Verification.
+    /// </summary>
+    /// <remarks>
+    /// No DefaultStyleKey, unlike a real library control: set to its own type, the framework
+    /// looks for ms-appx:///WinUIDesigner.Shell.Tests/Themes/Generic.xaml when the control goes
+    /// live, and this test process has no resources.pri to resolve it - the Shell suite's host
+    /// died with 0xC000027B. The mechanism under test is the merged implicit style, which applies
+    /// by TargetType either way; the real app's SampleCard covers the DefaultStyleKey case.
+    /// </remarks>
+    public class TestCard : Control
+    {
+    }
 }

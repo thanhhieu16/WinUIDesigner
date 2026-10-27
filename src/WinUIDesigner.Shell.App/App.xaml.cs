@@ -15,7 +15,7 @@ namespace WinUIDesigner.Shell
     /// control whose default template references a theme brush fail-fasts the process with
     /// 0xC0000409 during the first layout pass. See the Phase 5 spec.
     /// </remarks>
-    public partial class App : Application
+    public partial class App : Application, IXamlMetadataProviderHost
     {
         Window window;
         bool dialogOpen;
@@ -24,6 +24,42 @@ namespace WinUIDesigner.Shell
         {
             InitializeComponent();
             UnhandledException += OnUnhandledException;
+        }
+
+        /// <summary>
+        /// Registers a library's metadata provider with the one the XAML compiler generated for
+        /// this app. Library-resources spec Decision 2.
+        /// </summary>
+        /// <remarks>
+        /// Through reflection, because the generated code offers no way in. Measured on the
+        /// runner (the generated XamlTypeInfo.g.cs, printed by a temporary workflow step): App has
+        /// no <c>_AddOtherProvider</c> (CS0103) and its provider no <c>AddOtherProvider</c>, though
+        /// the compiler carries templates with both. What it does generate is
+        /// <c>App._AppProvider</c> (a XamlMetaDataProvider), its private <c>Provider</c> (the
+        /// XamlTypeInfoProvider), and that one's private <c>OtherProviders</c>: the list every
+        /// failed type lookup falls through to, created lazily with WinUI's own controls provider
+        /// in it. Adding to that list is what registering means. If a future SDK renames any of
+        /// the three, this throws and the add dialog says so.
+        /// </remarks>
+        public void AddProvider(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
+        {
+            var appProvider = Member(this, "_AppProvider");
+            var typeInfoProvider = Member(appProvider, "Provider");
+            var others = Member(typeInfoProvider, "OtherProviders") as System.Collections.Generic.IList<Microsoft.UI.Xaml.Markup.IXamlMetadataProvider>;
+            if (others == null)
+                throw new InvalidOperationException("This build's generated XAML metadata provider has no OtherProviders list.");
+            if (!others.Contains(provider))
+                others.Add(provider);
+        }
+
+        static object Member(object owner, string property)
+        {
+            const System.Reflection.BindingFlags Any =
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            var info = owner?.GetType().GetProperty(property, Any);
+            if (info == null)
+                throw new InvalidOperationException("This build's generated XAML metadata provider has no " + property + ".");
+            return info.GetValue(owner);
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
