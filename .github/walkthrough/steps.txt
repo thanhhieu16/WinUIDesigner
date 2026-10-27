@@ -177,8 +177,8 @@ screen 22a-open-recent-after-relaunch
 key escape
 key escape
 # A control library added at runtime: File > Add Controls Assembly..., then the sample library's
-# .dll, which the workflow copied into Documents (the picker lists the "Visual Studio 18" folder
-# first and the .dll second, as the Open picker lists walk.xaml).
+# .dll, which the workflow copied into Documents. The picker lists folders first - "Visual Studio
+# 18", then the library's own layout folder - so the .dll is the third row.
 click 24 21
 wait 800
 # A MenuFlyoutItem can take the first click as hover only (CLAUDE.md), and this one did.
@@ -187,7 +187,7 @@ wait 300
 click 70 152
 wait 2500
 screen 23-add-assembly-dialog
-dblclick 260 188
+dblclick 260 216
 wait 3000
 screen 24-assembly-added
 # The search box finds the library's controls: SampleBadge first, then SampleCard.

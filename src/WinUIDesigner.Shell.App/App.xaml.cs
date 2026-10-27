@@ -15,7 +15,7 @@ namespace WinUIDesigner.Shell
     /// control whose default template references a theme brush fail-fasts the process with
     /// 0xC0000409 during the first layout pass. See the Phase 5 spec.
     /// </remarks>
-    public partial class App : Application
+    public partial class App : Application, IXamlMetadataProviderHost
     {
         Window window;
         bool dialogOpen;
@@ -24,6 +24,16 @@ namespace WinUIDesigner.Shell
         {
             InitializeComponent();
             UnhandledException += OnUnhandledException;
+        }
+
+        /// <summary>
+        /// Registers a library's metadata provider with the one the XAML compiler generated for
+        /// this app, through the partial method that generated code declares for it.
+        /// Library-resources spec Decision 2.
+        /// </summary>
+        public void AddProvider(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
+        {
+            _AddOtherProvider(provider);
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs args)
