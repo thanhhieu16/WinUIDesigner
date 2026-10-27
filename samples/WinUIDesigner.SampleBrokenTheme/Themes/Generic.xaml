@@ -1,0 +1,21 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:WinUIDesigner.SampleBrokenTheme">
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="ms-appx:///WinUIDesigner.SampleBrokenTheme/Themes/Colors.xaml" />
+    </ResourceDictionary.MergedDictionaries>
+
+    <Style TargetType="local:SampleBrokenCard">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="local:SampleBrokenCard">
+                    <Border Background="{StaticResource BrokenCardBrush}" Padding="12">
+                        <TextBlock Text="Broken card" />
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+</ResourceDictionary>
