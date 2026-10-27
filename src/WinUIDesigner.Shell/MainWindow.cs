@@ -155,6 +155,8 @@ namespace WinUIDesigner.Shell
             toolboxFilter.TextChanged += (s, e) => toolboxView.Filter = toolboxFilter.Text;
 
             AppWindow.Closing += OnAppWindowClosing;
+            RestorePlacement();
+            AppWindow.Changed += OnAppWindowChanged;
 
             // Paste's enabled state follows the clipboard, which other applications change while
             // this window is in the background; coming back to the foreground is when it can have
@@ -1361,10 +1363,93 @@ namespace WinUIDesigner.Shell
             shell.SaveAs(doc, file.Path);
         }
 
+        /// <summary>The bounds the window has when it is neither maximized nor minimized, kept up
+        /// to date as it moves, so a window closed while maximized still restores to them.</summary>
+        WindowBounds restoredBounds;
+
+        /// <summary>
+        /// Puts the window back where it was when it last closed, if that is still on a display.
+        /// Window-placement spec Decision 2.
+        /// </summary>
+        void RestorePlacement()
+        {
+            try
+            {
+                var saved = ShellSettings.Load(ShellSettings.DefaultPath).Window;
+                // By index: enumerating DisplayArea.FindAll()'s projected list has been reported
+                // to fail under CsWinRT, and indexing it does not.
+                var displays = Microsoft.UI.Windowing.DisplayArea.FindAll();
+                var areas = new List<Windows.Graphics.RectInt32>();
+                for (int i = 0; i < displays.Count; i++)
+                    areas.Add(displays[i].WorkArea);
+
+                var rect = WindowPlacement.Fit(saved, areas);
+                if (rect != null)
+                {
+                    AppWindow.MoveAndResize(rect.Value);
+                    if (saved.Maximized)
+                        (AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter)?.Maximize();
+                }
+            }
+            catch (Exception ex)
+            {
+                // A window that cannot be placed opens where the system puts it.
+                System.Diagnostics.Debug.WriteLine("[MainWindow] could not restore placement: " + ex.Message);
+            }
+            restoredBounds = CurrentBounds();
+        }
+
+        void OnAppWindowChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
+        {
+            if ((args.DidPositionChange || args.DidSizeChange) && IsRestored())
+                restoredBounds = CurrentBounds();
+        }
+
+        bool IsRestored()
+        {
+            var presenter = AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+            return presenter == null || presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Restored;
+        }
+
+        WindowBounds CurrentBounds()
+        {
+            return new WindowBounds
+            {
+                X = AppWindow.Position.X,
+                Y = AppWindow.Position.Y,
+                Width = AppWindow.Size.Width,
+                Height = AppWindow.Size.Height
+            };
+        }
+
+        /// <summary>
+        /// Records the restored bounds and whether the window is maximized. Called as the close
+        /// goes through, while AppWindow can still be read. Window-placement spec Decision 1.
+        /// </summary>
+        void SavePlacement()
+        {
+            try
+            {
+                var bounds = IsRestored() ? CurrentBounds() : restoredBounds;
+                if (bounds == null)
+                    return;
+                var presenter = AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+                bounds.Maximized = presenter != null && presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Maximized;
+                ShellSettings.Update(ShellSettings.DefaultPath, settings => settings.Window = bounds);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("[MainWindow] could not save placement: " + ex.Message);
+            }
+        }
+
         void OnAppWindowClosing(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
         {
             if (closingConfirmed || !shell.IsSomethingDirty)
+            {
+                SavePlacement();
                 return;
+            }
 
             // AppWindowClosingEventArgs.Cancel is synchronous; ContentDialog.ShowAsync is not.
             // So cancel this close, ask, and close again once the answer is in. Phase 5 Decision 20.
