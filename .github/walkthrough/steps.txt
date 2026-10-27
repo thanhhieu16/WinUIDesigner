@@ -109,6 +109,11 @@ shot 12f-pasted-back
 key ctrl+s
 wait 2500
 screen 13-save-dialog
+# Click the File name box first: once, the picker showed that box focused yet the typed keys
+# never reached it, and nothing was saved. A click makes the picker the foreground window.
+# (372,336) is the box at screen (380,367) less the client origin (8,31).
+click 372 336
+key ctrl+a
 type walk
 key enter
 wait 2000
@@ -127,6 +132,16 @@ screen 16-open-dialog
 dblclick 260 188
 wait 2500
 shot 17-opened
+# File > Open Recent lists walk.xaml, saved and then opened above.
+click 24 21
+wait 800
+screen 17a-file-menu
+click 70 119
+wait 1000
+screen 17b-open-recent
+key escape
+key escape
+wait 500
 # Error strip, last because it moves the mode bar up ~40px: break the XAML, switch to Design,
 # and the strip lists the error.
 click 342 711
@@ -153,3 +168,11 @@ shot 21-drag-undone
 launch {docs}\walk.xaml
 wait 2000
 shot 22-launched-with-file
+# The list survived the relaunch: it is read back from the settings file.
+click 24 21
+wait 800
+click 70 119
+wait 1000
+screen 22a-open-recent-after-relaunch
+key escape
+key escape

@@ -602,7 +602,7 @@ namespace WinUIDesigner.Shell.Tests
                     Assert.That(shell.Documents.Count, Is.EqualTo(before + 2));
                     Assert.That(window.TabStripForTest.TabItems.Count, Is.EqualTo(before + 2));
                     Assert.That(shell.CurrentDocument.FilePath, Is.EqualTo(second));
-                    Assert.That(window.BatchErrorsForTest, Is.Empty);
+                    Assert.That(window.LastBatchErrors, Is.Empty);
                 }
                 finally
                 {
@@ -631,7 +631,7 @@ namespace WinUIDesigner.Shell.Tests
 
                     Assert.That(shell.Documents.Count, Is.EqualTo(before + 1));
                     Assert.That(shell.CurrentDocument.FilePath, Is.EqualTo(good));
-                    Assert.That(window.BatchErrorsForTest.Select(error => error.Path),
+                    Assert.That(window.LastBatchErrors.Select(error => error.Path),
                         Is.EqualTo(new[] { missingA, missingB }));
                 }
                 finally
@@ -706,7 +706,7 @@ namespace WinUIDesigner.Shell.Tests
 
                 Assert.That(shell.Documents.Count, Is.EqualTo(1));
                 Assert.That(shell.CurrentDocument, Is.SameAs(blank), "the window is never left empty");
-                Assert.That(window.BatchErrorsForTest, Has.Count.EqualTo(1));
+                Assert.That(window.LastBatchErrors, Has.Count.EqualTo(1));
             });
         }
 
@@ -720,6 +720,112 @@ namespace WinUIDesigner.Shell.Tests
             });
 
             Assert.That(paths, Is.EqualTo(new[] { @"C:\a\One.xaml", @"C:\a\Two.XAML" }));
+        }
+    
+
+        static string[] RecentMenuTexts(MainWindow window)
+        {
+            return window.OpenRecentItemForTest.Items
+                .OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>()
+                .Select(item => item.Text)
+                .ToArray();
+        }
+
+        [Test]
+        public void OpenRecentListsOpenedFilesMostRecentFirst()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var first = WriteTempXaml("recent-first");
+                var second = WriteTempXaml("recent-second");
+                try
+                {
+                    var window = NewWindow();
+                    window.ShellForTest.RecentFiles.Clear();
+                    Assert.That(RecentMenuTexts(window), Is.EqualTo(new[] { "(none)" }));
+
+                    window.OpenFiles(new[] { first, second });
+
+                    Assert.That(RecentMenuTexts(window), Is.EqualTo(new[] { second, first, "Clear Recent Files" }));
+                }
+                finally
+                {
+                    DeleteAll(first, second);
+                }
+            });
+        }
+
+        [Test]
+        public void ARecentEntryWhoseFileIsGoneIsRemovedWhenChosen()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var kept = WriteTempXaml("recent-kept");
+                var gone = WriteTempXaml("recent-gone");
+                try
+                {
+                    var window = NewWindow();
+                    var recent = window.ShellForTest.RecentFiles;
+                    recent.Clear();
+                    window.OpenFiles(new[] { kept, gone });
+                    var goneDoc = window.ShellForTest.CurrentDocument;
+                    window.ShellForTest.Close(goneDoc);
+                    System.IO.File.Delete(gone);
+
+                    window.OpenRecent(gone);
+
+                    Assert.That(window.LastBatchErrors, Has.Count.EqualTo(1));
+                    Assert.That(recent.Items, Is.EqualTo(new[] { kept }));
+                }
+                finally
+                {
+                    DeleteAll(kept, gone);
+                }
+            });
+        }
+
+        [Test]
+        public void ARecentEntryThatFailsToLoadButExistsStaysListed()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+                    "wd-recent-broken-" + Guid.NewGuid().ToString("N") + ".xaml");
+                try
+                {
+                    var window = NewWindow();
+                    var recent = window.ShellForTest.RecentFiles;
+                    recent.Clear();
+                    recent.Add(path);
+                    System.IO.File.WriteAllText(path, "<Canvas><Button></Canvas>");
+
+                    window.OpenRecent(path);
+
+                    Assert.That(window.LastBatchErrors, Has.Count.EqualTo(1));
+                    Assert.That(recent.Items, Is.EqualTo(new[] { path }), "the user may fix it and try again");
+                }
+                finally
+                {
+                    DeleteAll(path);
+                }
+            });
+        }
+
+        [Test]
+        public void ClearRecentFilesLeavesTheNoneItem()
+        {
+            WinUITestHost.Run(() =>
+            {
+                var window = NewWindow();
+                var recent = window.ShellForTest.RecentFiles;
+                recent.Add(@"C:\a\One.xaml");
+                Assert.That(RecentMenuTexts(window), Does.Contain("Clear Recent Files"));
+
+                recent.Clear();
+
+                Assert.That(RecentMenuTexts(window), Is.EqualTo(new[] { "(none)" }));
+                Assert.That(window.OpenRecentItemForTest.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Single().IsEnabled, Is.False);
+            });
         }
     }
 }
