@@ -84,8 +84,9 @@ Two findings from the test host, both bisected on the runner with temporary work
    - `LibraryResources` now checks a theme is well-formed XML with `XmlReader` before
      `XamlReader` sees it, so the likeliest broken theme never reaches WinUI's parser.
    - A theme that is well-formed but semantically wrong still goes to `XamlReader`. Examples are
-     a type the provider cannot name and `Source="ms-appx:///..."`. Whether the real app, which
-     handles `Application.UnhandledException`, survives that stowed error is **not verified**.
+     a type the provider cannot name and `Source="ms-appx:///..."`. Whether the real app survives
+     that stowed error was not verified here. It was measured afterwards: it does
+     (`2026-10-27-broken-theme-measurement.md`).
 2. **Rendering a templated test control in the shared window is not possible here.** It needs
    resources the test process does not have. So the in-process test asserts the merged
    dictionary's `Style` and its `TargetType`. That `TargetType` is the library's type resolved

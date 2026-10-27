@@ -32,4 +32,24 @@ If the app dies, the next step fails with its exit code, which `error.txt` recor
 
 ## Results
 
-(pending)
+**The real app survives.** Walkthrough steps 29–33, run on `057737e`:
+- **Step 30:** the add reports "WinUIDesigner.SampleBrokenTheme's styles could not be loaded, so
+  its templated controls will not show: ... Cannot locate resource from
+  'ms-appx:///WinUIDesigner.SampleBrokenTheme/Themes/Colors.xaml'. [Line: 7 Position: 29]".
+  `XamlReader.Load` threw, and `LibraryResources` caught it.
+- **Steps 31–32:** the toolbox lists `SampleBrokenCard`, and it places. It renders nothing, as a
+  templated control without its theme does, and appears in the outline.
+- **Step 33:** an undo removes it. Five seconds later the app is still running, and the
+  walkthrough ends without an `error.txt`.
+
+So the stowed error a failed `XamlReader.Load` leaves behind ends the **test host**, measured in
+the library-resources plan, but not this app. The difference is not root-caused. The likely
+reason is the one this plan named: `App` handles `Application.UnhandledException`, and the test
+host's `TestApplication` installs no handler. No unhandled-exception dialog appeared, so if the
+error reached that handler, it was handled without a message.
+
+The well-formed-XML check in `LibraryResources` stays. It is still what keeps the test suite
+alive, and it costs nothing.
+
+The first run of this measurement was void: the picker had opened in Downloads, so the `.dll` was
+never chosen. The step now picks Documents in the picker's navigation pane first.
