@@ -132,11 +132,20 @@ namespace WinUIDesigner.XamlDom
 		{
 			AssemblyNamespaceMapping mapping = new AssemblyNamespaceMapping(assembly, @namespace);
 			string xmlNamespace;
-			if (!getClrNamespace && reverseDict.TryGetValue(mapping, out xmlNamespace)) {
+			if (getClrNamespace)
+				return ClrNamespaceFor(mapping);
+			if (reverseDict.TryGetValue(mapping, out xmlNamespace))
 				return xmlNamespace;
-			} else {
-				return "clr-namespace:" + mapping.Namespace + ";assembly=" + mapping.Assembly.GetName().Name;
-			}
+			// WinUI's own spelling for a type no XML namespace maps: what a WinUI XAML file
+			// written by hand would say, and the only CLR-namespace form WinUI's XamlReader
+			// accepts (clr-namespace: fails there as "unknown namespace"). Toolbox-assemblies
+			// spec Decision 3.
+			return UsingPrefix + mapping.Namespace;
+		}
+
+		static string ClrNamespaceFor(AssemblyNamespaceMapping mapping)
+		{
+			return "clr-namespace:" + mapping.Namespace + ";assembly=" + mapping.Assembly.GetName().Name;
 		}
 
 		/// <summary>
@@ -148,8 +157,11 @@ namespace WinUIDesigner.XamlDom
 			List<string> xmlNamespaces;
 			if (!getClrNamespace && reverseDictList.TryGetValue(mapping, out xmlNamespaces)) {
 				return xmlNamespaces;
+			} else if (getClrNamespace) {
+				return new List<string>() { ClrNamespaceFor(mapping) };
 			} else {
-				return new List<string>() { "clr-namespace:" + mapping.Namespace + ";assembly=" + mapping.Assembly.GetName().Name };
+				// Both spellings, so a property element matches whichever one the document uses.
+				return new List<string>() { UsingPrefix + mapping.Namespace, ClrNamespaceFor(mapping) };
 			}
 		}
 

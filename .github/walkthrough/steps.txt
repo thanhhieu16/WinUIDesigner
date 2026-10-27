@@ -176,3 +176,41 @@ wait 1000
 screen 22a-open-recent-after-relaunch
 key escape
 key escape
+# A control library added at runtime: File > Add Controls Assembly..., then the sample library's
+# .dll, which the workflow copied into Documents (the picker lists the "Visual Studio 18" folder
+# first and the .dll second, as the Open picker lists walk.xaml).
+click 24 21
+wait 800
+# A MenuFlyoutItem can take the first click as hover only (CLAUDE.md), and this one did.
+click 70 152
+wait 300
+click 70 152
+wait 2500
+screen 23-add-assembly-dialog
+dblclick 260 188
+wait 3000
+screen 24-assembly-added
+# The search box finds the library's controls: SampleBadge first, then SampleCard.
+click 100 60
+key ctrl+a
+type sample
+wait 800
+shot 25-toolbox-sample
+# SampleBadge is built in code and should look like itself. SampleCard's look is in its
+# library's Generic.xaml, which an unpackaged app has no resources.pri entry for: what it shows
+# is the measurement (toolbox-assemblies spec Decision 7).
+click 37 101
+click 420 300
+wait 1500
+shot 26-badge-placed
+click 37 141
+click 420 420
+wait 1500
+shot 27-card-placed
+# Save, and start again with the file: the library is loaded from the settings before the file
+# opens, so both controls come back.
+key ctrl+s
+wait 1500
+launch {docs}\walk.xaml
+wait 3000
+shot 28-relaunched-with-library

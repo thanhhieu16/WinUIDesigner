@@ -61,6 +61,27 @@ namespace WinUIDesigner.XamlDom.Tests
             return (Microsoft.UI.Xaml.Controls.Grid)reparsed.RootInstance;
         }
 
+        /// <summary>
+        /// A control from an assembly no XML namespace maps is written with WinUI's own
+        /// <c>using:</c> spelling, which reloads; the WPF <c>clr-namespace:</c> spelling it used to
+        /// get is one WinUI's XamlReader rejects. Toolbox-assemblies spec Decision 3.
+        /// </summary>
+        [Test]
+        public void AControlFromAnUnmappedAssemblyIsWrittenAsAUsingNamespaceAndReloads()
+        {
+            WinUITestHost.Run(() => {
+                var document = ParseDocument("<Border xmlns='" + PresentationNs + "'/>");
+                SetThroughTheDocument(document, "Child", new ExampleControl());
+                var saved = SaveToString(document);
+
+                Assert.That(saved, Does.Contain("\"using:WinUIDesigner.XamlDom.Tests\""), saved);
+                Assert.That(saved, Does.Not.Contain("clr-namespace:"), saved);
+
+                var reparsed = (Microsoft.UI.Xaml.Controls.Border)ParseDocument(saved).RootInstance;
+                Assert.That(reparsed.Child, Is.InstanceOf<ExampleControl>(), saved);
+            });
+        }
+
         [Test]
         public void ASkewTransformKeepsBothAnglesAcrossASaveAndReload()
         {

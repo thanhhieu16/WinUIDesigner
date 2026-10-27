@@ -83,9 +83,7 @@ namespace WinUIDesigner.Shell
         /// </summary>
         void Commit()
         {
-            var settings = ShellSettings.Load(storePath);
-            settings.RecentFiles = new List<string>(items);
-            settings.Save(storePath);
+            ShellSettings.Update(storePath, settings => settings.RecentFiles = new List<string>(items));
             var handler = Changed;
             if (handler != null)
                 handler(this, EventArgs.Empty);

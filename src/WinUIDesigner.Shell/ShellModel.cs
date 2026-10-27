@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using WinUIDesigner.DesignModel.Xaml;
 
 namespace WinUIDesigner.Shell
@@ -63,9 +64,110 @@ namespace WinUIDesigner.Shell
         /// <paramref name="recentFiles"/>. Null keeps no list. Recent-files spec Decision 3.
         /// </summary>
         public ShellModel(RecentFileList recentFiles)
+            : this(recentFiles, null)
+        {
+        }
+
+        /// <summary>
+        /// A model that also remembers the assemblies it adds to the toolbox in the settings file
+        /// at <paramref name="settingsPath"/>. Null remembers nothing. Toolbox-assemblies spec
+        /// Decision 5.
+        /// </summary>
+        public ShellModel(RecentFileList recentFiles, string settingsPath)
         {
             this.recentFiles = recentFiles;
+            this.settingsPath = settingsPath;
             Documents = new ObservableCollection<Document>();
+        }
+
+        readonly string settingsPath;
+
+        /// <summary>How many skipped control names a report lists before summarizing the rest.</summary>
+        const int SkippedListed = 10;
+
+        /// <summary>
+        /// Loads the assembly at <paramref name="path"/> and adds its controls to the toolbox.
+        /// Reports, rather than throws, a file that is not a loadable assembly, one with no
+        /// controls, one already in the toolbox, and the controls that could not be created.
+        /// <paramref name="remember"/> records the path for the next start; the startup load
+        /// itself passes false, and is quiet about an assembly that is already present.
+        /// Returns whether the assembly's controls are in the toolbox. Toolbox-assemblies spec
+        /// Decisions 1, 2 and 5.
+        /// </summary>
+        public bool AddAssembly(string path, bool remember)
+        {
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch (Exception ex)
+            {
+                RaiseError(ex.Message, null);
+                return false;
+            }
+
+            string error;
+            var assembly = Toolbox.LoadAssembly(fullPath, out error);
+            if (assembly == null)
+            {
+                RaiseError("Could not add " + Path.GetFileName(fullPath) + " to the toolbox: " + error, null);
+                return false;
+            }
+
+            AddAssemblyResult result;
+            try
+            {
+                result = Toolbox.Instance.AddAssembly(assembly);
+            }
+            catch (Exception ex)
+            {
+                // GetExportedTypes and the activation probes run the library's own code.
+                RaiseError("Could not add " + Path.GetFileName(fullPath) + " to the toolbox: " + ex.Message, null);
+                return false;
+            }
+
+            var name = assembly.GetName().Name;
+            if (result.AlreadyPresent)
+            {
+                if (remember)
+                    RaiseError(name + " is already in the toolbox.", null);
+            }
+            else if (result.Added == null)
+            {
+                RaiseError(name + " contains no controls that can be placed." + SkippedText(result), null);
+                return false;
+            }
+            else if (result.Skipped.Count > 0)
+            {
+                RaiseError(name + " was added to the toolbox." + SkippedText(result), null);
+            }
+
+            if (remember && settingsPath != null)
+            {
+                ShellSettings.Update(settingsPath, settings =>
+                {
+                    if (!settings.ToolboxAssemblies.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+                        settings.ToolboxAssemblies.Add(fullPath);
+                });
+            }
+            return true;
+        }
+
+        static string SkippedText(AddAssemblyResult result)
+        {
+            if (result.Skipped.Count == 0)
+                return string.Empty;
+            var text = new System.Text.StringBuilder();
+            text.AppendLine();
+            text.AppendLine(result.Skipped.Count == 1
+                ? "This control could not be created and was left out:"
+                : "These controls could not be created and were left out:");
+            foreach (var skipped in result.Skipped.Take(SkippedListed))
+                text.AppendLine(skipped);
+            if (result.Skipped.Count > SkippedListed)
+                text.AppendLine("... and " + (result.Skipped.Count - SkippedListed) + " more.");
+            return text.ToString().TrimEnd();
         }
 
         /// <summary>The list this model records into, or null.</summary>
