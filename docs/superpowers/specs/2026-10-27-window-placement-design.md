@@ -49,3 +49,13 @@ pane layout" (out of scope there). Pane layout stays out of scope.
 - Per-display DPI conversion. Bounds are stored and restored in the physical pixels `AppWindow`
   uses, so a window moved to a display with different scaling while closed comes back at the same
   pixel size.
+
+## Results
+
+- CI is green on `windows-latest`, with all four suites run from their `.exe`s. There are 6 new
+  `WindowPlacementTests`.
+- Walkthrough, on the real app (steps 36–37):
+  - The window moved to (120, 90, 900 × 640) measured `120 90 900 640` before closing.
+  - It closed on `WM_CLOSE`.
+  - After a relaunch the walkthrough did not place, it measured `120 90 900 640` again, and the
+    whole-screen screenshot shows it there.
