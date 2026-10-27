@@ -227,6 +227,12 @@ wait 300
 click 70 152
 wait 2500
 screen 29-add-broken-assembly-dialog
+# The picker does not always start in Documents (one run opened it in Downloads), so pick
+# Documents in its navigation pane first: (93,298) is the entry at screen (101,329) less the
+# client origin (8,31).
+click 93 298
+wait 1500
+screen 29a-picker-in-documents
 dblclick 260 244
 wait 3000
 screen 30-broken-theme-reported
