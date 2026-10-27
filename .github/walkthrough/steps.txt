@@ -178,7 +178,8 @@ key escape
 key escape
 # A control library added at runtime: File > Add Controls Assembly..., then the sample library's
 # .dll, which the workflow copied into Documents. The picker lists folders first - "Visual Studio
-# 18", then the library's own layout folder - so the .dll is the third row.
+# 18", then the two sample libraries' layout folders - and then SampleBrokenTheme.dll, so
+# SampleControls.dll is the fifth row.
 click 24 21
 wait 800
 # A MenuFlyoutItem can take the first click as hover only (CLAUDE.md), and this one did.
@@ -187,7 +188,7 @@ wait 300
 click 70 152
 wait 2500
 screen 23-add-assembly-dialog
-dblclick 260 216
+dblclick 260 272
 wait 3000
 screen 24-assembly-added
 # The search box finds the library's controls: SampleBadge first, then SampleCard.
@@ -214,3 +215,39 @@ wait 1500
 launch {docs}\walk.xaml
 wait 3000
 shot 28-relaunched-with-library
+# A library whose theme is well-formed XML but merges a dictionary from ms-appx:///, which a
+# library added at runtime cannot resolve, so XamlReader.Load fails on it. The add should report
+# that and keep the app alive; a failed XamlReader.Load was measured leaving a stowed error that
+# killed the test host later. SampleBrokenTheme.dll is the fourth row. If the app dies, the next
+# step fails with its exit code (error.txt).
+click 24 21
+wait 800
+click 70 152
+wait 300
+click 70 152
+wait 2500
+screen 29-add-broken-assembly-dialog
+# The picker does not always start in Documents (one run opened it in Downloads), so pick
+# Documents in its navigation pane first: (93,298) is the entry at screen (101,329) less the
+# client origin (8,31).
+click 93 298
+wait 1500
+screen 29a-picker-in-documents
+dblclick 260 244
+wait 3000
+screen 30-broken-theme-reported
+key escape
+wait 1000
+# Keep using the app for a while, so a deferred failure has the chance to surface.
+click 100 60
+key ctrl+a
+type broken
+wait 1500
+shot 31-broken-control-listed
+click 37 101
+click 420 560
+wait 3000
+shot 32-broken-control-placed
+key ctrl+z
+wait 5000
+shot 33-still-running

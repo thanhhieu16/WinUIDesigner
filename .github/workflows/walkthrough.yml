@@ -35,11 +35,11 @@ jobs:
         shell: pwsh
         run: |
           $docs = [Environment]::GetFolderPath('MyDocuments')
-          $out = 'samples/WinUIDesigner.SampleControls/bin/Debug/net10.0-windows10.0.19041.0/win-x64'
-          Get-ChildItem -Recurse $out | Where-Object { $_.Name -notlike 'Microsoft.*' } | ForEach-Object { Write-Host $_.FullName.Substring((Resolve-Path $out).Path.Length) }
-          Get-ChildItem -File "$out/WinUIDesigner.SampleControls.*" | Copy-Item -Destination $docs
-          if (Test-Path "$out/WinUIDesigner.SampleControls") { Copy-Item -Recurse "$out/WinUIDesigner.SampleControls" $docs }
-          Get-ChildItem $docs | Select-Object Name
+          foreach ($name in 'WinUIDesigner.SampleControls', 'WinUIDesigner.SampleBrokenTheme') {
+            $out = "samples/$name/bin/Debug/net10.0-windows10.0.19041.0/win-x64"
+            Get-ChildItem -File "$out/$name.*" | Copy-Item -Destination $docs
+            if (Test-Path "$out/$name") { Copy-Item -Recurse "$out/$name" $docs }
+          }
           Get-ChildItem $docs | Select-Object Name
 
       - name: Walk
