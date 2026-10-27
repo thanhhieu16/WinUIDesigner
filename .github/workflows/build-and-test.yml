@@ -33,7 +33,9 @@ jobs:
           foreach ($name in 'XamlDom', 'DesignModel', 'Designer', 'Shell') {
             $exe = "tests/WinUIDesigner.$name.Tests/bin/Debug/net10.0-windows10.0.19041.0/win-x64/WinUIDesigner.$name.Tests.exe"
             Write-Host "::group::WinUIDesigner.$name.Tests"
-            & $exe "--result=TestResults/WinUIDesigner.$name.Tests.xml"
+            # --labels=Before names each test as it starts, so a host that dies (a fail-fast
+            # leaves no result file) shows which test it died in.
+            & $exe "--result=TestResults/WinUIDesigner.$name.Tests.xml" --labels=Before
             $code = $LASTEXITCODE
             Write-Host "::endgroup::"
             Write-Host "WinUIDesigner.$name.Tests exited with $code"
