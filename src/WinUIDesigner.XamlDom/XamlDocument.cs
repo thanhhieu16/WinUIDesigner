@@ -423,6 +423,45 @@ namespace WinUIDesigner.XamlDom
 			return GetPrefixForNamespace(_xmlDoc.DocumentElement, @namespace);
 		}
 
+		/// <summary>
+		/// A prefix a person would write for a CLR namespace mapping: the namespace's last
+		/// segment in lower case - "using:WinUIDesigner.SampleControls" gets "samplecontrols",
+		/// "using:CommunityToolkit.WinUI.Controls" gets "controls" - with a number appended when
+		/// that is taken by another namespace. Null for any other XML namespace, which keeps the
+		/// reference's "Controls" + counter. Namespace-prefix spec Decision 1.
+		/// </summary>
+		static string ReadablePrefixFor(XmlElement xmlElement, string @namespace)
+		{
+			string clrNamespace = null;
+			if (@namespace.StartsWith(XamlTypeFinder.UsingPrefix, StringComparison.Ordinal))
+				clrNamespace = @namespace.Substring(XamlTypeFinder.UsingPrefix.Length);
+			else if (@namespace.StartsWith("clr-namespace:", StringComparison.Ordinal))
+				clrNamespace = @namespace.Substring("clr-namespace:".Length).Split(';')[0];
+			if (String.IsNullOrWhiteSpace(clrNamespace))
+				return null;
+
+			string lastSegment = clrNamespace.Trim().Split('.').Last();
+			var letters = new System.Text.StringBuilder();
+			foreach (char c in lastSegment.ToLowerInvariant())
+			{
+				if (c < 128 && Char.IsLetterOrDigit(c))
+					letters.Append(c);
+			}
+			// An XML name may not start with a digit, and "xml..." prefixes are reserved.
+			if (letters.Length == 0 || Char.IsDigit(letters[0]) || letters.ToString().StartsWith("xml", StringComparison.Ordinal))
+				return null;
+
+			string stem = letters.ToString();
+			string candidate = stem;
+			for (int n = 2; ; n++)
+			{
+				string taken = xmlElement.GetNamespaceOfPrefix(candidate);
+				if (String.IsNullOrEmpty(taken) || taken == @namespace)
+					return candidate;
+				candidate = stem + n;
+			}
+		}
+
 		internal string GetPrefixForNamespace(XmlElement xmlElement, string @namespace)
 		{
 			//if (@namespace == XamlConstants.PresentationNamespace)
@@ -450,6 +489,11 @@ namespace WinUIDesigner.XamlDom
 				if (String.IsNullOrEmpty(prefix) ||
 				    !String.IsNullOrEmpty(existingNamespaceForPrefix) &&
 				    existingNamespaceForPrefix != @namespace)
+				{
+					prefix = ReadablePrefixFor(xmlElement, @namespace);
+				}
+
+				if (String.IsNullOrEmpty(prefix))
 				{
 					do
 					{
