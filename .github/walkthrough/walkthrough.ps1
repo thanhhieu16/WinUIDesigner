@@ -156,6 +156,19 @@ foreach ($raw in Get-Content $Steps) {
             [Native]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60
             [Native]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 400
         }
+        'ctrlwheel' {
+            # ctrlwheel x y notches: Ctrl held, the wheel turned at (x,y), 120 a notch (negative is
+            # towards the user). The data argument is a uint, so a negative delta goes as its
+            # two's complement, through the bytes: in PowerShell 0xFFFFFFFF is the int32 -1, so
+            # masking with it changed nothing (measured: "Cannot convert -240 to UInt32").
+            $s = To-Screen $n[0] $n[1]
+            [Native]::SetCursorPos($s[0], $s[1]) | Out-Null; Start-Sleep -Milliseconds 100
+            [Native]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 50
+            [Native]::mouse_event(0x0800, 0, 0, [BitConverter]::ToUInt32([BitConverter]::GetBytes([int32]($n[2] * 120)), 0), [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 100
+            [Native]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 400
+        }
         'dblclick' {
             $s = To-Screen $n[0] $n[1]
             [Native]::SetCursorPos($s[0], $s[1]) | Out-Null; Start-Sleep -Milliseconds 100

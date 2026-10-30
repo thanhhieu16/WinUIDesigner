@@ -1,4 +1,5 @@
 using System;
+using Windows.Foundation;
 using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -54,8 +55,14 @@ namespace WinUIDesigner.Shell
             {
                 Content = surfaceHost,
                 HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                // Ctrl+wheel and pinch zoom come with ZoomMode; the zoom bar below drives the
+                // same factor. Zoom spec Decision 1.
+                ZoomMode = ZoomMode.Enabled,
+                MinZoomFactor = (float)ZoomLevels[0],
+                MaxZoomFactor = (float)ZoomLevels[ZoomLevels.Length - 1]
             };
+            surfaceScroll.ViewChanged += (s, e) => UpdateZoomLabel();
 
             editor = new TextBox
             {
@@ -74,9 +81,17 @@ namespace WinUIDesigner.Shell
             designButton = new RadioButton { GroupName = group, Content = "Design", Margin = new Thickness(4, 2, 4, 2) };
             xamlButton = new RadioButton { GroupName = group, Content = "XAML", Margin = new Thickness(4, 2, 4, 2) };
 
-            var modeBar = new StackPanel { Orientation = Orientation.Horizontal };
-            modeBar.Children.Add(designButton);
-            modeBar.Children.Add(xamlButton);
+            var modes = new StackPanel { Orientation = Orientation.Horizontal };
+            modes.Children.Add(designButton);
+            modes.Children.Add(xamlButton);
+
+            zoomBar = BuildZoomBar();
+            var modeBar = new Grid();
+            modeBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            modeBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(zoomBar, 1);
+            modeBar.Children.Add(modes);
+            modeBar.Children.Add(zoomBar);
 
             var body = new Grid();
             body.Children.Add(surfaceScroll);
@@ -408,9 +423,86 @@ namespace WinUIDesigner.Shell
             context.Services.Selection.SetSelectedComponents(new[] { item });
         }
 
+        /// <summary>The zoom bar's steps, and the range Ctrl+wheel is held to.</summary>
+        internal static readonly double[] ZoomLevels = { 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4 };
+
+        readonly StackPanel zoomBar;
+        TextBlock zoomLabel;
+
+        StackPanel BuildZoomBar()
+        {
+            var bar = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            zoomLabel = new TextBlock { Text = "100%", Width = 48, TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            bar.Children.Add(ZoomButton("\u2212", (s, e) => ZoomTo(NextZoom(surfaceScroll.ZoomFactor, false))));
+            bar.Children.Add(zoomLabel);
+            bar.Children.Add(ZoomButton("+", (s, e) => ZoomTo(NextZoom(surfaceScroll.ZoomFactor, true))));
+            bar.Children.Add(ZoomButton("100%", (s, e) => ZoomTo(1)));
+            bar.Children.Add(ZoomButton("Fit", (s, e) => ZoomToFit()));
+            return bar;
+        }
+
+        static Button ZoomButton(string text, RoutedEventHandler onClick)
+        {
+            var button = new Button { Content = text, MinWidth = 40, Margin = new Thickness(2, 2, 2, 2), Padding = new Thickness(8, 2, 8, 2) };
+            button.Click += onClick;
+            return button;
+        }
+
+        /// <summary>The next step up or down from <paramref name="current"/>. A factor between
+        /// steps (from Ctrl+wheel) goes to the nearest step in that direction.</summary>
+        internal static double NextZoom(double current, bool up)
+        {
+            const double epsilon = 0.005;
+            if (up)
+            {
+                foreach (var level in ZoomLevels)
+                    if (level > current + epsilon)
+                        return level;
+                return ZoomLevels[ZoomLevels.Length - 1];
+            }
+            for (int i = ZoomLevels.Length - 1; i >= 0; i--)
+                if (ZoomLevels[i] < current - epsilon)
+                    return ZoomLevels[i];
+            return ZoomLevels[0];
+        }
+
+        /// <summary>The factor that shows all of <paramref name="content"/> in
+        /// <paramref name="viewport"/>, held to the zoom range; 1 when either has no size.</summary>
+        internal static double FitZoom(Size viewport, Size content)
+        {
+            if (viewport.Width <= 0 || viewport.Height <= 0 || content.Width <= 0 || content.Height <= 0)
+                return 1;
+            double fit = Math.Min(viewport.Width / content.Width, viewport.Height / content.Height);
+            return Math.Max(ZoomLevels[0], Math.Min(ZoomLevels[ZoomLevels.Length - 1], fit));
+        }
+
+        /// <summary>Sets the surface's zoom. Applied on a later layout pass, like any ChangeView.</summary>
+        internal void ZoomTo(double factor)
+        {
+            surfaceScroll.ChangeView(null, null, (float)factor, true);
+        }
+
+        internal void ZoomToFit()
+        {
+            ZoomTo(FitZoom(new Size(surfaceScroll.ViewportWidth, surfaceScroll.ViewportHeight),
+                new Size(surfaceHost.ActualWidth, surfaceHost.ActualHeight)));
+        }
+
+        void UpdateZoomLabel()
+        {
+            zoomLabel.Text = Math.Round(surfaceScroll.ZoomFactor * 100) + "%";
+        }
+
+        /// <summary>Test seam: the zoom bar's percentage.</summary>
+        internal string ZoomLabelForTest
+        {
+            get { return zoomLabel.Text; }
+        }
+
         void ApplyMode()
         {
             surfaceScroll.Visibility = document.InDesignMode ? Visibility.Visible : Visibility.Collapsed;
+            zoomBar.Visibility = surfaceScroll.Visibility;
             editor.Visibility = document.InXamlMode ? Visibility.Visible : Visibility.Collapsed;
 
             // Pushing Mode back into IsChecked raises Checked, which would re-enter the Mode
