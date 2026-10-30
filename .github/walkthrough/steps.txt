@@ -269,6 +269,23 @@ wait 500
 click 213 711
 wait 3000
 shot 35-segmented
+# File > Export as Image... saves the design as Documents\walk-export.png, which the workflow
+# publishes beside the screenshots (export-image spec). The item sits below Save All: menu rows
+# are 33px apart and a separator adds 3px, so it is at client y 356.
+click 24 21
+wait 800
+click 70 356
+wait 300
+screen 35a-export-menu
+click 70 356
+wait 2500
+screen 35b-export-dialog
+click 372 336
+key ctrl+a
+type walk-export
+key enter
+wait 2500
+shot 35c-exported
 # Window placement: a fresh app is moved and resized, closed normally (WM_CLOSE, not killed, so it
 # saves its bounds), and started again without the walkthrough placing it. It should come back
 # at the same rectangle (window-placement spec).

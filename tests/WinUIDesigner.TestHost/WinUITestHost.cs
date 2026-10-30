@@ -153,6 +153,68 @@ namespace WinUIDesigner.TestHost
 		}
 
 		/// <summary>
+		/// Like <see cref="Run"/>, for a body that awaits WinRT async operations (such as
+		/// <c>RenderTargetBitmap.RenderAsync</c>). The body starts on the dispatcher thread, its
+		/// continuations are posted back to that thread's queue, and the caller blocks until the
+		/// returned task completes. Blocking inside <see cref="Run"/> instead would deadlock, since
+		/// the continuation needs the very thread the body would be holding.
+		/// </summary>
+		public static void RunAsync(Func<System.Threading.Tasks.Task> body)
+		{
+			EnsureStarted();
+
+			if (queue == null) {
+				NUnit.Framework.Assert.Ignore(
+					"No WinUI application thread: this host cannot activate Microsoft.UI.Xaml classes, so the " +
+					"test was skipped rather than failed. Underlying error: " + (startupFailure?.Message ?? "unknown"));
+			}
+
+			ExceptionDispatchInfo captured = null;
+			var done = new ManualResetEventSlim();
+			async void Start() {
+				try {
+					await body();
+				} catch (Exception ex) {
+					captured = ExceptionDispatchInfo.Capture(ex);
+				} finally {
+					done.Set();
+				}
+			}
+			if (!queue.TryEnqueue(() => {
+				// Set here, in a synchronous callback, so it stays the thread's context. Set inside
+				// the async method instead, the method builder restores the previous (null) context
+				// when the body first yields, and DispatcherQueueSynchronizationContext.Post does not
+				// reinstate itself, so every await after the first resumed on the thread pool
+				// (measured: RPC_E_WRONG_THREAD from a Dispose after two awaits).
+				if (!(System.Threading.SynchronizationContext.Current is Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext))
+					System.Threading.SynchronizationContext.SetSynchronizationContext(
+						new Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext(queue));
+				Start();
+			})) {
+				throw new InvalidOperationException("Could not enqueue work onto the WinUI dispatcher thread.");
+			}
+
+			if (!done.Wait(TimeSpan.FromMinutes(2)))
+				throw new TimeoutException("Test body did not complete on the WinUI dispatcher thread.");
+
+			captured?.Throw();
+		}
+
+		/// <summary>
+		/// <see cref="RunAsync"/> with the shared live window, whose <c>Content</c> is reset to null
+		/// afterwards, as <see cref="RunWithWindow"/> does.
+		/// </summary>
+		public static void RunWithWindowAsync(Func<Microsoft.UI.Xaml.Window, System.Threading.Tasks.Task> body)
+		{
+			var window = EnsureWindow();
+			try {
+				RunAsync(() => body(window));
+			} finally {
+				Run(() => window.Content = null);
+			}
+		}
+
+		/// <summary>
 		/// Runs <paramref name="action"/> on the WinUI dispatcher thread with a real, activated
 		/// <see cref="Microsoft.UI.Xaml.Window"/> whose XAML island is already live - needed for
 		/// any test that depends on a real layout pass (ActualWidth/ActualHeight,

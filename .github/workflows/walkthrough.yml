@@ -87,6 +87,8 @@ jobs:
         run: |
           $saved = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'walk.xaml'
           if (Test-Path $saved) { Get-Content $saved; Copy-Item $saved walkthrough-shots/ } else { Write-Host 'no saved file' }
+          $exported = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'walk-export.png'
+          if (Test-Path $exported) { Get-Item $exported | Format-List Name, Length; Copy-Item $exported walkthrough-shots/35d-exported-file.png } else { Write-Host 'no exported image' }
 
       - name: Upload screenshots
         if: always()

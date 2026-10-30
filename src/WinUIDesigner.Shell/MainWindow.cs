@@ -512,6 +512,8 @@ namespace WinUIDesigner.Shell
             saveAllItem = Item("Save All", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(() => SaveAllAsync(SaveAsync)));
             file.Items.Add(saveAllItem);
             file.Items.Add(new MenuFlyoutSeparator());
+            file.Items.Add(Item("Export as Image...", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Fire(ExportImageAsync)));
+            file.Items.Add(new MenuFlyoutSeparator());
             file.Items.Add(Item("Exit", VirtualKey.None, VirtualKeyModifiers.None, (s, e) => Close()));
 
             undoItem = Item("Undo", VirtualKey.Z, VirtualKeyModifiers.Control, (s, e) => WithUndo(u => u.Undo()));
@@ -1285,6 +1287,44 @@ namespace WinUIDesigner.Shell
                 return;
 
             AddAssemblies(new[] { file.Path });
+        }
+
+        /// <summary>
+        /// File > Export as Image...: saves the current document's design as a PNG. Export-image
+        /// spec Decision 1.
+        /// </summary>
+        async Task ExportImageAsync()
+        {
+            var doc = shell.CurrentDocument;
+            var problem = DesignImageExport.Problem(doc);
+            if (problem != null)
+            {
+                await ShowErrorTextAsync("Export as Image", problem);
+                return;
+            }
+
+            var picker = new Windows.Storage.Pickers.FileSavePicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeChoices.Add("PNG image", new List<string> { ".png" });
+            picker.SuggestedFileName = System.IO.Path.GetFileNameWithoutExtension(doc.Name);
+
+            var file = await picker.PickSaveFileAsync();
+            if (file == null)
+                return;
+
+            var error = await DesignImageExport.ExportAsync(doc, file.Path);
+            if (error != null)
+            {
+                // The picker may have created the file empty; an export that failed leaves no file.
+                try
+                {
+                    var info = new System.IO.FileInfo(file.Path);
+                    if (info.Exists && info.Length == 0)
+                        info.Delete();
+                }
+                catch (Exception) { }
+                await ShowErrorTextAsync("Export as Image", error);
+            }
         }
 
         async Task OpenAsync()
