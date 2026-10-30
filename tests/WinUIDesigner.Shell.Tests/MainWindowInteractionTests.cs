@@ -295,7 +295,7 @@ namespace WinUIDesigner.Shell.Tests
 
                 var file = menuBar.Items.OfType<MenuBarItem>().First();
                 CollectionAssert.AreEqual(
-                    new[] { "New", "Open...", "Add Controls Assembly...", "Close", "Close All", "Save", "Save As...", "Save All", "Exit" },
+                    new[] { "New", "Open...", "Add Controls Assembly...", "Close", "Close All", "Save", "Save As...", "Save All", "Export as Image...", "Exit" },
                     file.Items.OfType<MenuFlyoutItem>().Select(i => i.Text).ToList());
 
                 var edit = menuBar.Items.OfType<MenuBarItem>().Last();
