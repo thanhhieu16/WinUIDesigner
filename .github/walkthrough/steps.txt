@@ -28,6 +28,19 @@ click 37 621
 click 330 420
 wait 1500
 shot 02-click-placed
+# Arrow keys move the selected Button (the press on the surface gave it focus): Shift+Right
+# twice is 20px, Down is 1px. Each press is one undo entry, so three Ctrl+Z put it back
+# before the next step's Ctrl+Z removes it (keyboard-move spec).
+key shift+right
+key shift+right
+key down
+wait 800
+shot 02a-arrow-moved
+key ctrl+z
+key ctrl+z
+key ctrl+z
+wait 800
+shot 02b-arrow-undone
 # One Ctrl+Z removes it.
 key ctrl+z
 wait 1000

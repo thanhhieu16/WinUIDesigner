@@ -27,6 +27,9 @@ namespace WinUIDesigner.Designer.Services
 			// HandlePointerPressed is DesignPanel's own existing (unchanged, already-tested)
 			// click-to-select logic.
 			var designPanel = (DesignPanel)sender;
+			// The arrow keys move the selection only while the panel has focus (keyboard-move
+			// spec), so a press on the surface takes it, as CreateComponentTool's does.
+			designPanel.Focus(Microsoft.UI.Xaml.FocusState.Pointer);
 			var point = e.GetCurrentPoint(designPanel).Position;
 			designPanel.HandlePointerPressed(point, e.KeyModifiers);
 		}
