@@ -33,6 +33,9 @@ namespace WinUIDesigner.Designer
 			// refuses the drag.
 			AllowDrop = true;
 			Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+			KeyDown += OnPanelKeyDown;
+			KeyUp += OnPanelKeyUp;
+			LostFocus += OnPanelLostFocus;
 		}
 
 		public UIElement Content {
@@ -322,6 +325,54 @@ namespace WinUIDesigner.Designer
 				selectionType = SelectionTypes.Primary;
 
 			Context.Services.Selection.SetSelectedComponents(new DesignItem[] { result.ModelHit }, selectionType);
+		}
+
+		readonly KeyboardMove keyboardMove = new KeyboardMove();
+
+		// Panel is not a Control, so it has no OnKeyDown/OnKeyUp to override: events instead.
+		void OnPanelKeyDown(object sender, KeyRoutedEventArgs e)
+		{
+			bool shift = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+				& Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down;
+			if (HandleArrowKeyDown(e.Key, shift))
+				e.Handled = true;
+		}
+
+		void OnPanelKeyUp(object sender, KeyRoutedEventArgs e)
+		{
+			if (IsArrow(e.Key) && keyboardMove.IsActive) {
+				HandleArrowKeyUp();
+				e.Handled = true;
+			}
+		}
+
+		void OnPanelLostFocus(object sender, RoutedEventArgs e)
+		{
+			// A KeyUp that goes to another element must not leave the operation open.
+			keyboardMove.Commit();
+		}
+
+		/// <summary>The arrow-key move: 1px a press, 10px with Shift. Returns false for any other
+		/// key, or when nothing selected can move. A test seam, since a test cannot raise a real
+		/// KeyDown. Keyboard-move spec.</summary>
+		internal bool HandleArrowKeyDown(VirtualKey key, bool shift)
+		{
+			if (!IsArrow(key) || Context == null) return false;
+			double step = shift ? 10 : 1;
+			double dx = key == VirtualKey.Left ? -step : key == VirtualKey.Right ? step : 0;
+			double dy = key == VirtualKey.Up ? -step : key == VirtualKey.Down ? step : 0;
+			return keyboardMove.Nudge(Context.Services.Selection.SelectedItems, dx, dy);
+		}
+
+		/// <summary>Ends the press: the move becomes one undo entry.</summary>
+		internal void HandleArrowKeyUp()
+		{
+			keyboardMove.Commit();
+		}
+
+		static bool IsArrow(VirtualKey key)
+		{
+			return key == VirtualKey.Left || key == VirtualKey.Right || key == VirtualKey.Up || key == VirtualKey.Down;
 		}
 
 		public void SetCursor(Microsoft.UI.Input.InputCursor cursor)

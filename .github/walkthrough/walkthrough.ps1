@@ -119,14 +119,16 @@ function To-Screen([int]$x, [int]$y) {
     return @(($origin.X + $x), ($origin.Y + $y))
 }
 
-$keys = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; escape = 0x1B; enter = 0x0D; delete = 0x2E; tab = 0x09; f5 = 0x74; home = 0x24; end = 0x23 }
+$keys = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; escape = 0x1B; enter = 0x0D; delete = 0x2E; tab = 0x09; f5 = 0x74; home = 0x24; end = 0x23; left = 0x25; up = 0x26; right = 0x27; down = 0x28 }
+# The arrows are extended keys: without KEYEVENTF_EXTENDEDKEY (1) they are the keypad's.
+$extended = @(0x25, 0x26, 0x27, 0x28)
 function Press-Key([string]$combo) {
     $codes = foreach ($part in $combo.ToLower().Split('+')) {
         if ($keys.ContainsKey($part)) { $keys[$part] } else { [Native]::VkKeyScan($part[0]) -band 0xFF }
     }
-    foreach ($c in $codes) { [Native]::keybd_event([byte]$c, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
+    foreach ($c in $codes) { $x = if ($extended -contains $c) { 1 } else { 0 }; [Native]::keybd_event([byte]$c, 0, $x, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
     [array]::Reverse($codes)
-    foreach ($c in $codes) { [Native]::keybd_event([byte]$c, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
+    foreach ($c in $codes) { $x = if ($extended -contains $c) { 1 } else { 0 }; [Native]::keybd_event([byte]$c, 0, 2 -bor $x, [UIntPtr]::Zero); Start-Sleep -Milliseconds 30 }
 }
 
 try {
