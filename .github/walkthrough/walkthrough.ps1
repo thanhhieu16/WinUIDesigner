@@ -156,6 +156,18 @@ foreach ($raw in Get-Content $Steps) {
             [Native]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60
             [Native]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 400
         }
+        'ctrlwheel' {
+            # ctrlwheel x y notches: Ctrl held, the wheel turned at (x,y), 120 a notch (negative is
+            # towards the user). The data argument is a uint, so a negative delta goes as its
+            # two's complement.
+            $s = To-Screen $n[0] $n[1]
+            [Native]::SetCursorPos($s[0], $s[1]) | Out-Null; Start-Sleep -Milliseconds 100
+            [Native]::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 50
+            [Native]::mouse_event(0x0800, 0, 0, [uint32]([int64]$n[2] * 120 -band 0xFFFFFFFF), [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 100
+            [Native]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 400
+        }
         'dblclick' {
             $s = To-Screen $n[0] $n[1]
             [Native]::SetCursorPos($s[0], $s[1]) | Out-Null; Start-Sleep -Milliseconds 100

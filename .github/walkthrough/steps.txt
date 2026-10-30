@@ -14,6 +14,24 @@ shot 01c-thumbnail-scrolled
 click 765 568
 wait 1000
 shot 01d-thumbnail-back
+# Zoom (zoom spec): the bar at the right of the mode bar holds minus, the percentage, plus,
+# 100% and Fit. Plus twice is 150%; Fit shows the whole 640x480 canvas; Ctrl+wheel zooms too;
+# 100% puts it back for the steps that follow. Positions are estimates checked on the shots.
+screen 01e-zoom-bar
+click 592 711
+wait 600
+click 592 711
+wait 1000
+shot 01f-zoomed-in
+click 702 711
+wait 1000
+shot 01g-fit
+ctrlwheel 460 400 -2
+wait 1000
+shot 01h-ctrl-wheel
+click 646 711
+wait 1000
+shot 01i-back-to-100
 # The toolbox search box narrows the list; clearing it brings every entry back.
 click 100 60
 type button
