@@ -16,9 +16,9 @@ The toolbox and the surface lose no room.
 
 **2. It draws the root element, like Export as Image.** `ThumbnailView` renders
 `DesignContext.RootItem.View` with `RenderTargetBitmap`, so adorners are not in it. The picture is
-scaled to fit the pane, never enlarged, and centred. A root with no size of its own is drawn at
-its content's bounds (export-image plan Results), so the picture's own size stands in for the
-root's.
+scaled to fit the pane, never enlarged, and centred. It shares `DesignImageExport.RenderWholeAsync`, so
+a root with no `Background` is drawn whole. A white page with a grey outline sits under the picture,
+so an empty design still shows where it is.
 
 **3. It is redrawn when the design changes, 300ms after changes settle.** The triggers are:
 - `Document.DesignChanged`, a new event raised on every undo stack change (an edit, an undo, a

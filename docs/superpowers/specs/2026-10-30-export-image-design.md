@@ -15,8 +15,9 @@ a mock-up, a bug report or documentation.
 selection frames, resize thumbs and snaplines are in `DesignPanel`'s adorner layer, a sibling of
 the root rather than a descendant, so they are not in the picture. The surface's scroll position
 does not matter either: the element is drawn whole.
-A root with no size of its own (a `Canvas` without `Width`/`Height`) is drawn at the bounds of
-what it contains, measured on the runner (plan Results).
+`RenderTargetBitmap` draws only what is painted, so a root with a null `Background` is given a
+`Transparent` one on the live object for the render, then cleared. The XAML is serialized from
+the model and never sees it (plan Results).
 
 **2. The PNG is at the display's scale and keeps transparency.** The bitmap's pixel size is the
 element's size times `XamlRoot.RasterizationScale`, and the file records the matching DPI

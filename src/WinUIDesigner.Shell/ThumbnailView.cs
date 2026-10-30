@@ -23,6 +23,15 @@ namespace WinUIDesigner.Shell
         static readonly TimeSpan RenderDelay = TimeSpan.FromMilliseconds(300);
 
         readonly Image image = new Image { Stretch = Stretch.Fill };
+        // The page under the picture, so a design with nothing painted on it still shows where
+        // it is.
+        readonly Rectangle page = new Rectangle
+        {
+            Fill = new SolidColorBrush(Colors.White),
+            Stroke = new SolidColorBrush(Colors.Gray),
+            StrokeThickness = 1,
+            IsHitTestVisible = false
+        };
         readonly Canvas overlay = new Canvas();
         readonly Rectangle frame = new Rectangle
         {
@@ -48,10 +57,12 @@ namespace WinUIDesigner.Shell
             Background = new SolidColorBrush(Colors.Transparent);
             image.HorizontalAlignment = HorizontalAlignment.Left;
             image.VerticalAlignment = VerticalAlignment.Top;
+            overlay.Children.Add(page);
             overlay.Children.Add(image);
             overlay.Children.Add(frame);
             Children.Add(overlay);
             frame.Visibility = Visibility.Collapsed;
+            page.Visibility = Visibility.Collapsed;
 
             timer = DispatcherQueue.GetForCurrentThread().CreateTimer();
             timer.Interval = RenderDelay;
@@ -174,8 +185,7 @@ namespace WinUIDesigner.Shell
                 return;
             }
 
-            var bitmap = new RenderTargetBitmap();
-            await bitmap.RenderAsync(root);
+            var bitmap = await DesignImageExport.RenderWholeAsync(root);
             // The view may have changed while the bitmap was drawn.
             if (!ReferenceEquals(root, RootView()))
                 return;
@@ -185,8 +195,8 @@ namespace WinUIDesigner.Shell
                 return;
             }
 
-            // A root with no size of its own is drawn at its content's bounds (export-image plan
-            // Results), so the picture's own size is the fallback.
+            // A root with no size of its own is drawn at its content's bounds, so the picture's
+            // own size is the fallback.
             double scale = root.XamlRoot != null ? root.XamlRoot.RasterizationScale : 1.0;
             var fe = root as FrameworkElement;
             contentSize = fe != null && fe.ActualWidth > 0 && fe.ActualHeight > 0
@@ -202,6 +212,7 @@ namespace WinUIDesigner.Shell
             contentSize = new Size(0, 0);
             imageRect = Rect.Empty;
             frame.Visibility = Visibility.Collapsed;
+            page.Visibility = Visibility.Collapsed;
         }
 
         UIElement RootView()
@@ -220,8 +231,14 @@ namespace WinUIDesigner.Shell
             if (imageRect.IsEmpty)
             {
                 frame.Visibility = Visibility.Collapsed;
+                page.Visibility = Visibility.Collapsed;
                 return;
             }
+            Canvas.SetLeft(page, imageRect.X);
+            Canvas.SetTop(page, imageRect.Y);
+            page.Width = imageRect.Width;
+            page.Height = imageRect.Height;
+            page.Visibility = Visibility.Visible;
             Canvas.SetLeft(image, imageRect.X);
             Canvas.SetTop(image, imageRect.Y);
             image.Width = imageRect.Width;

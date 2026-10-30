@@ -15,7 +15,7 @@ namespace WinUIDesigner.Shell.Tests
     {
         const string BigCanvas =
             "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" " +
-            "Width=\"800\" Height=\"600\" Background=\"Red\" />";
+            "Width=\"800\" Height=\"600\" />";
 
         [Test]
         public void ImageRect_FitsAndCentresTheContent()
@@ -67,6 +67,8 @@ namespace WinUIDesigner.Shell.Tests
         }
 
         [Test]
+        /// <remarks>The canvas has no Background and nothing in it, like a new document: the
+        /// case the runner showed drawing nothing before RenderWholeAsync.</remarks>
         public void ADesignIsDrawnFramedAndAPressScrollsTheSurface()
         {
             WinUITestHost.RunWithWindowAsync(async window =>

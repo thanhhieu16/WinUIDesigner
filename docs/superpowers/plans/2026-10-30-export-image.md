@@ -36,12 +36,12 @@ Record the results here, and close the gap in the shell spec if it lists one.
   click, which already opened it). Saving as `walk-export` wrote a 965-byte PNG, published as
   `35d-exported-file.png`: the CommunityToolkit `Segmented` with "One", "Two", "Three", on a
   transparent background, with no selection frame or thumbs.
-- **Measured: a root without a size is drawn at its content's bounds.** The walkthrough's
-  document is a `Canvas` typed without `Width`/`Height`, so its own size is 0×0. `RenderTargetBitmap`
-  still drew it, at 179×32: the bounds of what it contains, so the `Segmented`'s
-  `Canvas.Left`/`Top` of 40 is not in the picture. A root with a size (every new document's
-  640×480 `Canvas`) is drawn at that size, as the suite's 80×60 case shows. The zero-size error
-  path therefore applies only to a root with nothing visible in it.
+- **Measured: what is drawn is only what is painted.** The walkthrough's root `Canvas` has no
+  `Background` (and no size), and the export came out at 179×32: the `Segmented` alone, without
+  its `Canvas.Left`/`Top` of 40. This was first put down to the missing size. The thumbnail's run
+  (`2026-10-30-thumbnail.md`) showed the real cause: a 640×480 `Canvas` with no `Background` is
+  also cropped to its children, or drawn as nothing when it is empty. `RenderWholeAsync` now gives
+  such a root a `Transparent` background for the render only.
 - **Test host.** The first CI run failed `ExportAsync_WritesTheRootElementAsAPng` with
   `RPC_E_WRONG_THREAD` from `Document.Dispose`, after its image assertions had passed.
   `RunAsync` had set the `SynchronizationContext` inside its async lambda. The async method
