@@ -171,17 +171,25 @@ namespace WinUIDesigner.TestHost
 
 			ExceptionDispatchInfo captured = null;
 			var done = new ManualResetEventSlim();
-			if (!queue.TryEnqueue(async () => {
+			async void Start() {
 				try {
-					if (!(System.Threading.SynchronizationContext.Current is Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext))
-						System.Threading.SynchronizationContext.SetSynchronizationContext(
-							new Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext(queue));
 					await body();
 				} catch (Exception ex) {
 					captured = ExceptionDispatchInfo.Capture(ex);
 				} finally {
 					done.Set();
 				}
+			}
+			if (!queue.TryEnqueue(() => {
+				// Set here, in a synchronous callback, so it stays the thread's context. Set inside
+				// the async method instead, the method builder restores the previous (null) context
+				// when the body first yields, and DispatcherQueueSynchronizationContext.Post does not
+				// reinstate itself, so every await after the first resumed on the thread pool
+				// (measured: RPC_E_WRONG_THREAD from a Dispose after two awaits).
+				if (!(System.Threading.SynchronizationContext.Current is Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext))
+					System.Threading.SynchronizationContext.SetSynchronizationContext(
+						new Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext(queue));
+				Start();
 			})) {
 				throw new InvalidOperationException("Could not enqueue work onto the WinUI dispatcher thread.");
 			}
