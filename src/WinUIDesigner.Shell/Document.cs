@@ -438,9 +438,19 @@ namespace WinUIDesigner.Shell
             subscribedUndoService = null;
         }
 
+        /// <summary>
+        /// Raised after an edit, undo or redo reaches the design tree. A rebuilt tree (a mode
+        /// switch or Refresh) is announced through PropertyChanged("Mode"/"DesignContext")
+        /// instead. Thumbnail spec Decision 3.
+        /// </summary>
+        public event EventHandler DesignChanged;
+
         void OnUndoStackChanged(object sender, EventArgs e)
         {
             IsDirty = true;
+            var designChanged = DesignChanged;
+            if (designChanged != null)
+                designChanged(this, EventArgs.Empty);
 
             // A change that reaches the tree while the user is looking at the text must be
             // serialized into that text, or the next switch to Design reloads from stale text and

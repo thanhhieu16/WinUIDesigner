@@ -115,6 +115,18 @@ namespace WinUIDesigner.Shell
             get { return editor; }
         }
 
+        /// <summary>The ScrollViewer around the design surface, which the thumbnail follows and drives.</summary>
+        internal ScrollViewer SurfaceScroll
+        {
+            get { return surfaceScroll; }
+        }
+
+        /// <summary>The scrolled content: the surface's coordinates are offsets within it.</summary>
+        internal FrameworkElement SurfaceContent
+        {
+            get { return surfaceHost; }
+        }
+
         /// <summary>Test seam: the design surface's visibility, without walking the tree.</summary>
         internal Visibility SurfaceVisibility
         {
