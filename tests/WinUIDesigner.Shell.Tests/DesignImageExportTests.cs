@@ -63,6 +63,36 @@ namespace WinUIDesigner.Shell.Tests
             });
         }
 
+        /// <remarks>
+        /// RenderTargetBitmap draws only what is painted, so without the temporary background
+        /// this came out as the 10x10 child alone (measured on the runner).
+        /// </remarks>
+        [Test]
+        public void ExportAsync_RootWithNoBackground_IsDrawnWholeAndKeepsItsNullBackground()
+        {
+            WinUITestHost.RunWithWindowAsync(async window =>
+            {
+                using (var doc = new Document(null,
+                    "<Canvas xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" Width=\"80\" Height=\"60\">" +
+                    "<Border Canvas.Left=\"5\" Canvas.Top=\"5\" Width=\"10\" Height=\"10\" Background=\"Red\" /></Canvas>"))
+                {
+                    window.Content = doc.DesignSurface;
+                    doc.DesignSurface.UpdateLayout();
+                    double scale = doc.DesignSurface.XamlRoot.RasterizationScale;
+
+                    var error = await DesignImageExport.ExportAsync(doc, path);
+
+                    Assert.That(error, Is.Null);
+                    var decoded = await DecodeAsync(File.ReadAllBytes(path));
+                    Assert.That(decoded.Width, Is.EqualTo((uint)Math.Round(80 * scale)).Within(1));
+                    Assert.That(decoded.Height, Is.EqualTo((uint)Math.Round(60 * scale)).Within(1));
+                    var root = (Microsoft.UI.Xaml.Controls.Canvas)doc.DesignContext.RootItem.View;
+                    Assert.That(root.Background, Is.Null, "the temporary background is removed again");
+                    Assert.That(doc.Text, Does.Not.Contain("Background=\"Transparent\""));
+                }
+            });
+        }
+
         [Test]
         public void ExportAsync_InXamlMode_ReportsAndWritesNothing()
         {

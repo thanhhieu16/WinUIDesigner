@@ -5,6 +5,15 @@
 # The toolbox drag is the last step. It used to fail-fast the app with 0xC0000409 on the runner;
 # the cause was the UI thread running in the multithreaded apartment (see Program.cs).
 shot 01-start
+# The thumbnail pane, at the bottom of the right column (client x 728-1008, y 559-729), draws the
+# 640x480 canvas at about 213x160 from x 762. A press near its bottom right scrolls the surface
+# there; one near its top left scrolls back, so later coordinates still hold (thumbnail spec).
+click 965 715
+wait 1000
+shot 01c-thumbnail-scrolled
+click 765 568
+wait 1000
+shot 01d-thumbnail-back
 # The toolbox search box narrows the list; clearing it brings every entry back.
 click 100 60
 type button

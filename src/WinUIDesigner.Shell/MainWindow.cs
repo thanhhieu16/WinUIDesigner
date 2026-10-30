@@ -59,6 +59,7 @@ namespace WinUIDesigner.Shell
             VerticalContentAlignment = VerticalAlignment.Stretch
         };
         readonly ErrorListView errors = new ErrorListView();
+        readonly ThumbnailView thumbnail = new ThumbnailView();
         readonly Dictionary<Document, DocumentView> views = new Dictionary<Document, DocumentView>();
         readonly Dictionary<Document, TabViewItem> tabs = new Dictionary<Document, TabViewItem>();
         bool syncingSelection;
@@ -382,6 +383,12 @@ namespace WinUIDesigner.Shell
             }
         }
 
+        /// <summary>The thumbnail pane's height, borders included.</summary>
+        internal const double ThumbnailHeight = 170;
+
+        /// <summary>Test seam: the thumbnail pane.</summary>
+        internal ThumbnailView ThumbnailForTest { get { return thumbnail; } }
+
         UIElement BuildLayout()
         {
             var root = new Grid();
@@ -443,6 +450,9 @@ namespace WinUIDesigner.Shell
             right.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            // The thumbnail is last, so the outline and the property grid keep their places.
+            // Thumbnail spec Decision 1.
+            right.RowDefinitions.Add(new RowDefinition { Height = new GridLength(ThumbnailHeight) });
 
             Grid.SetRow(outlineFilter, 0);
             right.Children.Add(outlineFilter);
@@ -473,6 +483,16 @@ namespace WinUIDesigner.Shell
             };
             Grid.SetRow(gridScroll, 2);
             right.Children.Add(gridScroll);
+
+            var thumbnailFrame = new Border
+            {
+                Child = thumbnail,
+                BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Gray),
+                BorderThickness = new Thickness(0, 1, 0, 0),
+                Padding = new Thickness(4)
+            };
+            Grid.SetRow(thumbnailFrame, 3);
+            right.Children.Add(thumbnailFrame);
 
             Grid.SetColumn(right, 2);
             columns.Children.Add(right);
@@ -809,6 +829,8 @@ namespace WinUIDesigner.Shell
             // Phase 5 Decision 19.
             propertyGrid = new PropertyGridControl();
             propertyGridHost.Content = propertyGrid;
+
+            thumbnail.Attach(wiredDocument == null ? null : ViewFor(wiredDocument));
 
             if (wiredDocument == null)
             {

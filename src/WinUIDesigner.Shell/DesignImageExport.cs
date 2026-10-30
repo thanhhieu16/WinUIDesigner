@@ -71,8 +71,7 @@ namespace WinUIDesigner.Shell
         /// </summary>
         internal static async Task<byte[]> RenderPngAsync(UIElement element)
         {
-            var bitmap = new RenderTargetBitmap();
-            await bitmap.RenderAsync(element);
+            var bitmap = await RenderWholeAsync(element);
             if (bitmap.PixelWidth == 0 || bitmap.PixelHeight == 0)
                 throw new InvalidOperationException("it has no size on screen.");
 
@@ -95,6 +94,49 @@ namespace WinUIDesigner.Shell
                     return bytes;
                 }
             }
+        }
+
+        /// <summary>
+        /// Draws <paramref name="element"/> at its full size. RenderTargetBitmap draws only the
+        /// bounds of what is visibly painted, so a panel with a null Background - every new
+        /// document's root Canvas - came out cropped to its children, or empty with none
+        /// (measured on the runner, thumbnail plan Results). For the render, such an element
+        /// gets a Transparent background on the live object only, restored afterwards; the
+        /// document's XAML is serialized from its model and never sees it.
+        /// </summary>
+        internal static async Task<RenderTargetBitmap> RenderWholeAsync(UIElement element)
+        {
+            var bitmap = new RenderTargetBitmap();
+            var property = NullBackgroundProperty(element);
+            if (property != null)
+                element.SetValue(property, new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent));
+            try
+            {
+                await bitmap.RenderAsync(element);
+            }
+            finally
+            {
+                if (property != null)
+                    element.ClearValue(property);
+            }
+            return bitmap;
+        }
+
+        /// <summary>The Background property of a Panel, Border or Control whose Background is
+        /// unset (a local value is left alone), or null.</summary>
+        static DependencyProperty NullBackgroundProperty(UIElement element)
+        {
+            DependencyProperty property = null;
+            if (element is Microsoft.UI.Xaml.Controls.Panel)
+                property = Microsoft.UI.Xaml.Controls.Panel.BackgroundProperty;
+            else if (element is Microsoft.UI.Xaml.Controls.Border)
+                property = Microsoft.UI.Xaml.Controls.Border.BackgroundProperty;
+            else if (element is Microsoft.UI.Xaml.Controls.Control)
+                property = Microsoft.UI.Xaml.Controls.Control.BackgroundProperty;
+            if (property == null || element.ReadLocalValue(property) != DependencyProperty.UnsetValue
+                || element.GetValue(property) != null)
+                return null;
+            return property;
         }
 
         static UIElement RootView(Document doc)
