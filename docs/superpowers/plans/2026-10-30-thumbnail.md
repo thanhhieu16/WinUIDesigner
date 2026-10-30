@@ -34,3 +34,10 @@ changes.
 - **Fix.** `DesignImageExport.RenderWholeAsync` sets a `Transparent` background on such a root
   for the render and clears it afterwards. Both the export and the thumbnail use it. The pane
   also draws a white page under the picture.
+- **Second run (91bb7ee), CI green.**
+  - The empty new document shows as a white page in the pane.
+  - A press near the pane's bottom right moved the frame to the right edge
+    (`01c-thumbnail-scrolled.png`), and a press near its top left moved it back.
+  - The placed Button appears small, at its place on the 640×480 page (`02-click-placed.png`).
+  - The exported Segmented document is now 528×613: its unsized root `Canvas` at the size it is
+    arranged to on the surface, with the `Segmented` at its offset of 40.
