@@ -47,7 +47,7 @@ namespace WinUIDesigner.Shell
         FrameworkElement scrolled;
         Size contentSize;
         Rect imageRect = Rect.Empty;
-        bool rendering;
+        Task running;
         bool renderAgain;
         bool dragging;
 
@@ -156,24 +156,33 @@ namespace WinUIDesigner.Shell
         /// </summary>
         internal async Task RenderNowAsync()
         {
-            if (rendering)
+            // A render already running is asked to go round once more, and awaited, so the
+            // caller's request is drawn before this returns. Returning at once instead let a test
+            // see the previous picture (measured: the timer's render was in flight).
+            if (running != null)
             {
                 renderAgain = true;
+                await running;
                 return;
             }
-            rendering = true;
+            running = RenderLoopAsync();
             try
             {
-                do
-                {
-                    renderAgain = false;
-                    await RenderOnceAsync();
-                } while (renderAgain);
+                await running;
             }
             finally
             {
-                rendering = false;
+                running = null;
             }
+        }
+
+        async Task RenderLoopAsync()
+        {
+            do
+            {
+                renderAgain = false;
+                await RenderOnceAsync();
+            } while (renderAgain);
         }
 
         async Task RenderOnceAsync()
